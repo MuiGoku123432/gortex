@@ -98,6 +98,30 @@ your last fetch — it read "0 behind" while 1,304 commits behind.
 | 4 | JCL `SET` / `INCLUDE` / `JCLLIB ORDER` symbolic resolution | **yes** |
 | 5 | `.ctl` / `.bms` / `.ezt` extractors | later |
 
+Item 2 changed shape on 2026-08-27. **`go-sitter-forest/cobol` v1.9.1 is already
+a `go.mod` dependency and already compiled in**, vendoring
+`yutaro-sakamoto/tree-sitter-cobol` (MIT, rev `e99dbdc3`). No extractor is
+registered for it because `cobol.go` claims `.cbl`/`.cpy`.
+
+`internal/parser/forest/cobolprobe/` measures it. Recall against level-number
+lines counted from the code area, 1,564 DCC files:
+
+| | fields in source | grammar | + preprocessing |
+|---|---|---|---|
+| `.cbl` (606) | 121,457 | 17,905 (15%) | 32,360 (**27%**) |
+| `.cpy` (958) | 24,478 | 0 (0%) | 22,800 (**93%**) |
+
+**So DATA DIVISION support is a registration job for `.cpy`, not a parser.** The
+regex extractor produces zero data items, so it is a strict gain.
+
+Programs stay on `cobol.go` for now: grammar errors **cascade to the end of their
+division**, so one `EXEC CICS` leaves 1 of 20 following paragraphs and one IDMS
+`SCHEMA SECTION` leaves 0 of 20 data items. The four breaking families are
+`EXEC CICS`/`SQL`/`DLI`, IDMS DML verbs, IDMS `SCHEMA SECTION`/`DB x WITHIN y`,
+and a copybook parsed standalone. Everything else parses clean — including
+`INSTALLATION.`/`AUTHOR.` comment-entry paragraphs, banner comments, column 1-6
+change markers, and every `COPY IDMS` form.
+
 **Item 1 is done** (`028ef49e`). Scope changed on measurement: **`COPY REPLACING`
 and `COPY x OF y` do not occur at all** in this estate, so neither was built.
 What did occur:
