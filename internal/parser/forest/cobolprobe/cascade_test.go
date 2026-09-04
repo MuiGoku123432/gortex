@@ -97,4 +97,36 @@ func TestErrorCascade(t *testing.T) {
 	t.Logf("recovery after SCHEMA SEC: %d/%d paragraphs, %d/%d data items", pa3, pa, d3, d)
 	t.Logf("recovery after IDMS DML  : %d/%d paragraphs, %d/%d data items", pa4, pa, d4, d)
 	t.Logf("recovery IDMS DML in data: %d/%d paragraphs, %d/%d data items", pa5, pa, d5, d)
+
+	// --- IDMS-04 gate ---
+	//
+	// Assertions are deliberately scoped to the IDMS cases only. The EXEC CICS
+	// case is Phase 3's gate and SCHEMA SECTION belongs to preprocessing per
+	// locked decision D3; hard-asserting either here would fail the build on a
+	// known-open problem this phase does not fix.
+
+	// The clean control anchors every parity comparison below. Without this,
+	// a regression that lowered the baseline would make a broken parity check
+	// look green.
+	if d != 20 || pa != 20 {
+		t.Fatalf("clean control moved: got %d data items and %d paragraphs, want 20 and 20", d, pa)
+	}
+
+	// IDMS DML injected after paragraph 1 must not cascade: every following
+	// paragraph and every data item survives at parity with the clean control.
+	if pa4 != pa {
+		t.Errorf("IDMS DML after para 1 cascaded: got %d paragraphs, want %d (clean control)", pa4, pa)
+	}
+	if d4 != d {
+		t.Errorf("IDMS DML after para 1 cascaded: got %d data items, want %d (clean control)", d4, d)
+	}
+
+	// Negative control. OBTAIN is a procedural DML verb, so it is invalid
+	// inside WORKING-STORAGE and must NOT parse there - the IDMS statements
+	// attach to the procedure-division statement set only. Parity here would
+	// mean the grammar had started accepting invalid COBOL, so the gate asserts
+	// the error is still reported rather than asserting recovery.
+	if e5 == 0 {
+		t.Errorf("IDMS DML in WORKING-STORAGE parsed without error: procedural DML is not valid in the DATA DIVISION and must still be reported")
+	}
 }
