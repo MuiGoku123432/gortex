@@ -92,8 +92,39 @@ func TestErrorCascade(t *testing.T) {
 	e5, d5, pa5, ce5 := countAll(t, hurt4)
 	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "IDMS DML before data item", e5, d5, pa5, ce5)
 
+	// The remaining three EXEC CICS shapes from D-28, injected in exactly the
+	// place the paren-option case above injects so all four are directly
+	// comparable. Chosen for measured coverage, not variety:
+	//   (b) no-option    - the corpus's most common shape, 1,251 blocks / 43%,
+	//                      and the form most likely to break a repeat-based body
+	//   (c) bare-option  - covering the bare options measured at 1,586/450/438
+	//   (d) multi-line   - covering the 51 blocks with nothing after the opening
+	//                      on the first line
+	// Every command, map and mapset name below is invented and neutral -
+	// nothing is derived from any real estate.
+	const cicsNoOptStmt = "           EXEC CICS RETURN END-EXEC.\n"
+	injectedProcCicsNoOpt := lines[0] + "\n" + lines[1] + "\n" + cicsNoOptStmt + lines[2]
+	hurt5 := head + data.String() + mid + injectedProcCicsNoOpt + "           STOP RUN.\n"
+	e6, d6, pa6, ce6 := countAll(t, hurt5)
+	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "EXEC CICS no-option after para 1", e6, d6, pa6, ce6)
+
+	const cicsBareOptStmt = "           EXEC CICS SEND ERASE END-EXEC.\n"
+	injectedProcCicsBareOpt := lines[0] + "\n" + lines[1] + "\n" + cicsBareOptStmt + lines[2]
+	hurt6 := head + data.String() + mid + injectedProcCicsBareOpt + "           STOP RUN.\n"
+	e7, d7, pa7, ce7 := countAll(t, hurt6)
+	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "EXEC CICS bare-option after para 1", e7, d7, pa7, ce7)
+
+	const cicsMultiLineStmt = "           EXEC CICS\n               SEND MAP('MENU01')\n               MAPSET('MENUSET')\n           END-EXEC.\n"
+	injectedProcCicsMultiLine := lines[0] + "\n" + lines[1] + "\n" + cicsMultiLineStmt + lines[2]
+	hurt7 := head + data.String() + mid + injectedProcCicsMultiLine + "           STOP RUN.\n"
+	e8, d8, pa8, ce8 := countAll(t, hurt7)
+	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "EXEC CICS multi-line after para 1", e8, d8, pa8, ce8)
+
 	t.Log("")
 	t.Logf("recovery after EXEC CICS : %d/%d paragraphs, %d/%d data items", pa2, pa, d2, d)
+	t.Logf("recovery CICS no-option  : %d/%d paragraphs, %d/%d data items", pa6, pa, d6, d)
+	t.Logf("recovery CICS bare-option: %d/%d paragraphs, %d/%d data items", pa7, pa, d7, d)
+	t.Logf("recovery CICS multi-line : %d/%d paragraphs, %d/%d data items", pa8, pa, d8, d)
 	t.Logf("recovery after SCHEMA SEC: %d/%d paragraphs, %d/%d data items", pa3, pa, d3, d)
 	t.Logf("recovery after IDMS DML  : %d/%d paragraphs, %d/%d data items", pa4, pa, d4, d)
 	t.Logf("recovery IDMS DML in data: %d/%d paragraphs, %d/%d data items", pa5, pa, d5, d)
