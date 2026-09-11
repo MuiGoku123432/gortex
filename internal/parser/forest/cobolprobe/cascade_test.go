@@ -129,12 +129,23 @@ func TestErrorCascade(t *testing.T) {
 	t.Logf("recovery after IDMS DML  : %d/%d paragraphs, %d/%d data items", pa4, pa, d4, d)
 	t.Logf("recovery IDMS DML in data: %d/%d paragraphs, %d/%d data items", pa5, pa, d5, d)
 
-	// --- IDMS-04 gate ---
+	// --- IDMS-04 and CICS-03 gates ---
 	//
-	// Assertions are deliberately scoped to the IDMS cases only. The EXEC CICS
-	// case is Phase 3's gate and SCHEMA SECTION belongs to preprocessing per
-	// locked decision D3; hard-asserting either here would fail the build on a
-	// known-open problem this phase does not fix.
+	// Asserted below: the four IDMS cases and the four EXEC CICS shapes
+	// (paren-option, no-option, bare-option, multi-line). EXEC CICS was
+	// previously logged-only and described here as "Phase 3's gate"; Phase 3
+	// has now landed the grammar, so the cases are hard-asserted and this
+	// comment no longer holds them open.
+	//
+	// Deliberately still logged-only, with reasons:
+	//   SCHEMA SECTION  - locked decision D3 assigns it to preprocessing in a
+	//                     different repository. Asserting it here would fail
+	//                     the build on a problem no grammar phase fixes; it
+	//                     still reports 0/20 data items and that is expected.
+	//   IDMS DML in WS  - not a parity case at all. It is the negative control
+	//                     at the bottom of this function, which asserts an
+	//                     error is STILL reported rather than asserting
+	//                     recovery.
 
 	// The clean control anchors every parity comparison below. Without this,
 	// a regression that lowered the baseline would make a broken parity check
@@ -150,6 +161,46 @@ func TestErrorCascade(t *testing.T) {
 	}
 	if d4 != d {
 		t.Errorf("IDMS DML after para 1 cascaded: got %d data items, want %d (clean control)", d4, d)
+	}
+
+	// CICS-03 gate. Each of the four representative EXEC CICS shapes is
+	// measured against the SAME immutable clean control, never against the
+	// previous shape, so the assertions are independent of injection order.
+	//
+	// The measured pre-Phase-3 baseline was 1 of 20 paragraphs surviving an
+	// EXEC CICS block. These assertions are what make CICS-03 real: revert
+	// this fork's forest-shim/cobol to the pre-Phase-3 parser and all four
+	// paragraph-parity assertions below fail.
+	//
+	// The data-item assertions are not redundant with the paragraph ones.
+	// Data items already sit at parity today; asserting them means a future
+	// paragraph fix cannot silently break the DATA DIVISION (D-27).
+	if pa2 != pa {
+		t.Errorf("EXEC CICS paren-option after para 1 cascaded: got %d paragraphs, want %d (clean control)", pa2, pa)
+	}
+	if d2 != d {
+		t.Errorf("EXEC CICS paren-option after para 1 cascaded: got %d data items, want %d (clean control)", d2, d)
+	}
+
+	if pa6 != pa {
+		t.Errorf("EXEC CICS no-option after para 1 cascaded: got %d paragraphs, want %d (clean control)", pa6, pa)
+	}
+	if d6 != d {
+		t.Errorf("EXEC CICS no-option after para 1 cascaded: got %d data items, want %d (clean control)", d6, d)
+	}
+
+	if pa7 != pa {
+		t.Errorf("EXEC CICS bare-option after para 1 cascaded: got %d paragraphs, want %d (clean control)", pa7, pa)
+	}
+	if d7 != d {
+		t.Errorf("EXEC CICS bare-option after para 1 cascaded: got %d data items, want %d (clean control)", d7, d)
+	}
+
+	if pa8 != pa {
+		t.Errorf("EXEC CICS multi-line after para 1 cascaded: got %d paragraphs, want %d (clean control)", pa8, pa)
+	}
+	if d8 != d {
+		t.Errorf("EXEC CICS multi-line after para 1 cascaded: got %d data items, want %d (clean control)", d8, d)
 	}
 
 	// Negative control. OBTAIN is a procedural DML verb, so it is invalid
