@@ -120,6 +120,18 @@ func TestErrorCascade(t *testing.T) {
 	e8, d8, pa8, ce8 := countAll(t, hurt7)
 	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "EXEC CICS multi-line after para 1", e8, d8, pa8, ce8)
 
+	const sqlProcStmt = "           EXEC SQL SELECT ID FROM APP.CUSTOMER END-EXEC.\n"
+	injectedProcSQL := lines[0] + "\n" + lines[1] + "\n" + sqlProcStmt + lines[2]
+	hurt8 := head + data.String() + mid + injectedProcSQL + "           STOP RUN.\n"
+	e9, d9, pa9, ce9 := countAll(t, hurt8)
+	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "EXEC SQL after para 1", e9, d9, pa9, ce9)
+
+	const sqlDataStmt = "       EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+	injectedDataSQL := dataLines[0] + "\n" + sqlDataStmt + dataLines[1]
+	hurt9 := head + injectedDataSQL + mid + proc.String() + "           STOP RUN.\n"
+	e10, d10, pa10, ce10 := countAll(t, hurt9)
+	t.Logf("%-34s errs=%-3d data=%-3d paras=%-3d commentEntry=%d", "EXEC SQL before data item", e10, d10, pa10, ce10)
+
 	t.Log("")
 	t.Logf("recovery after EXEC CICS : %d/%d paragraphs, %d/%d data items", pa2, pa, d2, d)
 	t.Logf("recovery CICS no-option  : %d/%d paragraphs, %d/%d data items", pa6, pa, d6, d)
@@ -201,6 +213,19 @@ func TestErrorCascade(t *testing.T) {
 	}
 	if d8 != d {
 		t.Errorf("EXEC CICS multi-line after para 1 cascaded: got %d data items, want %d (clean control)", d8, d)
+	}
+
+	if pa9 != pa {
+		t.Errorf("EXEC SQL after para 1 cascaded: got %d paragraphs, want %d (clean control)", pa9, pa)
+	}
+	if d9 != d {
+		t.Errorf("EXEC SQL after para 1 cascaded: got %d data items, want %d (clean control)", d9, d)
+	}
+	if pa10 != pa {
+		t.Errorf("EXEC SQL before data item cascaded: got %d paragraphs, want %d (clean control)", pa10, pa)
+	}
+	if d10 != d {
+		t.Errorf("EXEC SQL before data item cascaded: got %d data items, want %d (clean control)", d10, d)
 	}
 
 	// Negative control. OBTAIN is a procedural DML verb, so it is invalid
