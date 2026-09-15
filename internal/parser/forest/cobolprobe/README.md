@@ -1,16 +1,30 @@
 # cobolprobe — is the vendored COBOL grammar usable on a real estate?
 
-Measurement harness, not a unit test. Every test skips unless given a corpus
-flag, so it never runs in CI.
+Measurement and parser-acceptance harness, not a production extractor test.
+Corpus measurements skip unless given a corpus flag. The cascade acceptance
+gate skips unless `-enhanced-parser` is set, so a stock gortex checkout remains
+green against the committed forest dependency.
+
+The authoritative enhanced parser is `tree-sitter-cobol-upgrade/main` at merge
+commit `97ac9f1`. Activate its drop-in forest shim from this repository with:
+
+    go work init . \
+        /Users/e1001547-mbp-it/repos/mine/devDeps/tree-sitter-cobol-upgrade/forest-shim/cobol
+    go test -race ./internal/parser/forest/cobolprobe/ -run TestErrorCascade -v \
+        -enhanced-parser
+
+The full estate measurements remain opt-in:
 
     go test ./internal/parser/forest/cobolprobe/ -v -timeout 20m \
         -corpus      ~/repos/mine/cobolCode/cam-corpus-dcc/DCC \
         -neut-corpus ~/repos/mine/cobolCode/cam-corpus-dcc/DCC
 
-The grammar under test is `github.com/alexaandru/go-sitter-forest/cobol`
-v1.9.1, which vendors **`yutaro-sakamoto/tree-sitter-cobol`** (MIT, revision
-`e99dbdc3`). It is already a `go.mod` dependency and already compiled in; no
-extractor is registered for it, because `cobol.go` claims `.cbl`/`.cpy`.
+Without the workspace override, the grammar under test is
+`github.com/alexaandru/go-sitter-forest/cobol` v1.9.1, which vendors
+**`yutaro-sakamoto/tree-sitter-cobol`** (MIT, revision `e99dbdc3`). It remains
+the committed module dependency; `go.work` is the intentional local integration
+boundary for the enhanced parser. No tree-sitter COBOL extractor is registered
+yet because the regex extractor in `cobol.go` still claims `.cbl`/`.cpy`.
 
 ## What it measured, on 1,564 files (606 `.cbl`, 958 `.cpy`)
 
@@ -37,8 +51,10 @@ division**:
 | IDMS `SCHEMA SECTION` / `DB x WITHIN y` | 1 error → **0 of 20** data items survive |
 | a copybook parsed standalone | no program structure → whole file becomes `comment_entry` |
 
-`TestErrorCascade` pins that behaviour. It is why a 5,352-line program yields
-4 ERROR nodes but only 5 of its 77 paragraphs: recovery is not local.
+`TestErrorCascade` records that original failure and, when run with
+`-enhanced-parser`, enforces recovery parity for the IDMS, CICS, and SQL forms
+now supported by `tree-sitter-cobol-upgrade/main`. The `SCHEMA SECTION` and
+invalid DATA DIVISION controls remain diagnostic rather than parity gates.
 
 Ruled out by `TestHypothesisIdentificationParagraphs` — these all parse clean:
 `INSTALLATION.` / `AUTHOR.` / `DATE-WRITTEN.` comment-entry paragraphs, banner
