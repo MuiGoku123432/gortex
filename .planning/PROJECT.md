@@ -8,6 +8,16 @@ A private fork of [zzet/gortex](https://github.com/zzet/gortex) — the graph-ba
 
 A trustworthy graph representation of a mainframe estate that modernization cutover decisions can be made against — deterministic and reproducible first, enriched and simulated later.
 
+## Current Milestone: v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+
+**Goal:** Convert the completed COBOL parser's named AST contract into a reproducible, provenance-aware native graph; represent parser and retrieval gaps explicitly; then add optional, validated AI claims without changing deterministic facts.
+
+**Target features:**
+- A thin deterministic tracer from one existing COBOL parser node through SQLite persistence and native CLI/MCP query surfaces
+- Stable identity, exact source provenance, idempotent incremental lifecycle, and explicit unresolved-gap modeling
+- Evidence-based storage architecture with SQLite authoritative unless research proves otherwise
+- Optional bounded AI enrichment with validated, evidence-linked claims and human review
+
 ## Requirements
 
 ### Validated
@@ -38,31 +48,23 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
   inter-program call graph was missing
 - ✓ **`cobolprobe`** (`80f0c08e`) — harness measuring the vendored COBOL grammar
   against a real estate; skips without a `-corpus` flag
+- ✓ **Enhanced deterministic COBOL parser baseline** — `tree-sitter-cobol-upgrade/main`
+  at merge commit `97ac9f1`, including DATA DIVISION, IDMS, CICS, and SQL nodes,
+  bounded unparsed tails, 149/149 non-comment corpus assertions, 371 passing NIST
+  COBOL-85 tests, and merged gortex cascade/acceptance gates
 
 ### Active
 
 <!-- Big-picture staged vision. Detailed per-stage scoping is deliberately deferred to milestone/phase planning. -->
 
-- [ ] **Stage 1 — Deterministic mainframe processing:** ingest mainframe artifacts into the graph (COBOL + copybooks first-class; aspirationally "everything" — JCL, DB2, CICS, etc.), consuming pre-processed input from `cobol-repo-architect`
-- [ ] **Register the vendored COBOL tree-sitter grammar for `.cpy`** — the next
-  concrete step. `go-sitter-forest/cobol` v1.9.1 (vendoring
-  `yutaro-sakamoto/tree-sitter-cobol`, MIT) is **already a `go.mod` dependency
-  and already compiled in**, with no extractor registered because `cobol.go`
-  claims `.cbl`/`.cpy`. Measured recall on 958 DCC copybooks: **93%** of 24,478
-  fields once wrapped in a synthetic program shell, against **0** from the regex
-  extractor. This is the DATA DIVISION, i.e. the field-level lineage everything
-  else is for
-- [ ] **Extend the grammar for `EXEC CICS`/`EXEC SQL` and IDMS DML** — programs
-  sit at 27% recall because grammar errors **cascade to the end of their
-  division**: one `EXEC CICS` leaves 1 of 20 following paragraphs, one IDMS
-  `SCHEMA SECTION` leaves 0 of 20 data items. Upstreamable to `@yutaro-sakamoto`
-- [ ] **JCL symbolic resolution** (`SET` / `INCLUDE` / `JCLLIB ORDER`) — absent
-  entirely, so `DSN=&DCC1XN..EXTRACT` never resolves and the job→dataset→job
-  graph never forms. Unmeasured; needs its own baseline pass
-- [ ] **Stage 1 — Deterministic analyses** over the mainframe graph (impact analysis, lineage, batch flow — exact capability set TBD at phase planning)
-- [ ] **Stage 2 — LLM enrichment layer** on top of the deterministic graph (interpretation, summarization, business-rule extraction — scoped later)
-- [ ] **Stage 3 — Digital twin, staged:** static structural twin → behavioral simulation → live-synced twin (feasibility-gated), with data integration
-- [ ] Twin outputs that directly support **modernization cutover** (the end goal all stages serve)
+- [ ] Map the completed parser contract onto gortex's existing node, edge, provenance, identity, and SQLite persistence models
+- [ ] Deliver the first vertical slice as a thin deterministic tracer from one existing COBOL parser node through the native graph and CLI/MCP query surfaces
+- [ ] Extend deterministic extraction across source-positioned COBOL, IDMS, CICS, SQL, copybook, call, and resource facts
+- [ ] Make deterministic facts and findings stable and idempotent across identical and incremental indexing runs
+- [ ] Represent parser failures and unavailable artifacts as separate, queryable unresolved gaps before any AI enrichment
+- [ ] Decide the Neo4j boundary from measured query and operational needs; retain SQLite authority unless evidence justifies a different boundary
+- [ ] Add optional, policy-gated AI review that emits schema-validated, evidence-linked claims without mutating deterministic facts
+- [ ] Support human confirmation, contradiction, and supersession while retaining claim lineage
 
 ### Out of Scope
 
@@ -72,7 +74,8 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
   Either this exclusion or the upstream framing has to give. A human decision;
   no PR should be opened until it is settled
 - Reusing `cobol-ingestor` or `mainframe-viewer` internals — explicit fresh start; those tools stay separate
-- Committing to a v1 artifact list or deterministic feature set now — user chose to keep planning big-picture; details land in phase planning
+- Replacing SQLite with Neo4j by assumption — storage authority and any projection boundary must follow architecture evidence
+- Expanding this milestone into full JCL symbolic resolution or a complete digital twin — both remain later work unless required by the thin tracer or gap contract
 - Live-synced twin as a hard commitment — pursued only "if possible and feasible" after static + behavioral stages prove out
 
 ## Context
@@ -82,6 +85,8 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 - Related prior work (`cobol-ingestor`, `mainframe-viewer`) informs the domain but is intentionally not coupled.
 - Fork remotes: `origin` = MuiGoku123432/gortex (personal, via `github-personal` SSH), `upstream` = zzet/gortex.
 - The engine's existing multi-language graph, dataflow, and analyzer machinery is the substrate the mainframe layers extend.
+- The authoritative parser baseline is `tree-sitter-cobol-upgrade/main` at merge commit `97ac9f1`; gortex consumes its `forest-shim/cobol` module through the local `go.work` boundary, and merged acceptance tests protect the integration.
+- Gortex's durable graph remains SQLite today. Existing Neo4j support is a manual Cypher export path, not an authoritative or synchronized store.
 
 ## Constraints
 
@@ -99,7 +104,9 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 | Staged twin: static → behavioral → live-synced | De-risks the vision; each stage has standalone modernization value | — Pending |
 | Deterministic before LLM enrichment | LLM interpretation belongs on top of a reproducible substrate, not in place of one | — Pending |
 | Fix the existing COBOL/JCL extractors rather than write new ones | Gortex already shipped them, and `cobolStripLine` already had the fixed-format column model right. Every gap was specific and measurable | ✓ Items 0 and 1 shipped 2026-08-27 |
-| Hybrid parser: tree-sitter for copybooks, island regex for programs | Measured, not assumed — 93% field recall on `.cpy` versus 27% on `.cbl`, because grammar errors cascade to end-of-division. Same conclusion Koopa reached for real COBOL | ✓ Decided 2026-08-27 |
+| Hybrid parser: tree-sitter for copybooks, island regex for programs | Superseded by the completed enhanced parser baseline, which now preserves the required DATA DIVISION, IDMS, CICS, and SQL structures under gortex acceptance tests | Superseded 2026-09-15 |
+| Parser baseline for graph milestone | Pin planning and acceptance evidence to `tree-sitter-cobol-upgrade/main` merge `97ac9f1`; parser changes are not part of this milestone unless a graph-blocking regression is proven | ✓ Decided 2026-09-15 |
+| Native graph before AI enrichment | Deterministic extraction, stable identity, and explicit unresolved gaps must exist before claims can be generated or consumed | ✓ Decided 2026-09-15 |
 | Run this fork's daemon on an isolated `~/.gortex-fork` store | Keeps the official Homebrew install tracking every other repo while the fork is three minor versions ahead. Verified: fork-only commands leave `~/.gortex` byte-identical | ✓ Verified 2026-08-27 |
 | Drop `COPY REPLACING` and `COPY x OF y` from scope | Measured **zero** occurrences in the estate; building for them would be speculative generality | ✓ Decided 2026-08-27 |
 
@@ -121,7 +128,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-27 — items 0 and 1 shipped, tree-sitter grammar measured.*
+*Last updated: 2026-09-15 — v1.0 AI-enhanced COBOL graph milestone started from parser baseline `97ac9f1`.*
 
 *Companion docs: `FORK-NOTES.md` (how to run this fork, fix order, upstream
 workflow) and `PythonApps/cobol-kg/HANDOFF.md` (session entry point, corpus,
