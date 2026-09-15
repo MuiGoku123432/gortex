@@ -22,6 +22,7 @@ scratchpad/
 *.out
 go.work
 go.work.sum
+.planning/*.bak
 
 # IDE
 .idea/
