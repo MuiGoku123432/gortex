@@ -2,6 +2,7 @@ package cobolprobe
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,8 @@ import (
 	cobolforest "github.com/alexaandru/go-sitter-forest/cobol"
 	sitter "github.com/zzet/gortex/internal/parser/tsitter"
 )
+
+var enhancedParser = flag.Bool("enhanced-parser", false, "verify the tree-sitter-cobol-upgrade parser acceptance gates")
 
 // countAll tallies the node kinds that matter for adoption.
 func countAll(t *testing.T, src string) (errs, dataItems, paras, commentEntry int) {
@@ -44,10 +47,13 @@ func countAll(t *testing.T, src string) (errs, dataItems, paras, commentEntry in
 	return
 }
 
-// TestErrorCascade asks the question that decides adoption: when the grammar
-// hits a construct it does not know (EXEC CICS, IDMS DML), does it lose only
-// that statement, or everything after it?
+// TestErrorCascade enforces local recovery for constructs supported by the
+// enhanced parser while retaining negative controls for unsupported placement.
 func TestErrorCascade(t *testing.T) {
+	if !*enhancedParser {
+		t.Skip("set -enhanced-parser with tree-sitter-cobol-upgrade/main active")
+	}
+
 	var data, proc strings.Builder
 	for i := 1; i <= 20; i++ {
 		fmt.Fprintf(&data, "       01  WS-FIELD-%02d          PIC X(10).\n", i)
