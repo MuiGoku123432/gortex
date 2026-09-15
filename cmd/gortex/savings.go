@@ -40,10 +40,13 @@ sessions: Today, Last 7 days, and All time. Each bucket shows a 16-cell
 saved/total bar, percentage saved, raw token counts, and the USD value of
 the tokens avoided (priced against popular models).
 
-Savings accumulate every time a source-reading MCP tool — read_file,
+Savings accumulate on two shapes of call. A read-family tool — read_file,
 get_file_summary, get_editing_context, get_symbol_source, batch_symbols,
-smart_context — returns a summary, symbol, or compressed view that stands
-in for a full-file read. The ledger lives in the machine-global sidecar
+smart_context — books the whole file its response stands in for. A
+retrieval tool — explore, the search / relations / trace families,
+get_repo_outline, get_artifact and friends — books the set of files its
+page cites, each file credited at most once per session so a re-query
+never mints savings twice. The ledger lives in the machine-global sidecar
 database (~/.gortex/sidecar.sqlite); flat-file ledgers from older
 releases (savings.json / savings.jsonl under the cache dir) are imported
 once and renamed *.bak.
@@ -82,6 +85,8 @@ func runSavings(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("open savings ledger: %w", err)
 	}
+	// One-shot CLI read: release the sidecar handle on every exit path.
+	defer func() { _ = store.Close() }()
 	// Legacy flat-file import runs only against the default locations:
 	// pointing the dashboard at a directory with --cache-dir must never
 	// rename files there as a side effect of looking.
@@ -265,14 +270,14 @@ func emitSavingsDashboard(snap savings.File, buckets []savings.Bucket, modelTota
 	_, headlineModel := pickHeadlineCost(costs, savingsModel)
 	fmt.Println()
 	if snap.Totals.CallsCounted == 0 {
-		hint := "savings record when the agent reads code through gortex (read_file, get_file_summary, get_editing_context, get_symbol_source, smart_context, …)"
+		hint := "savings record when the agent reads or locates code through gortex (read_file, get_symbol_source, search_symbols, find_usages, explore, …)"
 		if tty {
 			fmt.Println("  " + progress.StyleHint.Render("◌  no source-reading tool calls recorded yet"))
 			fmt.Println("     " + progress.Caption(hint))
 			fmt.Println()
 		} else {
 			fmt.Println("No source-reading tool calls recorded yet.")
-			fmt.Println("Savings record when the agent reads code through gortex (read_file, get_file_summary, get_editing_context, get_symbol_source, smart_context, ...).")
+			fmt.Println("Savings record when the agent reads or locates code through gortex (read_file, get_symbol_source, search_symbols, find_usages, explore, ...).")
 		}
 		return
 	}

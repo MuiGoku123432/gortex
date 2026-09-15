@@ -2,7 +2,7 @@ package store_sqlite
 
 import (
 	"encoding/json"
-	"path/filepath"
+	gopath "path"
 
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/graphpath"
@@ -21,9 +21,9 @@ WITH requested(file_path) AS (
 SELECT e.file_path, e.to_id, 0 AS malformed
 FROM requested AS r
 JOIN edges AS e INDEXED BY edges_by_file
-  ON e.file_path = r.file_path AND e.kind = ?
+  ON e.file_path = r.file_path AND e.kind = ? AND e.view_gen = ?
 JOIN nodes AS source
-  ON source.id = e.from_id AND source.file_path = e.file_path
+  ON source.id = e.from_id AND source.file_path = e.file_path AND source.view_gen = e.view_gen
 UNION ALL
 SELECT r.file_path, '', 1 AS malformed
 FROM requested AS r
@@ -31,10 +31,11 @@ WHERE EXISTS (
     SELECT 1
     FROM nodes AS source INDEXED BY nodes_by_file
     JOIN edges AS e INDEXED BY edges_by_from
-      ON e.from_id = source.id
+      ON e.from_id = source.id AND e.view_gen = source.view_gen
     WHERE source.file_path = r.file_path
       AND e.kind = ?
       AND e.file_path <> source.file_path
+      AND source.view_gen = ?
 )`
 
 var _ graph.ImportAdjacencyProjector = (*Store)(nil)
@@ -53,15 +54,15 @@ func (s *Store) ProjectImportAdjacency(filePaths []string) (map[string][]string,
 		if path == "" || path == "." {
 			return nil, false
 		}
-		// Indexed paths keep '/' after the repo prefix with the rest
-		// OS-native, so on Windows filepath.Clean rewrites separators on
-		// every stored path. A separator-only difference is not a
-		// canonicality violation — only a structural one (traversal,
-		// duplicate separators, a trailing "/." segment) rejects the
-		// request. Comparing the normalized forms is the whole test: Clean
-		// never inserts characters, so equal normalized forms mean the two
-		// spellings differ only in separators.
-		if cleaned := filepath.Clean(path); graphpath.Norm(cleaned) != graphpath.Norm(path) {
+		// Canonicality is judged in slash space, not OS space: a graph
+		// path is a stored identity, not a filesystem path, so only a
+		// structural violation (traversal, duplicate separators, a
+		// trailing "/." segment) may reject the request. filepath.Clean
+		// cannot make that call on Windows — it rewrites separators on
+		// every stored path, and prepends ".\" to any relative path whose
+		// first segment carries a colon, so a perfectly canonical
+		// "repo::pkg/a.go" would be refused there and nowhere else.
+		if norm := graphpath.Norm(path); gopath.Clean(norm) != norm {
 			return nil, false
 		}
 		if _, duplicate := seen[path]; duplicate {
@@ -81,7 +82,9 @@ func (s *Store) ProjectImportAdjacency(filePaths []string) (map[string][]string,
 		if err != nil {
 			return nil, false
 		}
-		rows, err := s.db.Query(importAdjacencyProjectionSQL, string(payload), string(graph.EdgeImports), string(graph.EdgeImports))
+		rows, err := s.db.Query(importAdjacencyProjectionSQL,
+			string(payload), string(graph.EdgeImports), s.viewGen,
+			string(graph.EdgeImports), s.viewGen)
 		if err != nil {
 			return nil, false
 		}

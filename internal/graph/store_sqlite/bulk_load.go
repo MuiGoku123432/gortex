@@ -62,8 +62,18 @@ const coldFTSMergePages = 64
 
 // bulkDroppableIndexes is the single source of truth for the dense secondary
 // indexes whose per-row maintenance is worth deferring for the bounded head of
-// a proven cold load. Open creates them, BeginBulkLoad drops them by name, and
-// the first deterministic seal recreates them from the exact same DDL.
+// a proven cold load. createGraphCoreIndexes creates them, BeginBulkLoad drops
+// them by name, and the first deterministic seal recreates them from the exact
+// same DDL.
+//
+// None of these keys names view_gen. Only the two identity keys — the nodes
+// primary key and the edges UNIQUE constraint — are taken per payload view
+// generation, because only they decide whether a write collides with an
+// existing row. These secondary keys serve generation-blind reads, and putting
+// view_gen in front of them would leave every such read unable to seek any
+// prefix. A WITHOUT ROWID secondary index entry carries the primary key, so
+// each nodes entry ends in (id, view_gen) regardless — which is why the
+// ID-projecting reads below stay index-only and their ORDER BY id stays free.
 //
 // These are exactly the standalone, NON-UNIQUE CREATE INDEX statements over
 // the large nodes / edges tables. Maintaining them per-row across a
@@ -74,11 +84,11 @@ const coldFTSMergePages = 64
 //   - nodes_by_qual: resolver lookups use INDEXED BY and must fail closed
 //     rather than scan the full nodes table. Keeping the compact partial index
 //     live preserves that contract during every bulk-load phase.
-//   - the edges UNIQUE(from_id, …) table constraint and every WITHOUT ROWID
+//   - the edges UNIQUE(from_id, …, view_gen) table constraint and every WITHOUT ROWID
 //     primary-key index: not standalone indexes; they cannot be dropped while
 //     the table/constraint exists.
 //   - edges_external (partial): a tiny index over external-call terminals,
-//     created from a shared predicate in Open; not worth dropping.
+//     created from a shared predicate const; not worth dropping.
 //
 // Dropping/recreating these is a runtime operation on identical DDL — it is
 // NOT a schema change, so it does not touch the persisted schema version.
@@ -92,18 +102,6 @@ var bulkDroppableIndexes = []bulkDroppableIndex{
 	{"nodes_by_kind", `CREATE INDEX IF NOT EXISTS nodes_by_kind ON nodes(kind)`},
 	{"nodes_by_file", `CREATE INDEX IF NOT EXISTS nodes_by_file ON nodes(file_path)`},
 	{"nodes_by_repo", `CREATE INDEX IF NOT EXISTS nodes_by_repo ON nodes(repo_prefix) WHERE repo_prefix <> ''`},
-	// Repo-first (repo_prefix, kind) probes for the repository projections:
-	// the flat kind index invites whole-kind-range scans that a repo filter
-	// then discards — measured on this workspace at 4.67s vs 0.82s (common
-	// kind) and 6.21s vs 0.02s (small repo) against repo-first plans.
-	// Deliberately NOT partial: the projections probe repo_prefix through a
-	// json_each CTE join, and SQLite cannot prove such a join implies
-	// repo_prefix <> '', so a partial index is structurally unusable there —
-	// which is precisely why the partial nodes_by_repo never served these
-	// queries and they fell back to kind-range scans. WITHOUT ROWID keys
-	// make each entry (repo_prefix, kind, id), so ID projections are
-	// index-only.
-	{"nodes_by_repo_kind", `CREATE INDEX IF NOT EXISTS nodes_by_repo_kind ON nodes(repo_prefix, kind)`},
 	// Resolver warmup selects definitions by exact repository, compatible
 	// language family, and a bounded page of names. Keep the key minimal: kind
 	// is not a query predicate and WITHOUT ROWID secondary indexes already
@@ -132,10 +130,45 @@ var bulkDroppableIndexes = []bulkDroppableIndex{
 	{"edges_by_file", `CREATE INDEX IF NOT EXISTS edges_by_file ON edges(file_path, kind)`},
 }
 
-// bulkAlwaysLiveIndexes are sparse partial indexes. Their predicates keep
-// maintenance bounded, while leaving them live preserves resolver and
-// repository projections as soon as the first repository publishes.
+// nodes_by_generation / edges_by_generation serve sparse-generation
+// enumeration and garbage collection: "which rows belong to generation g" and
+// "drop every row of generation g". Every other read binds its generation as a
+// residual conjunct on an existing access path, so these two are the only keys
+// in the package that lead with view_gen.
+//
+// The WHERE view_gen > 0 predicate is what makes them affordable. A store that
+// has only ever been plainly indexed holds nothing but generation-0 rows, so
+// both indexes stay empty and cost nothing to maintain; a sparse derived
+// generation gets a full leading seek. A reader must restate the predicate
+// literally — SQLite cannot prove a bound parameter is greater than zero — so
+// an ordinary `view_gen = ?` read keeps the plan it already had.
+const (
+	nodesByGenerationIndexName = "nodes_by_generation"
+	edgesByGenerationIndexName = "edges_by_generation"
+
+	nodesByGenerationIndexDDL = `CREATE INDEX IF NOT EXISTS nodes_by_generation ON nodes(view_gen, id) WHERE view_gen > 0`
+	edgesByGenerationIndexDDL = `CREATE INDEX IF NOT EXISTS edges_by_generation ON edges(view_gen, id) WHERE view_gen > 0`
+)
+
+// bulkAlwaysLiveIndexes preserve bounded maintenance and resolver/repository
+// projections as soon as the first repository publishes. Most are sparse
+// partial indexes; the dense repo-leading index also stays live so per-repo
+// emptiness checks and exact recounts never scan the growing cold corpus.
 var bulkAlwaysLiveIndexes = []bulkDroppableIndex{
+	// Repo-first (repo_prefix, kind) probes for the repository projections:
+	// the flat kind index invites whole-kind-range scans that a repo filter
+	// then discards — measured on this workspace at 4.67s vs 0.82s (common
+	// kind) and 6.21s vs 0.02s (small repo) against repo-first plans.
+	// Deliberately NOT partial: the projections probe repo_prefix through a
+	// json_each CTE join, and SQLite cannot prove such a join implies
+	// repo_prefix <> '', so a partial index is structurally unusable there —
+	// which is precisely why the partial nodes_by_repo never served these
+	// queries and they fell back to kind-range scans. WITHOUT ROWID keys
+	// make each entry (repo_prefix, kind, id, view_gen), so ID projections
+	// are index-only.
+	{"nodes_by_repo_kind", `CREATE INDEX IF NOT EXISTS nodes_by_repo_kind ON nodes(repo_prefix, kind)`},
+	{nodesByGenerationIndexName, nodesByGenerationIndexDDL},
+	{edgesByGenerationIndexName, edgesByGenerationIndexDDL},
 	{"nodes_repo_files", `CREATE INDEX IF NOT EXISTS nodes_repo_files ON nodes(repo_prefix, workspace_id, language, file_path, id) WHERE kind = 'file'`},
 	{"edges_by_unresolved", `CREATE INDEX IF NOT EXISTS edges_by_unresolved ON edges(is_unresolved) WHERE is_unresolved = 1`},
 	{"edges_fnvalue_prefixed", `CREATE INDEX IF NOT EXISTS edges_fnvalue_prefixed ON edges(to_id) WHERE to_id LIKE '%::unresolved::fnvalue::%'`},
@@ -188,6 +221,9 @@ type sqliteTxBeginner interface {
 }
 
 func (s *Store) beginWriteContext(ctx context.Context) (*sql.Tx, error) {
+	if err := s.refuseSealedPayloadWrite(); err != nil {
+		return nil, err
+	}
 	if s.bulkConn != nil {
 		return s.beginWriteOnConnContext(ctx, s.bulkConn)
 	}
@@ -212,6 +248,9 @@ func (s *Store) beginWriteOnContext(ctx context.Context, beginner sqliteTxBeginn
 // writes on the pinned bulk connection when one is active. Callers hold
 // writeMu, which guards bulkConn for the full operation.
 func (s *Store) execActiveWriteLocked(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if err := s.refuseSealedPayloadWrite(); err != nil {
+		return nil, err
+	}
 	if s.bulkConn != nil {
 		return s.bulkConn.ExecContext(ctx, query, args...)
 	}
@@ -276,6 +315,7 @@ func (s *Store) BeginCoordinatedBulkLoad() bool {
 		return false
 	}
 	s.coordinatedBulkLoad = true
+	s.syncBulkWindowLocked()
 	return true
 }
 
@@ -351,6 +391,7 @@ func (s *Store) beginBulkLoadLocked() {
 	}
 
 	s.bulkConn = conn
+	s.syncBulkWindowLocked()
 	s.bulkPrevSync = prevSync
 	s.bulkPrevCacheSize = prevCache
 	s.bulkPrevAutoCheckpoint = prevAutoCheckpoint
@@ -403,6 +444,7 @@ func (s *Store) EndCoordinatedBulkLoad() error {
 		return nil
 	}
 	s.coordinatedBulkLoad = false
+	s.syncBulkWindowLocked()
 	if s.deferredFTSOptimize {
 		// A full FTS5 optimize is unbounded and previously sat directly on the
 		// cold-start critical path. One bounded merge keeps segment growth in
@@ -426,6 +468,7 @@ func (s *Store) EndCoordinatedBulkLoad() error {
 		// connection here would make the failed DDL impossible to retry because
 		// sealBulkIndexesLocked intentionally requires the pinned bulk writer.
 		s.coordinatedBulkLoad = true
+		s.syncBulkWindowLocked()
 		s.writeMu.Unlock()
 		return sealErr
 	}
@@ -446,6 +489,14 @@ func (s *Store) EndCoordinatedBulkLoad() error {
 		s.emitBulkFinalizeEvent(bulkFinalizeEvent{Stage: "planner_stats", Name: "nodes_edges", Elapsed: time.Since(statsStarted), Err: statsErr})
 	}
 	closeErr := s.closeBulkConnectionLocked()
+	// The refresh above ran on the pinned writer, so readers already holding a
+	// connection would keep the pre-load statistics forever, and the runtime
+	// freshness checker would not know an ANALYZE had just run. Both are done
+	// after the pinned connection is released so neither touches it.
+	if sealErr == nil && hadBulk && statsErr == nil {
+		s.stampPlannerStatsRefresh(context.Background(), "cold_load_finalize")
+		recycleStatsReadPool(s.db, s.writerDB)
+	}
 	// The writer gate prevents a competing writer, but it cannot retire a
 	// snapshot held by the read-only pool. RESTART/TRUNCATE invokes SQLite's
 	// busy handler until every such reader leaves the WAL, which made cold
@@ -473,6 +524,20 @@ func (s *Store) EndCoordinatedBulkLoad() error {
 	s.jsonbIngestBuffers.release()
 	s.writeMu.Unlock()
 	return errors.Join(sealErr, statsErr, closeErr)
+}
+
+// AbortCoordinatedBulkLoad gives up retryable finalization and restores the
+// writer connection unconditionally. It is for terminal owners only: dense
+// indexes whose rebuild failed may remain absent until normal schema repair or
+// restart, but the store no longer holds synchronous=OFF, disabled automatic
+// checkpoints, or a pinned writer indefinitely.
+func (s *Store) AbortCoordinatedBulkLoad() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.coordinatedBulkLoad = false
+	err := s.closeBulkConnectionLocked()
+	s.jsonbIngestBuffers.release()
+	return err
 }
 
 // noteBulkRowsLocked advances independent index-seal and WAL-checkpoint budgets
@@ -575,6 +640,10 @@ func (s *Store) sealBulkIndexesLocked(reason string) error {
 // pinned writer. Dense-index rebuilding deliberately lives in
 // sealBulkIndexesLocked so an early seal cannot end the outer window.
 func (s *Store) closeBulkConnectionLocked() error {
+	// Unconditional: every caller has just cleared coordinatedBulkLoad, and
+	// the early return below is the path where the pinned connection was
+	// already gone but that flag still has to reach the health probe.
+	defer s.syncBulkWindowLocked()
 	conn := s.bulkConn
 	if conn == nil {
 		return nil
@@ -682,13 +751,21 @@ func shouldBackoffBulkRowCheckpoint(err error) bool {
 // edges must both be empty, and neither durable warm-restart sidecar may carry
 // prior lifecycle state. Any query error fails closed to the ordinary indexed
 // writer path.
+//
+// The node/edge probes name generation 0 explicitly rather than a handle's
+// generation: this fast path exists for the first index of the base corpus,
+// which is the only thing a cold load writes. The sidecar probes are
+// deliberately generation-unscoped: a store holding any generation's lifecycle
+// rows has been indexed before, whichever view wrote them, so it is not the
+// cold store this fast path is for.
 func coldGraphStoreEmpty(ctx context.Context, conn *sql.Conn) bool {
 	var empty int
 	err := conn.QueryRowContext(ctx, `
-SELECT NOT EXISTS(SELECT 1 FROM nodes)
-   AND NOT EXISTS(SELECT 1 FROM edges)
+SELECT NOT EXISTS(SELECT 1 FROM nodes WHERE view_gen = ?)
+   AND NOT EXISTS(SELECT 1 FROM edges WHERE view_gen = ?)
    AND NOT EXISTS(SELECT 1 FROM file_mtimes)
-   AND NOT EXISTS(SELECT 1 FROM repo_index_state)`).Scan(&empty)
+   AND NOT EXISTS(SELECT 1 FROM repo_index_state)`,
+		baseViewGeneration, baseViewGeneration).Scan(&empty)
 	return err == nil && empty == 1
 }
 

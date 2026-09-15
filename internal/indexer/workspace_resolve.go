@@ -103,21 +103,7 @@ func (mi *MultiIndexer) ScopeForCWD(cwd string) (workspaceID, projectID, repoPre
 	mi.mu.RLock()
 	defer mi.mu.RUnlock()
 
-	var bestRoot, bestPrefix string
-	for prefix, meta := range mi.repos {
-		if meta == nil {
-			continue
-		}
-		root := filepath.Clean(meta.RootPath)
-		if root == "" || root == "." {
-			continue
-		}
-		if pathkey.HasPathPrefix(cwd, root) {
-			if len(root) > len(bestRoot) {
-				bestRoot, bestPrefix = root, prefix
-			}
-		}
-	}
+	bestPrefix := mi.bestRepoPrefixForPathLocked(cwd)
 	if bestPrefix == "" {
 		// Reverse containment only. A root too broad to be anyone's
 		// project lexically contains every tracked repo, so it must not
@@ -125,7 +111,7 @@ func (mi *MultiIndexer) ScopeForCWD(cwd string) (workspaceID, projectID, repoPre
 		// one declared slug would otherwise resolve to that whole
 		// workspace, walking straight past the same guard in
 		// ContainedReposScope.
-		if UnsafeIndexRootReason(cwd) != "" {
+		if unsafeScopeRootReason(cwd) != "" {
 			return "", "", "", false
 		}
 		return mi.scopeForWorkspaceRootLocked(cwd)
@@ -141,6 +127,41 @@ func (mi *MultiIndexer) ScopeForCWD(cwd string) (workspaceID, projectID, repoPre
 		}
 	}
 	return ws, proj, bestPrefix, true
+}
+
+// bestRepoPrefixForPathLocked returns the innermost repository containing
+// path. It deliberately completes one lexical pass before touching the
+// filesystem: a request inside one of many ordinarily-spelled repositories
+// must not EvalSymlinks every unrelated root before reaching its match. Only
+// when no lexical root matches do we canonicalize the candidate once and
+// compare it with canonical roots. Caller holds mi.mu (read or write).
+func (mi *MultiIndexer) bestRepoPrefixForPathLocked(path string) string {
+	if prefix := mi.bestRepoPrefixForSpellingLocked(filepath.Clean(path), false); prefix != "" {
+		return prefix
+	}
+	return mi.bestRepoPrefixForSpellingLocked(pathkey.CanonicalPath(path), true)
+}
+
+func (mi *MultiIndexer) bestRepoPrefixForSpellingLocked(path string, canonicalRoots bool) string {
+	var bestPrefix string
+	bestLen := -1
+	for prefix, meta := range mi.repos {
+		if meta == nil {
+			continue
+		}
+		root := filepath.Clean(meta.RootPath)
+		if root == "" || root == "." {
+			continue
+		}
+		if canonicalRoots {
+			root = pathkey.CanonicalPath(root)
+		}
+		if pathkey.HasPathPrefix(path, root) && len(root) > bestLen {
+			bestPrefix = prefix
+			bestLen = len(root)
+		}
+	}
+	return bestPrefix
 }
 
 // ContainedReposScope resolves a working directory that CONTAINS tracked
@@ -176,7 +197,7 @@ func (mi *MultiIndexer) ContainedReposScope(cwd string) (repos []string, workspa
 		return nil, nil, false
 	}
 	cwd = filepath.Clean(cwd)
-	if UnsafeIndexRootReason(cwd) != "" {
+	if unsafeScopeRootReason(cwd) != "" {
 		return nil, nil, false
 	}
 
@@ -189,7 +210,7 @@ func (mi *MultiIndexer) ContainedReposScope(cwd string) (repos []string, workspa
 			continue
 		}
 		root := filepath.Clean(meta.RootPath)
-		if root == "" || root == "." || !pathkey.HasPathPrefix(root, cwd) {
+		if root == "" || root == "." || !pathkey.CanonicalHasPathPrefix(root, cwd) {
 			continue
 		}
 		repos = append(repos, prefix)
@@ -204,6 +225,21 @@ func (mi *MultiIndexer) ContainedReposScope(cwd string) (repos []string, workspa
 	sort.Strings(repos)
 	sort.Strings(workspaces)
 	return repos, workspaces, true
+}
+
+// unsafeScopeRootReason applies the broad-root guard to both the spelling a
+// client supplied and the existing filesystem identity behind it. Without the
+// canonical arm, a symlink to $HOME or / could pass the lexical check and bind
+// a session to every repository below that dangerous root.
+func unsafeScopeRootReason(root string) string {
+	if reason := UnsafeIndexRootReason(root); reason != "" {
+		return reason
+	}
+	canonical := pathkey.CanonicalExistingRoot(root)
+	if canonical == filepath.Clean(root) {
+		return ""
+	}
+	return UnsafeIndexRootReason(canonical)
 }
 
 // effectiveWorkspaceLocked returns a tracked repo's effective workspace
@@ -232,7 +268,7 @@ func (mi *MultiIndexer) scopeForWorkspaceRootLocked(cwd string) (workspaceID, pr
 			continue
 		}
 		root := filepath.Clean(meta.RootPath)
-		if root == "" || root == "." || !pathkey.HasPathPrefix(root, cwd) {
+		if root == "" || root == "." || !pathkey.CanonicalHasPathPrefix(root, cwd) {
 			continue
 		}
 		ws := mi.effectiveWorkspaceLocked(prefix) // singleton fallback, same rule as ReposInWorkspace
@@ -337,14 +373,16 @@ func (mi *MultiIndexer) backfillWorkspaceSlugsWithImpact() (nodesStamped, contra
 	// Map each repo prefix to its global-config RepoEntry so we honour
 	// the user-level workspace/project override even on backfill.
 	entryByPrefix := make(map[string]config.RepoEntry, len(repoMeta))
-	if mi.configMgr.Global() != nil {
-		for _, e := range mi.configMgr.Global().Repos {
-			p := config.ResolvePrefix(e)
-			if p == "" || p == "." {
-				continue
-			}
-			entryByPrefix[p] = e
+	// ReposSnapshot copies the list under the config mutation mutex, the same
+	// reason the crossWorkspaceLookup path below takes it: the deferred
+	// receipt tail reaches this backfill through RunPreEnrichResolve while
+	// UntrackRepo and TrackRepoCtx edit the live Repos slice in place.
+	for _, e := range mi.configMgr.Global().ReposSnapshot() {
+		p := config.ResolvePrefix(e)
+		if p == "" || p == "." {
+			continue
 		}
+		entryByPrefix[p] = e
 	}
 	for prefix, root := range repoMeta {
 		// Make sure the per-repo `.gortex.yaml` is loaded — at warmup
@@ -483,6 +521,9 @@ func (mi *MultiIndexer) runCrossRepoResolveContext(ctx context.Context, reconcil
 	if reconcileContracts {
 		mi.ReconcileContractEdges()
 	}
+	// Bounded by the calls this pass actually bound; the deferred
+	// fallback lane runs with no global test-edges pass behind it.
+	mi.reconcileRetargetedTestCalls(cr.TakeRetargetedTestCallFiles())
 	return nil
 }
 
@@ -507,6 +548,7 @@ func (mi *MultiIndexer) runCrossRepoResolveMutationFrontiers(resolutionFiles, ed
 		return
 	}
 	cr.ResolveMutationFrontiers(resolutionFiles, edgeSourceFiles, definitionFiles)
+	mi.reconcileRetargetedTestCalls(cr.TakeRetargetedTestCallFiles())
 }
 
 // crossWorkspaceLookup builds a resolver.CrossWorkspaceDepLookup from
@@ -567,15 +609,16 @@ func (mi *MultiIndexer) collectCrossWorkspaceRules() (map[string][]resolver.Cros
 	// Per-repo crossWorkspaceLookup needs the same precedence as the
 	// stamp path: a global-config Workspace override changes which
 	// source-workspace bucket receives the repo's dependency rules.
+	// ReposSnapshot copies the list under the config mutation mutex — the
+	// deferred receipt tail runs this concurrently with UntrackRepo, which
+	// edits the live Repos slice in place.
 	entryByPrefix := make(map[string]config.RepoEntry)
-	if global := mi.configMgr.Global(); global != nil {
-		for _, e := range global.Repos {
-			p := config.ResolvePrefix(e)
-			if p == "" || p == "." {
-				continue
-			}
-			entryByPrefix[p] = e
+	for _, e := range mi.configMgr.Global().ReposSnapshot() {
+		p := config.ResolvePrefix(e)
+		if p == "" || p == "." {
+			continue
 		}
+		entryByPrefix[p] = e
 	}
 	for _, prefix := range repoPrefixes {
 		cfg := mi.configMgr.GetRepoConfig(prefix)

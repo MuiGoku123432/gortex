@@ -1,6 +1,63 @@
 package store_sqlite
 
-import "github.com/zzet/gortex/internal/graph"
+import (
+	"strings"
+
+	"github.com/zzet/gortex/internal/graph"
+)
+
+// capabilityProjectionHighWaterQuery keeps the legacy base-corpus access path,
+// but makes the partial (view_gen, id) index eligible for derived generations.
+func capabilityProjectionHighWaterQuery(viewGen int64) string {
+	const query = `SELECT COALESCE(MAX(id), 0) FROM edges WHERE view_gen = ?`
+	if viewGen > 0 {
+		return query + ` AND view_gen > 0`
+	}
+	return query
+}
+
+func capabilityProjectionPageQuery(viewGen int64, allRepos bool) string {
+	const scopedQuery = `
+WITH requested_repos(repo_prefix) AS (
+    SELECT CAST(value AS TEXT) FROM json_each(?)
+)
+SELECT e.id, n.repo_prefix,
+       e.from_id, e.to_id, e.kind, e.file_path, e.line
+FROM edges AS e NOT INDEXED
+JOIN nodes AS n ON n.id = e.from_id AND n.view_gen = e.view_gen
+JOIN requested_repos AS r ON r.repo_prefix = n.repo_prefix
+LEFT JOIN nodes AS target ON target.id = e.to_id AND target.view_gen = e.view_gen
+WHERE e.id > ? AND e.id <= ? AND e.view_gen = ?
+  AND e.kind IN (?, ?, ?, ?)
+  AND (e.kind NOT IN (?, ?) OR target.kind = ?)
+ORDER BY e.id
+LIMIT ?`
+	const allQuery = `
+SELECT e.id, n.repo_prefix,
+       e.from_id, e.to_id, e.kind, e.file_path, e.line
+FROM edges AS e NOT INDEXED
+JOIN nodes AS n ON n.id = e.from_id AND n.view_gen = e.view_gen
+LEFT JOIN nodes AS target ON target.id = e.to_id AND target.view_gen = e.view_gen
+WHERE e.id > ? AND e.id <= ? AND e.view_gen = ?
+  AND e.kind IN (?, ?, ?, ?)
+  AND (e.kind NOT IN (?, ?) OR target.kind = ?)
+ORDER BY e.id
+LIMIT ?`
+	query := scopedQuery
+	if allRepos {
+		query = allQuery
+	}
+	if viewGen > 0 {
+		// A sparse generation can sit behind millions of unrelated corpus
+		// rows in this shared table. Do not force a global row-id traversal.
+		// The explicit positive predicate proves eligibility for the existing
+		// partial edges_by_generation index; equality to a parameter does not.
+		// This is not INDEXED BY: an optional index being absent remains safe.
+		query = strings.Replace(query, "edges AS e NOT INDEXED", "edges AS e", 1)
+		query = strings.Replace(query, "e.view_gen = ?", "e.view_gen = ? AND e.view_gen > 0", 1)
+	}
+	return query
+}
 
 // ScanRepoCapabilityEdges reads only source repository and logical identity
 // columns needed by capability synthesis. nil repoPrefixes scans all sources;
@@ -29,7 +86,7 @@ func (s *Store) ScanRepoCapabilityEdges(
 	}
 
 	var highWater int64
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM edges`).Scan(&highWater); err != nil {
+	if err := s.db.QueryRow(capabilityProjectionHighWaterQuery(s.viewGen), s.viewGen).Scan(&highWater); err != nil {
 		panicOnFatal(err)
 		return
 	}
@@ -37,37 +94,7 @@ func (s *Store) ScanRepoCapabilityEdges(
 		return
 	}
 
-	const scopedQuery = `
-WITH requested_repos(repo_prefix) AS (
-    SELECT CAST(value AS TEXT) FROM json_each(?)
-)
-SELECT e.id, n.repo_prefix,
-       e.from_id, e.to_id, e.kind, e.file_path, e.line
-FROM edges AS e NOT INDEXED
-JOIN nodes AS n ON n.id = e.from_id
-JOIN requested_repos AS r ON r.repo_prefix = n.repo_prefix
-LEFT JOIN nodes AS target ON target.id = e.to_id
-WHERE e.id > ? AND e.id <= ?
-  AND e.kind IN (?, ?, ?, ?)
-  AND (e.kind NOT IN (?, ?) OR target.kind = ?)
-ORDER BY e.id
-LIMIT ?`
-	const allQuery = `
-SELECT e.id, n.repo_prefix,
-       e.from_id, e.to_id, e.kind, e.file_path, e.line
-FROM edges AS e NOT INDEXED
-JOIN nodes AS n ON n.id = e.from_id
-LEFT JOIN nodes AS target ON target.id = e.to_id
-WHERE e.id > ? AND e.id <= ?
-  AND e.kind IN (?, ?, ?, ?)
-  AND (e.kind NOT IN (?, ?) OR target.kind = ?)
-ORDER BY e.id
-LIMIT ?`
-	query := scopedQuery
-	if allRepos {
-		query = allQuery
-	}
-	stmt, err := s.db.Prepare(query)
+	stmt, err := s.db.Prepare(capabilityProjectionPageQuery(s.viewGen, allRepos))
 	if err != nil {
 		panicOnFatal(err)
 		return
@@ -76,12 +103,12 @@ LIMIT ?`
 
 	lastID := int64(0)
 	for lastID < highWater {
-		args := make([]any, 0, 12)
+		args := make([]any, 0, 13)
 		if !allRepos {
 			args = append(args, reposJSON)
 		}
 		args = append(args,
-			lastID, highWater,
+			lastID, highWater, s.viewGen,
 			string(graph.EdgeReadsConfig), string(graph.EdgeReads),
 			string(graph.EdgeWrites), string(graph.EdgeCalls),
 			string(graph.EdgeReads), string(graph.EdgeWrites), string(graph.KindField),

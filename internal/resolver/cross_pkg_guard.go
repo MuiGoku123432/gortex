@@ -1,7 +1,6 @@
 package resolver
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -134,6 +133,11 @@ func (r *Resolver) guardCrossPackageCallEdges(jobs []reindexJob, closure map[str
 		if r.csharpExtensionGuardKeep(j.edge, callerFile, target) {
 			continue
 		}
+		// Same shape for a receiverless call bound through `using static`:
+		// the directive is the scope evidence, never an import edge.
+		if r.csharpUsingStaticGuardKeep(j.edge, callerFile, target) {
+			continue
+		}
 		// Not reachable — revert to the unresolved placeholder and
 		// re-index against the resolved target we are abandoning.
 		// SetEdgeProvenance("") drops the resolution provenance so
@@ -237,8 +241,8 @@ func (r *Resolver) targetImportReachable(callerFile string, callerNode, target *
 		// shown unreachable — leave the edge alone.
 		return true
 	}
-	callerDir := filepath.Dir(callerFile)
-	targetDir := filepath.Dir(target.FilePath)
+	callerDir := filePathDir(callerFile)
+	targetDir := filePathDir(target.FilePath)
 	if targetDir == callerDir {
 		return true
 	}
@@ -450,7 +454,7 @@ func (r *Resolver) buildImportClosureFiltered(repos map[string]struct{}) map[str
 	}
 	for file := range graph.FileNodeIdentitiesSeq(r.graph, repoPrefixes) {
 		if file.FilePath != "" && inScope(file.ID) {
-			add(file.FilePath, filepath.Dir(file.FilePath))
+			add(file.FilePath, filePathDir(file.FilePath))
 		}
 	}
 	// Materialise metadata-free import projections and batch-load only the
@@ -512,47 +516,57 @@ func (r *Resolver) buildImportClosureFiltered(repos map[string]struct{}) map[str
 	}
 	placements := graph.NodePlacementsByIDs(r.graph, idList)
 
-	// Direct barrel-file → re-export-target-file map, then a memoised
-	// transitive walk so chained barrels (src/index.ts → src/middleware.ts
-	// → src/middleware/persist.ts) contribute every hop's directory.
-	reexpTargets := make(map[string][]string)
+	// Collapse symbol-level re-export edges to unique file targets.
+	reexpTargets := make(map[string]map[string]struct{})
 	for _, e := range reexports {
 		barrel := e.FilePath
 		if from, ok := placements[e.From]; ok && from.FilePath != "" {
 			barrel = from.FilePath
 		}
 		if to, ok := placements[e.To]; ok && to.FilePath != "" && barrel != "" {
-			reexpTargets[barrel] = append(reexpTargets[barrel], to.FilePath)
+			if reexpTargets[barrel] == nil {
+				reexpTargets[barrel] = make(map[string]struct{})
+			}
+			reexpTargets[barrel][to.FilePath] = struct{}{}
 		}
-	}
-	barrelDirCache := make(map[string][]string)
-	var barrelDirs func(file string, seen map[string]bool) []string
-	barrelDirs = func(file string, seen map[string]bool) []string {
-		if dirs, ok := barrelDirCache[file]; ok {
-			return dirs
-		}
-		if seen[file] {
-			return nil
-		}
-		seen[file] = true
-		var dirs []string
-		for _, tf := range reexpTargets[file] {
-			dirs = append(dirs, filepath.Dir(tf))
-			dirs = append(dirs, barrelDirs(tf, seen)...)
-		}
-		barrelDirCache[file] = dirs
-		return dirs
 	}
 
+	// Schedule imported descendants first so overlapping roots can reuse
+	// completed closures. Cyclic members still require independent full
+	// walks: recursive partial cache entries would be order-dependent.
+	barrelDirCache := make(map[string][]string)
+	if len(reexpTargets) > 0 {
+		var roots []string
+		seenRoots := make(map[string]struct{})
+		for _, e := range imports {
+			if target, ok := placements[e.To]; ok && len(reexpTargets[target.FilePath]) > 0 {
+				if _, seen := seenRoots[target.FilePath]; !seen {
+					seenRoots[target.FilePath] = struct{}{}
+					roots = append(roots, target.FilePath)
+				}
+			}
+		}
+		for _, root := range importRootOrder(roots, reexpTargets) {
+			barrelDirCache[root] = importReachableDirs(root, reexpTargets, barrelDirCache)
+		}
+	}
 	for _, e := range imports {
 		callerFile := e.FilePath
 		if from, ok := placements[e.From]; ok && from.FilePath != "" {
 			callerFile = from.FilePath
 		}
-		if target, ok := placements[e.To]; ok && target.FilePath != "" {
-			add(callerFile, filepath.Dir(target.FilePath))
-			for _, d := range barrelDirs(target.FilePath, map[string]bool{}) {
-				add(callerFile, d)
+		if target, ok := placements[e.To]; ok && target.FilePath != "" && callerFile != "" {
+			add(callerFile, filePathDir(target.FilePath))
+			if len(reexpTargets[target.FilePath]) == 0 {
+				continue
+			}
+			dirs, ok := barrelDirCache[target.FilePath]
+			if !ok {
+				dirs = importReachableDirs(target.FilePath, reexpTargets, barrelDirCache)
+				barrelDirCache[target.FilePath] = dirs
+			}
+			for _, dir := range dirs {
+				add(callerFile, dir)
 			}
 		}
 	}

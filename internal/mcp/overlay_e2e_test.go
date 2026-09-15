@@ -146,6 +146,27 @@ func Overlay() {}
 		"base graph must be byte-identical before and after an overlay round-trip")
 }
 
+func TestOverlay_AbsoluteMissingAliasMapsToCanonicalGraphPath(t *testing.T) {
+	srv, dir, _, _ := setupOverlayServer(t)
+	aliasRoot := filepath.Join(t.TempDir(), "repo-alias")
+	if err := os.Symlink(dir, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	aliasFile := filepath.Join(aliasRoot, "new-buffer.go")
+	layer, paths, err := srv.constructOverlayLayer(context.Background(), []daemon.OverlayFile{{
+		Path:    aliasFile,
+		Content: "package main\n\nfunc AliasBuffer() {}\n",
+	}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"new-buffer.go"}, paths)
+	require.NotNil(t, layer)
+
+	view := graph.NewOverlaidView(srv.graph, layer)
+	nodes := view.FindNodesByName("AliasBuffer")
+	require.Len(t, nodes, 1)
+	require.Equal(t, "new-buffer.go::AliasBuffer", nodes[0].ID)
+}
+
 // TestOverlay_FindUsagesPreservesCrossFileCallers exercises the
 // regression the in-place-mutation design had: an editor overlays
 // target.go (defining Target), and find_usages(target.go::Target)
@@ -425,7 +446,9 @@ func TestOverlay_MCP_RegisterPushList(t *testing.T) {
 
 	listRes := callToolByName(t, srv, ctx, "overlay_list", map[string]any{})
 	listText := toolText(listRes)
-	require.Contains(t, listText, targetFile)
+	// The listing is a JSON body: a Windows path reaches it with its
+	// backslashes escaped, so match the JSON spelling of the path.
+	require.Contains(t, listText, jsonEscape(targetFile))
 	require.Contains(t, listText, `"count":1`)
 
 	summary := callToolByName(t, srv, ctx, "get_file_summary", map[string]any{

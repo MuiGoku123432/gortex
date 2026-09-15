@@ -25,6 +25,14 @@ import (
 // the shared externals out from under every repo, or wipe the lone repo.
 // Every method here refuses or excludes ''.
 
+// GENERATION SCOPE — every statement driven by the four table lists in this
+// file is deliberately generation-UNSCOPED, as are PurgeRepo and the explicit
+// EvictRepoAllGenerations path in store.go. Untracking or re-keying a repository
+// removes it from the store entirely, not from one payload view of it: a row
+// left behind in another generation would be residue no later call could reach,
+// which is exactly what these sweeps exist to prevent. Ordinary EvictRepo and
+// per-repo reads and writes carry the caller's view_gen; these do not.
+//
 // purgeSidecarTables are the repo_prefix-keyed sidecar tables PurgeRepo
 // clears for a prefix, alongside nodes+edges. Each carries a repo_prefix
 // column a plain `DELETE ... WHERE repo_prefix = ?` keys on. The two FTS5
@@ -33,6 +41,7 @@ import (
 // unlike the per-edit hot path. Vectors are repo-keyed too; deleting them by
 // repo_prefix is essential because synthetic chunk IDs are not graph node IDs.
 var purgeSidecarTables = []string{
+	"file_index_failures",
 	"file_mtimes",
 	"repo_index_state",
 	"symbol_fts_state",
@@ -55,12 +64,12 @@ var purgeSidecarTables = []string{
 	"content_fts_rowid",
 }
 
-// PurgeRepo deletes EVERY row a repo owns — nodes, edges, all fifteen
-// repo_prefix-keyed sidecar tables, and vectors — in one
-// transaction. It is the complete form of EvictRepo (which drops only
-// nodes+edges), wired into UntrackRepo so removing a repo from config leaves
-// no residue. Refuses prefix=="" (shared global externals / solo-mode live
-// data — see the file-level INVARIANT).
+// PurgeRepo deletes EVERY row a repo owns — nodes, edges, every
+// repo_prefix-keyed sidecar table, and vectors — across all generations in one
+// transaction. It is the sidecar-complete form of EvictRepoAllGenerations,
+// wired into UntrackRepo so removing a repo from config leaves no residue.
+// Refuses prefix=="" (shared global externals / solo-mode live data — see the
+// file-level INVARIANT).
 func (s *Store) PurgeRepo(prefix string) error {
 	if prefix == "" {
 		return fmt.Errorf("store_sqlite: PurgeRepo refuses empty repo prefix (would delete shared global externals / solo-repo data)")
@@ -141,6 +150,7 @@ func (s *Store) PurgeRepo(prefix string) error {
 // A prefix whose nodes are gone but whose sidecars remain is invisible to a
 // nodes-only scan, which is why the sidecar tables are unioned in.
 var orphanScanTables = []string{
+	"file_index_failures",
 	"nodes",
 	"file_mtimes",
 	"repo_index_state",
@@ -238,6 +248,7 @@ var rekeyMoveTables = []string{
 // too — their rows carry the old node ids, and UPDATE over an FTS5 UNINDEXED
 // column is awkward, so delete-then-reindex is the clean path.
 var rekeyDropTables = []string{
+	"file_index_failures",
 	"semantic_binding_types",
 	"clone_shingles",
 	"clone_corpus_state",

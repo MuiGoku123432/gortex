@@ -21,27 +21,27 @@ import (
 )
 
 var facadeDescriptions = map[string]string{
-	"explore":         "Localize a task in indexed code.",
-	"search":          "Search indexed code and artifacts by operation.",
-	"read":            "Read files, symbols, or context by operation.",
-	"relations":       "Query symbol relationships by operation.",
-	"trace":           "Trace graph or data flow by operation.",
-	"analyze":         "Run graph analysis by kind.",
-	"ask":             "Ask the configured research agent.",
-	"change":          "Assess a proposed or existing change.",
-	"edit":            "Apply guarded source or file changes.",
-	"refactor":        "Apply a semantic refactor.",
-	"review":          "Build or critique a code review.",
-	"publish_review":  "Publish a review to a forge.",
+	"explore":         "Localize indexed code.",
+	"search":          "Search code and artifacts.",
+	"read":            "Read files, symbols, or context.",
+	"relations":       "Query symbol relationships.",
+	"trace":           "Trace graph or data flow.",
+	"analyze":         "Analyze the code graph.",
+	"ask":             "Ask the research agent.",
+	"change":          "Assess a code change.",
+	"edit":            "Apply guarded edits.",
+	"refactor":        "Apply semantic refactors.",
+	"review":          "Build or critique reviews.",
+	"publish_review":  "Publish a forge review.",
 	"pr":              "Inspect pull requests.",
-	"recall":          "Read notes, memories, or notebooks.",
-	"remember":        "Persist notes, memories, or suppressions.",
-	"workspace":       "Inspect workspace and index state.",
-	"workspace_admin": "Change workspace or daemon state.",
-	"session":         "Change volatile session state.",
-	"overlay":         "Change speculative overlay state.",
-	"response":        "Inspect a buffered response.",
-	"capabilities":    "List operations or return an exact schema.",
+	"recall":          "Read notes and memories.",
+	"remember":        "Persist notes and memories.",
+	"workspace":       "Inspect workspace state.",
+	"workspace_admin": "Change workspace state.",
+	"session":         "Change session state.",
+	"overlay":         "Change overlay state.",
+	"response":        "Inspect buffered output.",
+	"capabilities":    "List operations or exact schemas.",
 }
 
 func boolPointer(v bool) *bool { return &v }
@@ -107,11 +107,11 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 	switch name {
 	case "explore":
 		opts = []mcpgo.ToolOption{
-			mcpgo.WithString("operation", mcpgo.Description("Use localize when the requested outcome is files or symbols; it returns terminal evidence. Use task only when diagnosis or implementation will continue.")),
-			mcpgo.WithString("task", mcpgo.Description("Task, bug, or question to localize.")),
+			mcpgo.WithString("operation", mcpgo.Description("Use localize for terminal evidence. Use task only for diagnosis or implementation.")),
+			mcpgo.WithString("task", mcpgo.Description("Task or question.")),
 			mcpgo.WithString("path"),
 			mcpgo.WithObject("options",
-				mcpgo.Description("Set new_user_task=true only on the first explore call (task or localize) caused by a new user request. Never set it to retry, paraphrase, or continue the current request."),
+				mcpgo.Description("new_user_task=true only on the first call for a new user request."),
 				mcpgo.AdditionalProperties(true),
 			),
 			output,
@@ -122,7 +122,7 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 		opts = []mcpgo.ToolOption{
 			operation, target, freeObject("context", "Read window or source-context controls."),
 			mcpgo.WithObject("options",
-				mcpgo.Description("Set new_user_task=true only on the first read.file call caused by a new user request. Never set it to retry, continue the current request, or bypass answer_ready."),
+				mcpgo.Description("new_user_task=true only on the first read.file call for a new request."),
 				mcpgo.AdditionalProperties(true),
 			),
 			output,
@@ -131,7 +131,7 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 		opts = []mcpgo.ToolOption{operation, freeObject("target", "Primary file or symbol target."), freeObject("to", "Optional destination target."), options, output}
 	case "analyze":
 		opts = []mcpgo.ToolOption{
-			mcpgo.WithString("kind", mcpgo.Description("Analysis kind or operation; omit to list supported kinds.")),
+			mcpgo.WithString("kind", mcpgo.Description("Kind; omit to list kinds.")),
 			freeObject("target", "Optional analysis target."), options, output,
 		}
 	case "ask":
@@ -148,7 +148,13 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 		opts = []mcpgo.ToolOption{
 			operation, target, mcpgo.WithString("match"), mcpgo.WithString("replacement"),
 			mcpgo.WithString("content"), freeObject("guard", "Stale-write and occurrence guards."),
-			mcpgo.WithArray("changes", mcpgo.Description("Batch file or symbol edits."), mcpgo.Items(map[string]any{"type": "object", "additionalProperties": true})),
+			// The per-op contract rides in the description rather than in an
+			// items union: every session on this preset pays for tools/list,
+			// and the union costs kilobytes to say what one line says. Naming
+			// each op with its exact field list — optional fields marked `?` —
+			// keeps expected_sha256 and replace_all discoverable without a
+			// capabilities round trip.
+			mcpgo.WithArray("changes", mcpgo.Description("Batch items by op: edit_file{path,old_string,new_string,replace_all?}, edit_symbol{id,old_source,new_source}. move_file{source,destination,expected_sha256?} and delete_file{path,expected_sha256?} act on whole files."), mcpgo.Items(map[string]any{"type": "object", "additionalProperties": true})),
 			mcpgo.WithBoolean("dry_run"), options, output,
 		}
 	case "refactor":
@@ -163,14 +169,14 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 		opts = []mcpgo.ToolOption{operation, freeObject("arguments", "Operation arguments.")}
 	case "session":
 		opts = []mcpgo.ToolOption{
-			mcpgo.WithString("operation", mcpgo.Description("Session operation; see capabilities. Use subscribe or unsubscribe with channel.")),
+			mcpgo.WithString("operation", mcpgo.Description("Operation; subscribe/unsubscribe require channel.")),
 			mcpgo.WithString("channel", mcpgo.Description("daemon_health, diagnostics, graph_invalidated, stale_refs, or workspace_readiness")),
 			freeObject("arguments", "Optional session arguments."),
 		}
 	case "capabilities":
 		opts = []mcpgo.ToolOption{
-			mcpgo.WithString("domain", mcpgo.Description("Public tool name; omit to list all tool domains.")),
-			mcpgo.WithString("operation", mcpgo.Description("Operation name; omit to list the domain.")),
+			mcpgo.WithString("domain", mcpgo.Description("Tool name; omit to list domains.")),
+			mcpgo.WithString("operation", mcpgo.Description("Operation; omit to list domain.")),
 			mcpgo.WithString("detail", mcpgo.Description("summary or schema")),
 		}
 	default:
@@ -198,7 +204,7 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 		// without a capabilities round-trip or a rejected probe.
 		targetSchema["minProperties"] = 1
 		targetSchema["maxProperties"] = 1
-		targetSchema["description"] = "Choose exactly one selector."
+		targetSchema["description"] = "Choose one selector."
 		if name == "read" {
 			targetSchema["description"] = "Choose exactly one selector: symbol for one source symbol, symbols for a batch, or file for file content."
 		}
@@ -210,6 +216,7 @@ func facadeToolDefinitionWithOperations(name string, operations []string) mcpgo.
 	if property, ok := tool.InputSchema.Properties[discriminator].(map[string]any); ok && len(operations) > 0 {
 		property["enum"] = append([]string(nil), operations...)
 	}
+	publishViewSelectorSchema(&tool)
 	return tool
 }
 
@@ -326,6 +333,16 @@ func (s *Server) wrapLegacyFacade(name string, raw server.ToolHandlerFunc) serve
 		// straight to the legacy handler, which has no target to read — the
 		// caller got a repo-wide ranking that looks like an answer.
 		if !facadeSession && !explicitOperation && !usesFacadeVocabulary(args) {
+			// A bare analyze(kind=…) call with no facade vocabulary still
+			// needs the facade when the kind is an aliased operation
+			// (processes, communities, contracts, …): the facade holds the
+			// captured legacy handler directly, so the call works under the
+			// core/defer surface without promoting the legacy tool into the
+			// live registry. Native dispatcher kinds (hotspots, dead_code,
+			// cycles, …) are not aliased and fall through to the dispatcher.
+			if name == "analyze" && s.facadeAnalyzeKindAliased(ctx, req) {
+				return s.handleFacade(ctx, name, req)
+			}
 			return raw(ctx, req)
 		}
 		if name == "analyze" {
@@ -335,6 +352,25 @@ func (s *Server) wrapLegacyFacade(name string, raw server.ToolHandlerFunc) serve
 		}
 		return s.handleFacade(ctx, name, req)
 	}
+}
+
+// facadeAnalyzeKindAliased reports whether an analyze call's requested kind
+// is a facade-aliased operation — one that routes to a captured legacy tool
+// other than the analyze dispatcher (e.g. processes → get_processes,
+// communities → get_communities). Aliased kinds are reachable through the
+// facade without promoting the legacy tool into the live registry, so a
+// plain analyze(kind=processes) call from a legacy or HTTP session must not
+// fall through to the dispatcher's "unknown analyze kind" error.
+func (s *Server) facadeAnalyzeKindAliased(ctx context.Context, req mcpgo.CallToolRequest) bool {
+	if s == nil || s.facades == nil {
+		return false
+	}
+	operation := requestedAnalyzeKind(req.GetArguments())
+	if operation == "" {
+		return false
+	}
+	spec, ok := s.capabilityOperation("analyze", operation)
+	return ok && spec.Legacy != "analyze"
 }
 
 // decorateLocalizationReadResult makes a reserved localization read carry its
@@ -1039,8 +1075,8 @@ func (s *Server) invokeFacadeSpec(ctx context.Context, req mcpgo.CallToolRequest
 					}), nil
 				}
 				var node *graph.Node
-				if s.graph != nil {
-					node = s.graph.GetNode(canonical)
+				if reader := s.readerFor(ctx); reader != nil {
+					node = reader.GetNode(canonical)
 				}
 				if node == nil || node.FilePath == "" || !s.nodeInSessionScope(ctx, node) {
 					outcome = facadeOutcomeInvalidArgument
@@ -1058,7 +1094,7 @@ func (s *Server) invokeFacadeSpec(ctx context.Context, req mcpgo.CallToolRequest
 	if spec.Facade == "change" && spec.Operation == "impact" {
 		if rawPath, exists := normalized["path"]; exists {
 			if path := strings.TrimSpace(fmt.Sprint(rawPath)); path != "" {
-				path = s.graphRelPath(path)
+				path = s.graphRelPath(ctx, path)
 				eng := s.engineFor(ctx)
 				ids := make([]string, 0)
 				if eng != nil {
@@ -1111,6 +1147,11 @@ func (s *Server) invokeFacadeSpec(ctx context.Context, req mcpgo.CallToolRequest
 	forwarded.Params.RawArguments = nil
 	result, err = legacy.handler(ctx, forwarded)
 	if err == nil {
+		// Book the retrieval half of the savings ledger under the LEGACY tool
+		// name, so a facade call and a direct legacy call land in the same
+		// per-tool bucket. Runs before decoration: the baseline is what the
+		// handler actually retrieved, not the riders bolted on afterwards.
+		s.recordRetrievalSavings(ctx, spec.Legacy, result)
 		result = s.decorateFacadeFreshness(spec.Legacy, forwarded, result)
 	}
 	result = decorateFacadeResultIdentity(result, spec)
@@ -1138,7 +1179,8 @@ func decorateFacadeResultIdentity(result *mcpgo.CallToolResult, spec facadeOpera
 
 func (s *Server) resolveFacadeSymbolShorthand(ctx context.Context, id string) (string, []string) {
 	resolved := s.resolveSymbolID(ctx, id)
-	if s.graph == nil || s.graph.GetNode(resolved) != nil || strings.Contains(id, "::") {
+	reader := s.readerFor(ctx)
+	if reader == nil || reader.GetNode(resolved) != nil || strings.Contains(id, "::") {
 		return resolved, nil
 	}
 	eng := s.engineFor(ctx)
@@ -2646,6 +2688,24 @@ func (s *Server) facadeCapability(spec facadeOperationSpec, includeSchema bool) 
 			if spec.Facade != "analyze" && spec.Facade != "session" && (spec.Facade != "workspace_admin" || spec.Legacy != "analyze") {
 				inputSchema = facadePublicCapabilitySchema(spec, properties, required, requestShape)
 			}
+			schema, ok := inputSchema.(map[string]any)
+			if !ok {
+				schema = map[string]any{
+					"type":       legacy.tool.InputSchema.Type,
+					"properties": properties,
+				}
+				if len(required) > 0 {
+					schema["required"] = append([]string(nil), required...)
+				}
+				inputSchema = schema
+			}
+			schemaProperties, _ := schema["properties"].(map[string]any)
+			publishedProperties := make(map[string]any, len(schemaProperties)+1)
+			for name, property := range schemaProperties {
+				publishedProperties[name] = property
+			}
+			publishedProperties[viewArgName] = viewSelectorSchema()
+			schema["properties"] = publishedProperties
 			if spec.Facade == "read" && spec.Operation == "symbols" {
 				if schema, ok := inputSchema.(map[string]any); ok {
 					schemaProperties, _ := schema["properties"].(map[string]any)
@@ -2964,10 +3024,26 @@ func facadeRequestShape(spec facadeOperationSpec, properties map[string]any, req
 			args["match"] = "<existing source>"
 			args["replacement"] = "<replacement source>"
 		case "batch":
-			args["changes"] = []map[string]any{{
-				"op": "edit_file", "path": "<file>",
-				"old_string": "<existing text>", "new_string": "<replacement text>",
-			}}
+			// One example per accepted `op` so the shape advertises the
+			// whole-file lifecycle items, not just the string replacement.
+			// The lifecycle examples carry expected_sha256 because a stale
+			// digest is the one precondition that turns a blind whole-file
+			// move or delete into a refusal instead of a silent overwrite.
+			args["changes"] = []map[string]any{
+				{
+					"op": "edit_file", "path": "<file>",
+					"old_string": "<existing text>", "new_string": "<replacement text>",
+				},
+				{
+					"op": "edit_symbol", "id": "<symbol>",
+					"old_source": "<existing source>", "new_source": "<replacement source>",
+				},
+				{
+					"op": "move_file", "source": "<file>",
+					"destination": "<destination file>", "expected_sha256": "<sha256>",
+				},
+				{"op": "delete_file", "path": "<file>", "expected_sha256": "<sha256>"},
+			}
 		default:
 			args["options"] = map[string]any{}
 		}

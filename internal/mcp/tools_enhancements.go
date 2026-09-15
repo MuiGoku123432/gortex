@@ -23,6 +23,7 @@ import (
 	"github.com/zzet/gortex/internal/excludes"
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/graphpath"
+	"github.com/zzet/gortex/internal/graphview"
 	"github.com/zzet/gortex/internal/indexer"
 	"github.com/zzet/gortex/internal/persistence"
 	"github.com/zzet/gortex/internal/query"
@@ -59,8 +60,8 @@ func (s *Server) ensureFresh(filePaths []string) []string {
 		if root == "" {
 			continue
 		}
-		rel, err := filepath.Rel(root, absPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		rel, ok := relativeWithinRoot(root, absPath)
+		if !ok {
 			continue
 		}
 		// IsTrackedStale is false for untracked / new / current files, so
@@ -409,7 +410,7 @@ func (s *Server) handleVerifyChange(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError("changes array is empty"), nil
 	}
 
-	result := analysis.VerifyChanges(s.graph, s.engine, changes)
+	result := analysis.VerifyChanges(s.readerFor(ctx), s.engineFor(ctx), changes)
 
 	if isCompact(req) {
 		var b strings.Builder
@@ -478,8 +479,9 @@ func (s *Server) handleCheckGuards(ctx context.Context, req mcp.CallToolRequest)
 		return s.respondJSONOrTOON(ctx, req, empty)
 	}
 
-	violations := s.evaluateGuards(ids)
-	violations = append(violations, analysis.EvaluateArchitecture(s.graph, s.architecture, ids)...)
+	guardReader := s.readerFor(ctx)
+	violations := s.evaluateGuards(guardReader, ids)
+	violations = append(violations, analysis.EvaluateArchitecture(guardReader, s.architecture, ids)...)
 
 	if isCompact(req) {
 		var b strings.Builder
@@ -732,7 +734,7 @@ func (s *Server) handlePrefetchContext(ctx context.Context, req mcp.CallToolRequ
 			}
 			n := candidates[i].Node
 			if n.StartLine > 0 && n.EndLine > 0 {
-				if absPath, err := s.resolveNodePath(n); err == nil {
+				if absPath, err := s.resolveNodePath(ctx, n); err == nil {
 					if source, _, _, err := readLines(absPath, n.StartLine, n.EndLine, 0); err == nil {
 						candidates[i].Source = source
 					}
@@ -1259,7 +1261,7 @@ func (s *Server) handleAnalyzeStaleCode(ctx context.Context, req mcp.CallToolReq
 	// Push the kind filter into the storage layer; the meta gate
 	// (last_authored.timestamp) stays in Go since the meta column is
 	// opaque to the query layer.
-	blame := blameRowsByID(s.graph)
+	blame := blameRowsByID(s.readerFor(ctx))
 	for _, n := range s.scopedNodesByKinds(ctx, allowedKindsSlice(allowedKinds)) {
 		la, ok := lastAuthoredFrom(blame, n)
 		if !ok || la.Timestamp == 0 {
@@ -1403,14 +1405,32 @@ func (s *Server) handleAnalyzeOwnership(ctx context.Context, req mcp.CallToolReq
 	// Kind pushdown — owners are derived from the blame meta on
 	// function/method (or wider) nodes; the analyzer scans tens of
 	// thousands of irrelevant nodes without it on a disk backend.
-	ownBlame := blameRowsByID(s.graph)
+	ownBlame := blameRowsByID(s.readerFor(ctx))
+	// Tallied inside the scan the answer is computed from, so the caveat can
+	// never disagree with the number it accompanies: candidates counts every
+	// symbol that passed the kind and path filters, stamped the subset
+	// carrying authorship. An empty answer means something different
+	// depending on which of the two is zero, and that difference was
+	// previously invisible.
+	candidatesByRepo := map[string]int{}
+	stampedByRepo := map[string]int{}
 	for _, n := range s.scopedNodesByKinds(ctx, allowedKindsSlice(allowedKinds)) {
 		if !graphpath.HasPrefix(n.FilePath, pathPrefix) {
 			continue
 		}
+		// Counted against blame's OWN admission set, not against everything
+		// that passed the filters: a symbol the pass never looks at is not a
+		// coverage hole, and counting it would report a shortfall no
+		// enrichment could ever close.
+		if blame.Eligible(n) {
+			candidatesByRepo[n.RepoPrefix]++
+		}
 		la, ok := lastAuthoredFrom(ownBlame, n)
 		if !ok {
 			continue
+		}
+		if blame.Eligible(n) {
+			stampedByRepo[n.RepoPrefix]++
 		}
 		email := la.Email
 		if email == "" {
@@ -1456,6 +1476,21 @@ func (s *Server) handleAnalyzeOwnership(ctx context.Context, req mcp.CallToolReq
 		return rows[i].Email < rows[j].Email
 	})
 
+	// A "built" state is dropped when there are rows: they are their own proof
+	// that authorship was stamped, and annotating them would spend a caller's
+	// attention on the case that never misleads.
+	//
+	// never_built and partial are NOT dropped. A repository in scope with no
+	// blame stamps makes this answer an undercount whether or not other
+	// repositories produced rows, and a non-empty undercount is the more
+	// dangerous shape: an empty answer at least looks suspicious, while rows
+	// look like the answer. This is the same argument the route inventory
+	// case makes — 130 of 153 rows is the reading that gets acted on.
+	state := ownershipDataState(candidatesByRepo, stampedByRepo, len(byEmail), len(rows))
+	if len(rows) > 0 && state.State == dataStateComplete {
+		state = dataStateCaveat{}
+	}
+
 	if isCompact(req) {
 		var b strings.Builder
 		for _, r := range rows {
@@ -1464,12 +1499,19 @@ func (s *Server) handleAnalyzeOwnership(ctx context.Context, req mcp.CallToolReq
 		if len(rows) == 0 {
 			b.WriteString("no owners matched\n")
 		}
+		if state.State != "" {
+			b.WriteString(state.line())
+		}
 		return mcp.NewToolResultText(b.String()), nil
 	}
-	return s.respondJSONOrTOON(ctx, req, map[string]any{
+	payload := map[string]any{
 		"owners": rows,
 		"total":  len(rows),
-	})
+	}
+	if state.State != "" {
+		payload[dataStateCaveatKey] = state.payload()
+	}
+	return s.respondJSONOrTOON(ctx, req, payload)
 }
 
 // tsFromMeta normalises the timestamp field across the int64
@@ -1543,7 +1585,7 @@ func (s *Server) handleAnalyzeCoverageGaps(ctx context.Context, req mcp.CallTool
 		Hit     int     `json:"hit"`
 	}
 	var rows []gapRow
-	covRows := s.coverageByID()
+	covRows := coverageRowsByID(s.readerFor(ctx))
 	// Kind pushdown — coverage_pct only ever lands on executable
 	// kinds, so the IN-list IS the candidate set.
 	for _, n := range s.scopedNodesByKinds(ctx, allowedKindsSlice(allowedKinds)) {
@@ -1666,7 +1708,8 @@ func (s *Server) handleAnalyzeStaleFlags(ctx context.Context, req mcp.CallToolRe
 	// was pure overhead. The caller batch below still does per-
 	// flag GetInEdges; pushing that into a single query join is a
 	// separate follow-up since the join semantics differ per flag.
-	flagBlame := blameRowsByID(s.graph)
+	reader := s.readerFor(ctx)
+	flagBlame := blameRowsByID(reader)
 	for _, n := range s.scopedNodesByKinds(ctx, []graph.NodeKind{graph.KindFlag}) {
 		provider, _ := n.Meta["provider"].(string)
 		if providerFilter != "" && provider != providerFilter {
@@ -1674,7 +1717,7 @@ func (s *Server) handleAnalyzeStaleFlags(ctx context.Context, req mcp.CallToolRe
 		}
 		// Walk incoming EdgeTogglesFlag edges to collect callers.
 		var callerIDs []string
-		for _, e := range s.graph.GetInEdges(n.ID) {
+		for _, e := range reader.GetInEdges(n.ID) {
 			if e.Kind != graph.EdgeTogglesFlag {
 				continue
 			}
@@ -1696,7 +1739,7 @@ func (s *Server) handleAnalyzeStaleFlags(ctx context.Context, req mcp.CallToolRe
 		var newestTS int64
 		hasBlame := false
 		for _, callerID := range callerIDs {
-			caller := s.graph.GetNode(callerID)
+			caller := reader.GetNode(callerID)
 			if caller == nil {
 				continue
 			}
@@ -1800,6 +1843,7 @@ func (s *Server) handleAnalyzeOrphanTables(ctx context.Context, req mcp.CallTool
 	}
 	var rows []orphanRow
 	tableCount, queryEdges := 0, 0
+	reader := s.readerFor(ctx)
 	// Kind pushdown — only KindTable carries the providers/queries
 	// fan-in we care about; the rest of the node table is noise.
 	for _, n := range s.scopedNodesByKinds(ctx, []graph.NodeKind{graph.KindTable}) {
@@ -1808,7 +1852,7 @@ func (s *Server) handleAnalyzeOrphanTables(ctx context.Context, req mcp.CallTool
 		// and consumers (query call sites).
 		hasProvider := false
 		queryCount := 0
-		for _, e := range s.graph.GetInEdges(n.ID) {
+		for _, e := range reader.GetInEdges(n.ID) {
 			switch e.Kind {
 			case graph.EdgeProvides:
 				hasProvider = true
@@ -1915,12 +1959,13 @@ func (s *Server) handleAnalyzeUnreferencedTables(ctx context.Context, req mcp.Ca
 	}
 	var rows []unrefRow
 	tableCount, queryEdges := 0, 0
+	reader := s.readerFor(ctx)
 	// Kind pushdown — same story as orphan_tables.
 	for _, n := range s.scopedNodesByKinds(ctx, []graph.NodeKind{graph.KindTable}) {
 		tableCount++
 		providerCount := 0
 		queryCount := 0
-		for _, e := range s.graph.GetInEdges(n.ID) {
+		for _, e := range reader.GetInEdges(n.ID) {
 			switch e.Kind {
 			case graph.EdgeProvides:
 				providerCount++
@@ -2011,7 +2056,7 @@ func (s *Server) handleAnalyzeCoverageSummary(ctx context.Context, req mcp.CallT
 		sumPct float64 // running sum, hidden from JSON
 	}
 	byDir := map[string]*dirStats{}
-	covRows := s.coverageByID()
+	covRows := coverageRowsByID(s.readerFor(ctx))
 
 	// Kind pushdown — coverage_pct only lives on executable kinds.
 	for _, n := range s.scopedNodesByKinds(ctx, allowedKindsSlice(allowedKinds)) {
@@ -2167,8 +2212,12 @@ func (s *Server) handleAnalyzeReleases(ctx context.Context, req mcp.CallToolRequ
 		Order      int      `json:"order"`
 		Files      []string `json:"files,omitempty"`
 	}
+	// Every scan and sidecar read in this handler shares one reader, so
+	// an overlay-active request grades the timeline against the state it
+	// reads rather than mixing buffers with the indexed node set.
+	reader := s.readerFor(ctx)
 	releaseByTag := map[string]*releaseRow{}
-	for _, n := range s.graph.AllNodes() {
+	for _, n := range reader.AllNodes() {
 		if n.Kind != graph.KindRelease {
 			continue
 		}
@@ -2219,8 +2268,8 @@ func (s *Server) handleAnalyzeReleases(ctx context.Context, req mcp.CallToolRequ
 				"total":      0,
 			})
 		}
-		relByID := s.releaseByID()
-		for _, n := range s.graph.AllNodes() {
+		relByID := releaseRowsByID(reader)
+		for _, n := range reader.AllNodes() {
 			if n.Kind != graph.KindFile || n.FilePath == "" {
 				continue
 			}
@@ -2254,10 +2303,10 @@ func (s *Server) handleAnalyzeReleases(ctx context.Context, req mcp.CallToolRequ
 		// (an unlikely combination; surface as an empty timeline);
 		// otherwise return the structured error.
 		hasAnyAddedIn := false
-		if relByID := s.releaseByID(); len(relByID) > 0 {
+		if relByID := releaseRowsByID(reader); len(relByID) > 0 {
 			hasAnyAddedIn = true
 		} else {
-			for _, n := range s.graph.AllNodes() {
+			for _, n := range reader.AllNodes() {
 				if !s.analyzeNodeVisible(ctx, n) {
 					continue
 				}
@@ -2322,7 +2371,9 @@ func (s *Server) handleAnalyzeBlame(ctx context.Context, req mcp.CallToolRequest
 	total := 0
 	perRepo := make(map[string]any, len(roots))
 	for prefix, root := range roots {
-		count, err := blame.EnrichGraph(s.graph, root)
+		// prefix scopes the pass: without it the walk over one repo's root can
+		// stamp another repo's identically-pathed nodes.
+		count, err := blame.EnrichGraph(s.graph, root, prefix)
 		if err != nil {
 			perRepo[prefix] = map[string]any{"root": root, "error": err.Error()}
 			continue
@@ -2392,9 +2443,10 @@ func (s *Server) handleFindDeadCode(ctx context.Context, req mcp.CallToolRequest
 		opts.SkipCrossRepoNodes = true
 	}
 
-	entries := analysis.FindDeadCode(s.graph, s.getProcesses(), nil, opts)
+	reader := s.readerFor(ctx)
+	entries := analysis.FindDeadCode(reader, s.getProcesses(), nil, opts)
 
-	// dead_code reads s.graph directly, bypassing the scoped-node
+	// dead_code reads the whole graph directly, bypassing the scoped-node
 	// accessors, so narrow its rows to the session workspace + optional
 	// repo allow-set here. This also closes the latent cross-workspace
 	// leak for this kind. Strict no-op for an unbound session with no
@@ -2402,7 +2454,7 @@ func (s *Server) handleFindDeadCode(ctx context.Context, req mcp.CallToolRequest
 	if s.scopeFiltersActive(ctx) {
 		kept := make([]analysis.DeadCodeEntry, 0, len(entries))
 		for _, e := range entries {
-			if s.analyzeNodeVisible(ctx, s.graph.GetNode(e.ID)) {
+			if s.analyzeNodeVisible(ctx, reader.GetNode(e.ID)) {
 				kept = append(kept, e)
 			}
 		}
@@ -2491,7 +2543,7 @@ func buildDeadCodeNote(opts analysis.FindDeadCodeOptions) string {
 
 func (s *Server) handleFindHotspots(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Check minimum graph size
-	if s.graph.NodeCount() < 10 {
+	if s.readerFor(ctx).NodeCount() < 10 {
 		return mcp.NewToolResultError("codebase too small for meaningful hotspot analysis (need at least 10 symbols)"), nil
 	}
 
@@ -2533,9 +2585,10 @@ func (s *Server) handleFindHotspots(ctx context.Context, req mcp.CallToolRequest
 	// repo allow-set here (also closing the latent cross-workspace leak).
 	// Strict no-op for an unbound session with no RepoAllow.
 	if s.scopeFiltersActive(ctx) {
+		reader := s.readerFor(ctx)
 		kept := make([]analysis.HotspotEntry, 0, len(entries))
 		for _, e := range entries {
-			if s.analyzeNodeVisible(ctx, s.graph.GetNode(e.ID)) {
+			if s.analyzeNodeVisible(ctx, reader.GetNode(e.ID)) {
 				kept = append(kept, e)
 			}
 		}
@@ -2595,11 +2648,17 @@ func (s *Server) handleFindHotspots(ctx context.Context, req mcp.CallToolRequest
 // resolve file paths through the multi-repo aware Server.resolveGraphPath
 // instead of relying on a single Indexer.RootPath which is empty in
 // multi-repo mode.
-type scaffoldReader struct{ s *Server }
+// The reader carries the request it was built for: analysis.SourceReader takes
+// no context, and path resolution needs one to place a path in the checkout the
+// request reads.
+type scaffoldReader struct {
+	s   *Server
+	ctx context.Context
+}
 
 func (r scaffoldReader) Graph() graph.Store { return r.s.graph }
 func (r scaffoldReader) ResolveFilePath(graphPath string) string {
-	abs, err := r.s.resolveGraphPath(graphPath)
+	abs, err := r.s.resolveGraphPath(r.ctx, graphPath)
 	if err != nil {
 		return ""
 	}
@@ -2622,7 +2681,7 @@ func (s *Server) handleScaffold(ctx context.Context, req mcp.CallToolRequest) (*
 		dryRun = v
 	}
 
-	result, err := analysis.GenerateScaffold(s.engine, scaffoldReader{s}, exampleID, newName)
+	result, err := analysis.GenerateScaffold(s.engine, scaffoldReader{s: s, ctx: ctx}, exampleID, newName)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -2672,8 +2731,9 @@ func (s *Server) handleScaffold(ctx context.Context, req mcp.CallToolRequest) (*
 // crosses the boundary is dropped rather than leaking its out-of-scope
 // members.
 func (s *Server) cycleVisible(ctx context.Context, c analysis.Cycle) bool {
+	reader := s.readerFor(ctx)
 	for _, id := range c.Path {
-		if !s.analyzeNodeVisible(ctx, s.graph.GetNode(id)) {
+		if !s.analyzeNodeVisible(ctx, reader.GetNode(id)) {
 			return false
 		}
 	}
@@ -2683,9 +2743,9 @@ func (s *Server) cycleVisible(ctx context.Context, c analysis.Cycle) bool {
 func (s *Server) handleFindCycles(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	scope := req.GetString("scope", "")
 
-	cycles := analysis.DetectCycles(s.graph, s.getCommunities(), scope)
+	cycles := analysis.DetectCycles(s.readerFor(ctx), s.getCommunities(), scope)
 
-	// cycles reads s.graph directly, bypassing the scoped-node accessors,
+	// cycles reads the whole graph directly, bypassing the scoped-node accessors,
 	// so narrow here to the session workspace + optional repo allow-set.
 	// A cycle is kept only when EVERY node on its path is visible, so a
 	// chain that crosses the boundary is dropped rather than leaking its
@@ -2757,15 +2817,17 @@ func (s *Server) handleWouldCreateCycle(ctx context.Context, req mcp.CallToolReq
 		return mcp.NewToolResultError("to_id is required"), nil
 	}
 
-	// Validate both symbols exist
-	if s.graph.GetNode(fromID) == nil {
+	// Validate both symbols exist — against the request's reader, so a
+	// symbol that only exists in the caller's buffer is not rejected.
+	reader := s.readerFor(ctx)
+	if reader.GetNode(fromID) == nil {
 		return mcp.NewToolResultError("symbol not found: " + fromID), nil
 	}
-	if s.graph.GetNode(toID) == nil {
+	if reader.GetNode(toID) == nil {
 		return mcp.NewToolResultError("symbol not found: " + toID), nil
 	}
 
-	wouldCycle, path := analysis.WouldCreateCycle(s.graph, fromID, toID)
+	wouldCycle, path := analysis.WouldCreateCycle(reader, fromID, toID)
 
 	if s.isGCX(ctx, req) {
 		return s.gcxResponseWithBudget(req)(encodeAnalyze("would_create_cycle", map[string]any{
@@ -2825,7 +2887,7 @@ func (s *Server) handleDiffContext(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(rootErr.Error()), nil
 	}
 
-	diff, err := analysis.MapGitDiff(s.graph, repoRoot, repoPrefix, scope, baseRef)
+	diff, err := analysis.MapGitDiff(s.readerFor(ctx), repoRoot, repoPrefix, scope, baseRef)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -2840,10 +2902,13 @@ func (s *Server) handleDiffContext(ctx context.Context, req mcp.CallToolRequest)
 	communities := s.getCommunities()
 	processes := s.getProcesses()
 
-	// Build enriched symbol info
+	// Build enriched symbol info. The lookups run on the request's
+	// reader, matching the caller/chain walks below which already go
+	// through the request's engine.
+	reader := s.readerFor(ctx)
 	var allSymbols []diffSymbolInfo
 	for _, cs := range diff.ChangedSymbols {
-		node := s.graph.GetNode(cs.ID)
+		node := reader.GetNode(cs.ID)
 		if node == nil {
 			continue
 		}
@@ -2862,7 +2927,7 @@ func (s *Server) handleDiffContext(ctx context.Context, req mcp.CallToolRequest)
 
 		// Source
 		if node.StartLine > 0 && node.EndLine > 0 {
-			if absPath, err := s.resolveNodePath(node); err == nil {
+			if absPath, err := s.resolveNodePath(ctx, node); err == nil {
 				if source, _, _, readErr := readLines(absPath, node.StartLine, node.EndLine, 0); readErr == nil {
 					info.Source = source
 				}
@@ -2904,7 +2969,7 @@ func (s *Server) handleDiffContext(ctx context.Context, req mcp.CallToolRequest)
 	fileMap := make(map[string][]diffSymbolInfo)
 	for _, sym := range allSymbols {
 		fp := ""
-		if n := s.graph.GetNode(sym.ID); n != nil {
+		if n := reader.GetNode(sym.ID); n != nil {
 			fp = n.FilePath
 		}
 		if fp == "" {
@@ -2921,7 +2986,7 @@ func (s *Server) handleDiffContext(ctx context.Context, req mcp.CallToolRequest)
 		for i, sym := range syms {
 			symbolIDs[i] = sym.ID
 		}
-		impact := analysis.AnalyzeImpact(s.graph, symbolIDs, communities, processes)
+		impact := analysis.AnalyzeImpact(reader, symbolIDs, communities, processes)
 
 		groups = append(groups, diffFileGroup{
 			FilePath: fp,
@@ -3004,6 +3069,9 @@ func (s *Server) handleIndexHealth(ctx context.Context, req mcp.CallToolRequest)
 		s.refreshIndexHealthInBackground()
 		result, updatedAt, refreshing = s.indexHealthSnapshot()
 	}
+	if result != nil {
+		result = s.refreshIndexHealthFileFailures(ctx, result)
+	}
 
 	if isCompact(req) {
 		if result == nil {
@@ -3063,6 +3131,14 @@ const healthOrphanSampleLimit = 3
 // the daemon finishing a scan for nobody, holding a transport slot the whole
 // time.
 func (s *Server) buildIndexHealthPayloadCtx(ctx context.Context) (map[string]any, error) {
+	baseline, err := s.buildIndexHealthBasePayloadCtx(ctx)
+	if err != nil || baseline == nil {
+		return baseline, err
+	}
+	return s.refreshIndexHealthFileFailures(ctx, baseline), nil
+}
+
+func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string]any, error) {
 	if s.indexer == nil {
 		return nil, nil
 	}
@@ -3201,7 +3277,7 @@ func (s *Server) buildIndexHealthPayloadCtx(ctx context.Context) (map[string]any
 
 	var recommendation string
 	if healthScore < 80 {
-		recommendation = "Health score below 80%. Run index_repository with path \".\" to re-index the codebase."
+		recommendation = indexHealthLowScoreRecommendation
 	}
 	if !orphans.Clean() {
 		msg := "Graph holds nodes for files that no longer exist on disk (" + orphans.Summary() + "). " +
@@ -3331,19 +3407,78 @@ func (s *Server) buildIndexHealthPayloadCtx(ctx context.Context) (map[string]any
 	}
 
 	result := map[string]any{
-		"health_score":         healthScore,
-		"total_detected":       totalDetected,
-		"successfully_indexed": successfullyIndexed,
-		"language_coverage":    langCoverage,
-		"last_index_time":      lastIndexStr,
-		"node_count":           stats.TotalNodes,
-		"edge_count":           stats.TotalEdges,
-		"edges_ok":             edgesOK,
-		"nodes_per_file":       nodesPerFile,
+		"health_score":                healthScore,
+		"total_detected":              totalDetected,
+		"successfully_indexed":        successfullyIndexed,
+		"language_coverage":           langCoverage,
+		"last_index_time":             lastIndexStr,
+		"node_count":                  stats.TotalNodes,
+		"edge_count":                  stats.TotalEdges,
+		"edges_ok":                    edgesOK,
+		"nodes_per_file":              nodesPerFile,
+		"file_node_count":             fileNodes,
+		indexHealthLivenessCeilingKey: orphans.LiveScore(),
 		// Shape-degradation guard firings since process start. Nonzero means
 		// the daemon caught (and self-healed) a live-patch or boot-reload
 		// resolution regression rather than silently serving a shrunken graph.
 		"resolution_regressions": indexer.ResolutionRegressions(),
+	}
+	// Query-planner statistics. Read-only on purpose: this payload is served
+	// from a cached snapshot rebuilt in the background, and a health report
+	// that issued an ANALYZE as a side effect would make observing the store
+	// change it. The refresh belongs to the index / resolve / publish paths.
+	if planner, ok := graph.MaybePlannerStatsHealth(ctx, s.graph); ok {
+		plannerStats := map[string]any{
+			"nodes": map[string]any{
+				"believed":             planner.Nodes.Believed,
+				"actual_from_counters": planner.Nodes.Actual,
+				"counters_known":       planner.Nodes.Known,
+			},
+			"edges": map[string]any{
+				"believed":             planner.Edges.Believed,
+				"actual_from_counters": planner.Edges.Actual,
+				"counters_known":       planner.Edges.Known,
+			},
+			"stale": planner.Stale,
+		}
+		// Omitted rather than zeroed when the receiver index is not in the
+		// schema — a bulk load has dropped it, or this store never had it.
+		// believed=0 / actual=0 there would read as "the Go receiver index is
+		// empty", which is the exact misreading the poisoned zero stat row of
+		// issue #651 causes in the planner itself.
+		if planner.Receivers.Present {
+			plannerStats["receivers"] = map[string]any{
+				"believed": planner.Receivers.Believed,
+				"actual":   planner.Receivers.Actual,
+				"bounded":  planner.Receivers.Bounded,
+				// The probe is capped, so `actual` can be a truncated lower
+				// bound. complete=false says the question could not be asked
+				// in full and the two figures must not be compared.
+				"complete": planner.Receivers.Known,
+			}
+		}
+		// Every verdict, not just a stale one. The non-stale reasons are the
+		// ones a reader most needs: "bulk_window_active" is why the numbers
+		// below it are all zero, and without it the payload looks like a
+		// store whose planner believes nothing.
+		if planner.Reason != "" {
+			plannerStats["reason"] = planner.Reason
+		}
+		if !planner.LastRefreshAt.IsZero() {
+			plannerStats["last_refresh_at"] = planner.LastRefreshAt.UTC().Format(time.RFC3339)
+			plannerStats["last_refresh_reason"] = planner.LastRefreshReason
+		}
+		result["planner_stats"] = plannerStats
+		if planner.Stale {
+			msg := "SQLite planner statistics are stale (" + planner.Reason + "): the graph has grown past what the query " +
+				"planner believes, which can invert join order on receiver/edge queries. They refresh automatically at the " +
+				"next repository index, commit/HEAD move, whole-graph resolve or generation build."
+			if recommendation == "" {
+				recommendation = msg
+			} else {
+				recommendation = msg + " " + recommendation
+			}
+		}
 	}
 	if prefixAuditOK {
 		ownership := map[string]any{
@@ -3841,7 +3976,7 @@ func batchEditItemsSchema() map[string]any {
 				"properties": map[string]any{
 					"op":              map[string]any{"const": "move_file"},
 					"source":          map[string]any{"type": "string", "description": "Existing source path (repo-relative or absolute)."},
-					"destination":     map[string]any{"type": "string", "description": "Non-existing destination path in the same indexed repository."},
+					"destination":     map[string]any{"type": "string", "description": "Non-existing destination path inside an indexed repository."},
 					"expected_sha256": map[string]any{"type": "string", "pattern": "^[0-9a-fA-F]{64}$", "description": "Optional SHA-256 precondition for the complete source bytes."},
 				},
 				"required": []any{"op", "source", "destination"},
@@ -4036,7 +4171,7 @@ func (s *Server) applyBatchSymbolEdit(ctx context.Context, edit batchEditItem, w
 		res.Status, res.Error = "failed", "symbol has no line range"
 		return res
 	}
-	absPath, resolveErr := s.resolveNodePath(node)
+	absPath, resolveErr := s.resolveNodePath(ctx, node)
 	if resolveErr != nil {
 		res.Status, res.Error = "failed", resolveErr.Error()
 		return res
@@ -4163,7 +4298,7 @@ func (s *Server) applyBatchFileEdit(ctx context.Context, edit batchEditItem, wri
 		res.Status, res.Error = "failed", "old_string and new_string are identical"
 		return res
 	}
-	absPath, relPath, resolveErr := s.resolveFilePath(edit.Path)
+	absPath, relPath, resolveErr := s.resolveFilePath(ctx, edit.Path)
 	if resolveErr != nil {
 		res.Status, res.Error = "failed", resolveErr.Error()
 		return res
@@ -4628,6 +4763,8 @@ func (s *Server) handleValidateContracts(ctx context.Context, req mcp.CallToolRe
 	// indexer attaches it during commitContracts (see
 	// snapshotContractShapes in internal/indexer/indexer.go).
 	lookup := contracts.ShapeLookup(func(symbolID string) *contracts.Shape {
+		// Base read on purpose: only the indexer stamps the shape meta this
+		// reads, so no other view can carry it.
 		n := s.graph.GetNode(symbolID)
 		if n == nil || n.Meta == nil {
 			return nil
@@ -5073,7 +5210,11 @@ func (s *Server) handleAuditAgentConfig(ctx context.Context, req mcp.CallToolReq
 		})
 	}
 
+	// The audit scans config files on disk against the indexed corpus, so its
+	// stale-ref verdicts are computed over the base corpus even when the
+	// request carries an overlay or a routed view, and say so under one.
 	report := audit.Audit(s.graph, root, files)
+	annotateBaseScoped(ctx, graphview.CapSyntaxGraph)
 
 	if isCompact(req) {
 		var b strings.Builder
@@ -5097,11 +5238,22 @@ func (s *Server) handleAuditAgentConfig(ctx context.Context, req mcp.CallToolReq
 	return s.respondJSONOrTOON(ctx, req, report)
 }
 
-// coverageByID batch-loads the coverage sidecar (change A) into an
-// id->row map; nil when the backend lacks the capability (callers then
-// fall back to Node.Meta). One read per handler call, not per-node.
+// coverageByID batch-loads the coverage sidecar off the base store.
+// Handlers that must honour the caller's buffers pass their request
+// reader to coverageRowsByID instead.
 func (s *Server) coverageByID() map[string]graph.CoverageEnrichment {
-	r, ok := s.graph.(graph.CoverageEnrichmentReader)
+	return coverageRowsByID(s.graph)
+}
+
+// coverageRowsByID batch-loads the coverage sidecar (change A) into an
+// id->row map; nil when the reader lacks the capability (callers then
+// fall back to Node.Meta). One read per handler call, not per-node.
+//
+// An overlay view has no sidecar, so an overlay-active request gets nil
+// and each row falls back to the node's own meta — the buffer's symbols
+// simply carry no coverage rather than borrowing the indexed numbers.
+func coverageRowsByID(g graph.Reader) map[string]graph.CoverageEnrichment {
+	r, ok := g.(graph.CoverageEnrichmentReader)
 	if !ok {
 		return nil
 	}
@@ -5125,10 +5277,12 @@ func coveragePctFrom(cov map[string]graph.CoverageEnrichment, n *graph.Node) (fl
 	return 0, false
 }
 
-// releaseByID batch-loads the release sidecar (change A) into an
-// id->tag map; nil when the backend lacks the capability.
-func (s *Server) releaseByID() map[string]string {
-	r, ok := s.graph.(graph.ReleaseEnrichmentReader)
+// releaseRowsByID batch-loads the release sidecar (change A) into an
+// id->tag map; nil when the reader lacks the capability. An overlay
+// view has none, so an overlay-active request falls back to each
+// node's meta.
+func releaseRowsByID(g graph.Reader) map[string]string {
+	r, ok := g.(graph.ReleaseEnrichmentReader)
 	if !ok {
 		return nil
 	}
@@ -5156,7 +5310,7 @@ func addedInFrom(rel map[string]string, n *graph.Node) (string, bool) {
 
 // blameRowsByID batch-loads the blame sidecar (change A) into an
 // id->row map; nil when the backend lacks the capability.
-func blameRowsByID(g graph.Store) map[string]graph.BlameEnrichment {
+func blameRowsByID(g graph.Reader) map[string]graph.BlameEnrichment {
 	r, ok := g.(graph.BlameEnrichmentReader)
 	if !ok {
 		return nil

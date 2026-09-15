@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -246,7 +245,7 @@ func (idx *Indexer) incrementalEvictWatcherPath(path string) (nodesRemoved, edge
 	// Captured BEFORE eviction: deleting a global-usings file (or a
 	// csproj, which draws the unit boundaries) removes visibility every
 	// dependent's extension bind was narrowed under.
-	graphPath := idx.prefixPath(filepath.FromSlash(path))
+	graphPath := idx.prefixPath(path)
 	evictedGlobals := csharpVisibilityStampForNodes(idx.graph.GetFileNodes(graphPath)).globals != "" ||
 		strings.HasSuffix(strings.ToLower(graphPath), ".csproj")
 
@@ -310,6 +309,7 @@ func (idx *Indexer) incrementalWatcherPaths(root string, paths []string, mode in
 			}
 			idx.resolver.ResolveFilesAndIncoming(frontier)
 		})
+		idx.resolveReceiptNamePendings(receipt)
 	} else if needed && !exact {
 		idx.observeIncrementalCatchup("resolve", nil)
 		idx.ResolveAll()
@@ -325,6 +325,18 @@ func (idx *Indexer) incrementalWatcherPaths(root string, paths []string, mode in
 	}
 	topologyChanged = incrementalTopologyChanged(result)
 	return result, nil
+}
+
+// resolveReceiptNamePendings rebinds pending references parked under the
+// unresolved stubs of names an exact receipt recorded (evicted definitions):
+// those references are reachable by name only, never by file frontier — the
+// definition's file no longer declares the name, so the file-scoped incoming
+// pass above cannot enumerate their stub.
+func (idx *Indexer) resolveReceiptNamePendings(receipt *graph.MutationReceipt) {
+	if receipt == nil || !receipt.Complete || len(receipt.EvictedNames) == 0 || idx.resolver == nil {
+		return
+	}
+	idx.resolver.ResolveIncomingForNames(receipt.EvictedNames, []string{idx.repoPrefix})
 }
 
 func (w *Watcher) reindexStormPaths(paths []string) (*IndexResult, error) {
@@ -383,8 +395,14 @@ func (mi *MultiIndexer) resolveIncrementalRepoMutationMode(
 			mi.runMasterResolveFiles(frontier, false)
 		})
 		crossRepoFiles = appendUniqueSorted(crossRepoFiles, resolvedFiles...)
+		if receipt != nil && receipt.Complete {
+			mi.runMasterResolveNames(receipt.EvictedNames)
+		}
 	} else if needed && len(files) > 0 {
 		mi.runMasterResolveFiles(files, false)
+		if receipt != nil && receipt.Complete {
+			mi.runMasterResolveNames(receipt.EvictedNames)
+		}
 	} else if needed {
 		scope := map[string]struct{}{repoPrefix: {}}
 		if repoPrefix == "" {

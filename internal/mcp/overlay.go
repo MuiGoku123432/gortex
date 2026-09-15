@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zzet/gortex/internal/daemon"
+	"github.com/zzet/gortex/internal/graphview"
 )
 
 // SetOverlayManager wires the editor-overlay manager into the MCP
@@ -119,6 +120,22 @@ func (s *Server) wrapToolHandlerMode(h mcpserver.ToolHandlerFunc, injectOverlay 
 				retErr = nil
 			}
 		}()
+		// The view argument is request context, not a tool parameter: it is
+		// read and stripped here so every tool honours it and no handler or
+		// schema has to know about it. Stripping precedes reconciliation so
+		// the alias matcher cannot rewrite it into a tool's own parameter.
+		requireExactView := requestRequiresExactCheckoutView(&req)
+		selector, selectorErr := takeViewSelector(&req)
+		if selectorErr != nil {
+			return mcp.NewToolResultError(selectorErr.Error()), nil
+		}
+		// The capability contract travels on the same seam and for the same
+		// reason: what a caller needs the view to be able to answer is a
+		// property of the request, not a parameter of any one tool.
+		capabilities, capabilitiesErr := takeCapabilityRequest(&req)
+		if capabilitiesErr != nil {
+			return mcp.NewToolResultError(capabilitiesErr.Error()), nil
+		}
 		// Tolerate hallucinated / mistyped parameter names before the
 		// handler reads arguments (e.g. "symbol" accepted as "id").
 		s.reconcileToolParams(&req)
@@ -140,7 +157,72 @@ func (s *Server) wrapToolHandlerMode(h mcpserver.ToolHandlerFunc, injectOverlay 
 		// handler chain, but its warn rider must attach AFTER the decorators
 		// below (see attachPendingArgGuardRider).
 		ctx = withArgGuardRiderSlot(ctx)
-		if injectOverlay {
+		// Which view answers this request: the selector the caller named, the
+		// checkout its cwd sits in, or the base corpus. Resolved before the
+		// overlay so a session's editor buffers layer on top of whatever
+		// answers here. The lease the materialized view holds is released
+		// with the request, on the same lifecycle that discards the overlay.
+		// A facade call is lowered to its legacy name once here; both of the
+		// gates below read that name rather than resolving it twice.
+		legacyName, _ := s.legacyToolName(&req)
+		controlOperation := checkoutControlOperationName(legacyName)
+		if controlOperation != "" {
+			control, controlErr := s.resolveCheckoutControlScope(ctx, selector, &req)
+			if controlErr != nil {
+				return mcp.NewToolResultError(controlErr.Error()), nil
+			}
+			ctx = withCheckoutControl(ctx, control)
+		}
+		// Catalog authority that needs no view at all: a recovery or receipt
+		// read that must stay reachable while publication is pending, and the
+		// tools that must not be hostage to the binding they exist to fix.
+		viewless := catalogOnlyCheckoutControl(controlOperation) || viewlessCatalogTool(legacyName)
+		var view *requestView
+		if !viewless {
+			var viewErr error
+			view, viewErr = s.resolveRequestView(ctx, selector, s.requestViewPolicy(&req))
+			if viewErr != nil {
+				control := checkoutControlFromContext(ctx)
+				if controlOperation != "detect_changes" || control == nil || !control.CheckoutScoped {
+					return mcp.NewToolResultError(viewErr.Error()), nil
+				}
+				// A pending graph cannot certify symbol impact. The detect handler
+				// can still report this checkout's Git file changes, explicitly
+				// incomplete, without substituting the primary's working tree.
+				view, _ = viewFallback(false, graphview.NewViewRider(control.Selector), viewErr)
+				view.rider.CheckoutID = control.Checkout.CheckoutID
+				view.rider.GraphID = control.GraphID
+			}
+		}
+		if view != nil {
+			ctx = withRequestView(ctx, view)
+			defer view.close()
+		}
+		if requireExactView && view != nil && view.rider != nil && !view.rider.Exact {
+			return mcp.NewToolResultError(graphview.NewViewError(graphview.CodeViewBuilding,
+				"the requested exact checkout view is unavailable; retry after publication; no fallback was served").Error()), nil
+		}
+		// Approved source tools serialize with the selected checkout's index
+		// coordinator. The lease does not invalidate or rebuild for dry runs;
+		// the shared disk-commit and reindex helpers perform those steps.
+		mutationCtx, releaseMutation, mutationErr := s.prepareRoutedViewMutation(ctx, &req)
+		if mutationErr != nil {
+			return mutationErr, nil
+		}
+		ctx = mutationCtx
+		defer releaseMutation()
+		if refused := s.refuseRoutedViewMutation(ctx, req.Params.Name); refused != nil {
+			return refused, nil
+		}
+		// What the view can answer, checked against what this operation
+		// needs, before the handler runs — a thin view must refuse rather
+		// than answer thinly and look complete doing it.
+		if !viewless {
+			if refused := s.evaluateRequestCapabilities(ctx, &req, capabilities); refused != nil {
+				return refused, nil
+			}
+		}
+		if injectOverlay && !viewless && view.acceptsBufferOverlay() {
 			var err error
 			ctx, _, err = s.prepareOverlayRequest(ctx)
 			if err != nil {
@@ -172,6 +254,14 @@ func (s *Server) wrapToolHandlerMode(h mcpserver.ToolHandlerFunc, injectOverlay 
 			qStart = time.Now()
 		}
 		res, hErr := h(ctx, req)
+		// Book the retrieval half of the savings ledger for a DIRECT legacy
+		// call. Facade calls do not reach here under their legacy name — the
+		// facade holds the unwrapped handler (prepareTool) and books in
+		// invokeFacadeSpec — and facade names are not in the allow-list, so
+		// the two paths cannot double-count.
+		if hErr == nil {
+			s.recordRetrievalSavings(ctx, req.Params.Name, res)
+		}
 		// Opt-in usage telemetry: count this tool invocation by name only —
 		// never arguments or results. nil-safe, consent-gated, and fail-silent,
 		// so a disabled or absent recorder adds nothing to the dispatch path.
@@ -194,6 +284,11 @@ func (s *Server) wrapToolHandlerMode(h mcpserver.ToolHandlerFunc, injectOverlay 
 				// or vanished on disk is flagged with per-repo provenance.
 				res = s.decorateListResultWithFreshness(res)
 			}
+			// Which view answered rides in that same block: a response that
+			// came from somewhere other than the base — or fell back to it —
+			// must say so where the caller already looks for provenance.
+			res = s.attachViewRider(ctx, res)
+			res = s.attachCheckoutControlScope(ctx, res)
 		}
 		// The arg guard's warn rider lands here — after the warming and
 		// freshness decorators, both of which rebuild the text result from

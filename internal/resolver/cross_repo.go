@@ -3,7 +3,6 @@ package resolver
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -158,6 +157,50 @@ type CrossRepoResolver struct {
 	edgesEnabled bool
 	prober       RemoteDeclarationProber
 	proxyBudget  int
+
+	// retargetedTestCallFiles mirrors Resolver.retargetedTestCallFiles for
+	// the cross-repository pass: caller files of test-classified calls this
+	// pass bound, drained via TakeRetargetedTestCallFiles so the indexer
+	// can reconcile their tests projections.
+	retargetedMu            sync.Mutex
+	retargetedTestCallFiles map[string]struct{}
+}
+
+// noteRetargetedCall mirrors Resolver.noteRetargetedCall for the
+// cross-repository pass.
+func (cr *CrossRepoResolver) noteRetargetedCall(e *graph.Edge) {
+	if e == nil || e.Kind != graph.EdgeCalls || e.FilePath == "" {
+		return
+	}
+	if graph.IsUnresolvedTarget(e.To) {
+		return
+	}
+	if !isTestFilePath(e.FilePath) && !nodeStampedTest(cr.cachedGetNode(e.From)) {
+		return
+	}
+	cr.retargetedMu.Lock()
+	if cr.retargetedTestCallFiles == nil {
+		cr.retargetedTestCallFiles = make(map[string]struct{})
+	}
+	cr.retargetedTestCallFiles[e.FilePath] = struct{}{}
+	cr.retargetedMu.Unlock()
+}
+
+// TakeRetargetedTestCallFiles drains the accumulated test-caller frontier,
+// sorted for determinism.
+func (cr *CrossRepoResolver) TakeRetargetedTestCallFiles() []string {
+	cr.retargetedMu.Lock()
+	defer cr.retargetedMu.Unlock()
+	if len(cr.retargetedTestCallFiles) == 0 {
+		return nil
+	}
+	files := make([]string, 0, len(cr.retargetedTestCallFiles))
+	for file := range cr.retargetedTestCallFiles {
+		files = append(files, file)
+	}
+	cr.retargetedTestCallFiles = nil
+	sort.Strings(files)
+	return files
 }
 
 // NewCrossRepo creates a CrossRepoResolver for the given graph.
@@ -655,7 +698,7 @@ func (cr *CrossRepoResolver) resolveScopedLocked(edges []*graph.Edge) *CrossRepo
 // used by resolveImport — the only resolution path that previously
 // scanned every node per edge.
 //
-//   - dirIndex     keys on filepath.Dir(file.FilePath) for exact matches
+//   - dirIndex     keys on filePathDir(file.FilePath) for exact matches
 //     (importPath equal to the file's directory).
 //   - lastDirIndex keys on the last path component of that directory,
 //     covering the common case where an import path is a single name
@@ -667,7 +710,7 @@ func (cr *CrossRepoResolver) buildDirIndexes() {
 	cr.dirIndex = make(map[string][]graph.FileNodeIdentity, 128)
 	cr.lastDirIndex = make(map[string][]graph.FileNodeIdentity, 128)
 	for file := range graph.FileNodeIdentitiesSeq(cr.graph, nil) {
-		dir := filepath.Dir(file.FilePath)
+		dir := filePathDir(file.FilePath)
 		cr.dirIndex[dir] = append(cr.dirIndex[dir], file)
 		last := lastPathComponent(dir)
 		if last != "" && last != dir {
@@ -1043,6 +1086,12 @@ func (cr *CrossRepoResolver) cachedFindNodesByQualName(qualName string) []*graph
 
 func (cr *CrossRepoResolver) resolveEdge(e *graph.Edge, stats *CrossRepoStats, batch *[]graph.EdgeReindex) {
 	oldTo := e.To
+	// Shared with the master resolver: a derived tests clone is never
+	// bound independently on any path (see resolutionExempt).
+	if resolutionExempt(e) {
+		stats.Unresolved++
+		return
+	}
 	// UnresolvedName handles BOTH the bare `unresolved::X` and the
 	// multi-repo `<repo>::unresolved::X` forms; a plain TrimPrefix only
 	// strips the bare form, leaving prefixed stubs (which fix-1's widened
@@ -1082,6 +1131,7 @@ func (cr *CrossRepoResolver) resolveEdge(e *graph.Edge, stats *CrossRepoStats, b
 
 	if e.To != oldTo {
 		*batch = append(*batch, graph.EdgeReindex{Edge: e, OldTo: oldTo})
+		cr.noteRetargetedCall(e)
 	}
 }
 
@@ -1216,6 +1266,14 @@ func (cr *CrossRepoResolver) resolveFunctionCall(e *graph.Edge, funcName string,
 	// instead of resolveMethodCall — the member_call evidence in Meta
 	// still marks it as a member-gate verdict.
 	if mc, _ := e.Meta["member_call"].(bool); mc && cr.csharpVerdictCaller(e) {
+		stats.Unresolved++
+		return
+	}
+	// A C# simple name the caller's own declaration space binds (local
+	// function, delegate parameter, local) has no in-graph callee; the
+	// per-repo pass left it unresolved on purpose and the same-repo tier
+	// below must not overturn that with a name-only pick.
+	if csharpLocalShadowed(e) {
 		stats.Unresolved++
 		return
 	}
@@ -1361,7 +1419,7 @@ func (cr *CrossRepoResolver) resolveImport(e *graph.Edge, importPath string, sta
 		// `*/bindings/go` directory sorts first. Collect every match so
 		// the workspace-aware pick below can prefer the importer's own
 		// workspace instead of the first one encountered.
-		if dirMatchesImport(filepath.Dir(file.FilePath), importPath) {
+		if dirMatchesImport(filePathDir(file.FilePath), importPath) {
 			crossRepoAll = append(crossRepoAll, file)
 		}
 	}
@@ -1385,7 +1443,7 @@ func (cr *CrossRepoResolver) resolveImport(e *graph.Edge, importPath string, sta
 		}
 	} else {
 		for file := range graph.FileNodeIdentitiesSeq(cr.graph, nil) {
-			dir := filepath.Dir(file.FilePath)
+			dir := filePathDir(file.FilePath)
 			if strings.HasSuffix(dir, lastPathComponent(importPath)) || dir == importPath {
 				consider(file)
 				if stop() {

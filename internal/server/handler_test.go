@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -53,6 +54,14 @@ func newTestHandler(t *testing.T) *Handler {
 
 func TestHealthEndpoint(t *testing.T) {
 	h := newTestHandler(t)
+	// Uptime is reported from the handler's start instant, so backdate it
+	// rather than race the clock for a positive reading. Windows advances
+	// the runtime's monotonic clock in ~0.5-15.6 ms ticks, and a handler
+	// this test builds microseconds before the request still lands inside
+	// the tick it started in: time.Since returns exactly 0 there and the
+	// old "> 0" assertion failed on a correct handler.
+	const uptime = 3 * time.Second
+	h.startTime = time.Now().Add(-uptime)
 	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -65,7 +74,7 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.True(t, resp.Indexed)
 	assert.Equal(t, 2, resp.Nodes)
 	assert.Equal(t, "0.0.1-test", resp.Version)
-	assert.Greater(t, resp.UptimeSeconds, float64(0))
+	assert.GreaterOrEqual(t, resp.UptimeSeconds, uptime.Seconds())
 }
 
 func TestListToolsEndpoint(t *testing.T) {
@@ -144,6 +153,39 @@ func TestToolCallUnknownTool(t *testing.T) {
 	available, ok := resp["available_tools"].([]any)
 	require.True(t, ok)
 	assert.Contains(t, available, "echo")
+}
+
+// TestToolCallAnalyzeAliasedKindRoutesThroughFacade pins the HTTP-facing
+// contract: POST /v1/tools/analyze with kind=processes reaches the facade
+// (which routes to the captured legacy handler) without any registry
+// promotion. This is the dashboard's /v1/processes path under core/defer.
+func TestToolCallAnalyzeAliasedKindRoutesThroughFacade(t *testing.T) {
+	h := newTestHandler(t)
+	legacyCalled := false
+	h.mcpServer.AddTool(
+		mcp.NewTool("analyze", mcp.WithDescription("dispatcher"),
+			mcp.WithString("kind", mcp.Required())),
+		func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			kind, _ := req.GetArguments()["kind"].(string)
+			if kind == "processes" {
+				legacyCalled = true
+				return mcp.NewToolResultText(`{"processes":[]}`), nil
+			}
+			return mcp.NewToolResultError("unknown analyze kind: " + kind), nil
+		},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tools/analyze",
+		strings.NewReader(`{"arguments":{"kind":"processes"}}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, legacyCalled, "analyze kind=processes must reach the legacy handler")
+	var resp ToolResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Content, 1)
+	assert.Contains(t, resp.Content[0].Text, `"processes"`)
 }
 
 func TestToolCallMalformedJSON(t *testing.T) {

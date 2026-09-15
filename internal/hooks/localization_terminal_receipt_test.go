@@ -3,6 +3,7 @@ package hooks
 import (
 	"encoding/json"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -301,7 +302,10 @@ func TestLocalizationAuthPreservesPreToolUsePolicyBranches(t *testing.T) {
 		wantConsulted  bool
 	}{
 		{name: "permissive auto approve", mode: ModeDeny, permissionMode: "auto", wantDecision: "allow"},
-		{name: "consult unlock marker", mode: ModeConsultUnlock, wantConsulted: true},
+		{name: "accept edits auto approve", mode: ModeDeny, permissionMode: "acceptEdits", wantDecision: "allow"},
+		{name: "default preserves prompt", mode: ModeDeny, permissionMode: "default", wantDecision: "ask"},
+		{name: "plan preserves prompt", mode: ModeDeny, permissionMode: "plan", wantDecision: "ask"},
+		{name: "consult unlock marker", mode: ModeConsultUnlock, wantDecision: "ask", wantConsulted: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			configureLocalizationTerminalTestHome(t)
@@ -509,7 +513,9 @@ func TestLocalizationProblemRewriteDirectAndPluginIsIdempotent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := info.Mode().Perm(); got != 0o600 {
+			// Windows has no POSIX mode bits: os.Chmod only toggles the
+			// read-only attribute, so a writable file always reports 0666.
+			if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
 				t.Fatalf("turn state mode = %o, want 600", got)
 			}
 			rawState, err := os.ReadFile(statePath)
@@ -534,6 +540,9 @@ func TestLocalizationProblemRewriteDirectAndPluginIsIdempotent(t *testing.T) {
 				var decoded HookOutput
 				if err := json.Unmarshal([]byte(output), &decoded); err != nil || decoded.HookSpecificOutput == nil {
 					t.Fatalf("invalid PreToolUse output: %v\n%s", err, output)
+				}
+				if got := decoded.HookSpecificOutput.PermissionDecision; got != "ask" {
+					t.Fatalf("rewrite permission decision = %q, want ask", got)
 				}
 				updated := decoded.HookSpecificOutput.UpdatedInput
 				if updated["task"] != problemStatement {
@@ -864,7 +873,7 @@ func captureTerminalAuthToken(
 		t.Fatalf("incompatible PreToolUse auth envelope: %#v", decoded)
 	}
 	hso := decoded.HookSpecificOutput
-	if hso.HookEventName != "PreToolUse" || hso.PermissionDecision != "" || hso.AdditionalContext != "" {
+	if hso.HookEventName != "PreToolUse" || hso.PermissionDecision != "ask" || hso.AdditionalContext != "" {
 		t.Fatalf("auth injection changed hook policy: %#v", hso)
 	}
 	raw, ok := hso.UpdatedInput[localizationauth.ArgumentKey]

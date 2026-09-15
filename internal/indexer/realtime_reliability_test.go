@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtdi/fswatcher"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zzet/gortex/internal/thirdparty/fswatcher"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -469,11 +469,11 @@ func TestWatcher_NewSubdirScanIndexesPreWatchFile(t *testing.T) {
 	require.NoError(t, os.MkdirAll(subdir, 0o755))
 	ext.setFuncs("Buried")
 	writeFile(t, filepath.Join(subdir, "buried.fk"), "buried body")
-	// The graph keys file nodes under OS-native separators (see
-	// graphRelKey), so build the expected key with filepath.Join instead
-	// of a hard-coded "pkg/buried.fk" — the slash form only matches on
-	// POSIX and would spuriously fail this test on Windows.
-	buriedKey := filepath.Join("pkg", "buried.fk")
+	// The graph keys file nodes under the slash-separated repo-relative
+	// spelling relKey mints, on every platform — never filepath.Join's
+	// native form, which would key this file as "pkg\buried.fk" on
+	// Windows and hide it from every other lookup.
+	const buriedKey = "pkg/buried.fk"
 	require.Empty(t, g.GetFileNodes(buriedKey),
 		"the pre-watch file must be absent before the directory scan")
 
@@ -533,34 +533,35 @@ func TestWatcher_DirEventScanGating(t *testing.T) {
 	}
 }
 
-// panicOnReadStore wraps a real Store but panics on GetFileNodes once
-// armed — the shape store_sqlite's panicOnFatal produces when the DB is
-// closed/locked (e.g. mid daemon-restart) or its schema is missing.
+// panicOnReadStore wraps a real Store but emits a typed storage panic from
+// GetFileNodes once armed — the exact operational shape panicOnFatal exposes
+// at legacy Store boundaries.
 type panicOnReadStore struct {
 	graph.Store
-	armed atomic.Bool
+	armed      atomic.Bool
+	panicValue any
 }
 
 func (s *panicOnReadStore) GetFileNodes(p string) []*graph.Node {
 	if s.armed.Load() {
-		panic("simulated fatal store error")
+		panic(s.panicValue)
 	}
 	return s.Store.GetFileNodes(p)
 }
 
-// TestWatcher_PatchPanicRecoveredNotCrash proves the watcher panic
-// firewall: a fatal store error during a debounced patch is recovered
+// TestWatcher_PatchStoragePanicRecoveredNotCrash proves the watcher panic
+// firewall: a typed storage error during a debounced patch is recovered
 // and logged, not propagated out of the timer goroutine to crash the
 // whole daemon. The fsnotify-driven goroutines don't route through the
 // MCP wrapToolHandler firewall, so a closed/locked DB during a restart
 // (panicOnFatal) used to take the process down — the exact shape of the
-// observed crash. Against the pre-firewall code the panic escapes the
-// AfterFunc goroutine and aborts the test binary.
-func TestWatcher_PatchPanicRecoveredNotCrash(t *testing.T) {
+// observed crash. Arbitrary panics are covered separately and still escape.
+func TestWatcher_PatchStoragePanicRecoveredNotCrash(t *testing.T) {
 	ext := &toggleExtractor{}
 	reg := parser.NewRegistry()
 	reg.Register(ext)
-	store := &panicOnReadStore{Store: graph.New()}
+	_, storageErr := indexCtxRawStorageError(t)
+	store := &panicOnReadStore{Store: graph.New(), panicValue: storageErr}
 	idx := New(store, reg, config.IndexConfig{Workers: 1}, zap.NewNop())
 	idx.search = search.NewNull()
 	dir := t.TempDir()
@@ -585,7 +586,7 @@ func TestWatcher_PatchPanicRecoveredNotCrash(t *testing.T) {
 	})
 
 	require.Eventually(t, func() bool {
-		return logs.FilterMessageSnippet("recovered from panic").Len() > 0
+		return logs.FilterMessageSnippet("storage failure in background re-index").Len() > 0
 	}, 2*time.Second, 10*time.Millisecond,
-		"a panic in the debounced patch must be recovered and logged, not crash the daemon")
+		"a storage panic in the debounced patch must be recovered and logged, not crash the daemon")
 }

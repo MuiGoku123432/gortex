@@ -22,6 +22,7 @@ Gortex exposes a knowledge-graph query surface over the [Model Context Protocol]
 - [Code generation](#code-generation)
 - [PR review](#pr-review)
 - [Multi-repo management](#multi-repo-management)
+- [Worktree views and checkouts](#worktree-views-and-checkouts)
 - [Live editor buffers (overlay sessions)](#live-editor-buffers-overlay-sessions)
 - [Speculative execution](#speculative-execution)
 - [MCP resources (18)](#mcp-resources-18)
@@ -281,7 +282,7 @@ over a very large tree, or `ask` against a slow local model.
 | Tool | Description |
 |------|-------------|
 | `get_symbol_source` | Source code of a single symbol (80% fewer tokens than Read). Returns `tokens_saved` per call. `compress_bodies` stubs bodies (with an optional `keep` subset); `max_lines` salience-truncates to a control-flow skeleton |
-| `batch_symbols` | Multiple symbols with source/callers/callees in one call |
+| `batch_symbols` | Multiple symbols with source and a capped 1-hop callers/callees sample (`callers_truncated` / `callees_truncated` mark a cut; full neighbourhood is `get_callers` / `get_call_chain`) |
 | `find_import_path` | Correct import path for a symbol |
 | `explain_change_impact` | Risk-tiered blast radius with affected processes. A zero-edge target carries the same per-symbol `likely_unused` / `possible_extraction_gap` / `coverage_incomplete` caveat as `get_callers` |
 | `get_recent_changes` | Files/symbols changed since timestamp. Rows are clamped to the session workspace and narrowed further by `repo`/`project`/`scope`; each multi-repo row names its `repo` |
@@ -295,6 +296,14 @@ over a very large tree, or `ask` against a slow local model.
 | `safe_delete_symbol` | Atomic dead-code removal with a graph-aware safety gate. A `cascade` parameter (`off` / `preview` / `apply`) drives a fixed-point orphan-propagation pass; cross-workspace and out-of-closure callers (and, by default, test-only callers) disqualify a candidate |
 | `set_planning_mode` | Switch the session between a guaranteed no-writes planning phase and editing mode |
 | `workflow` | Drive a phase-enforcement state machine (explore → implement → verify) — editing tools are gated until the implement phase |
+
+### Symbol refactors versus whole-file lifecycle
+
+`move_symbol` and `safe_delete_symbol` (the facade's `refactor move` / `refactor delete`) relocate or remove **one symbol**, selected by symbol ID. `move_symbol` is Go-only — a non-Go symbol is refused with an explicit unsupported-language error — and a cross-package move rewrites every qualified reference and fixes the imports on both sides, while a same-package move leaves callers untouched. `safe_delete_symbol` works for any indexed language: it computes the referencing edges first and refuses the delete while any remain unless `force` is set, and `propagate` turns that refusal into a per-caller delete-and-patch plan.
+
+`batch_edit`'s `move_file` and `delete_file` operate on a **whole file** of any language and rewrite nothing: no callers, no imports, no symbol analysis. They take a path selector, and source and destination must both resolve inside an indexed repository. A destination is never overwritten — an existing destination fails the transaction — and a symlink source or a destination path with any symlink component below the repository root is refused, so a lifecycle write cannot escape the repository. Optional `expected_sha256` pins the complete source bytes and fails the transaction on drift. The receipt records before/after digests per touched path, and a commit failure rolls every touched file back. Two batch paths that name one file are refused rather than given independent futures — a hard link, a case alias on a case-insensitive filesystem (which is what a case-only rename is), or a symlink and the file it points at. Two destinations that do not exist yet and whose names differ only by case or by Unicode normalisation (NFC versus NFD) — or that are the same name spelled through two paths to one directory — are refused on the same grounds, on every filesystem and even under a directory the batch would create: nothing on disk distinguishes them, so the batch cannot say which file was meant.
+
+`dry_run: true` writes nothing and returns the resolved plan. A lifecycle entry carries `resolved_path` and `source_state`; a `move_file` entry adds `resolved_destination` and `destination_state`. A path state is `{exists, kind, git, ignored}` plus `sha256` on a source that is a regular file — a destination never carries a digest. `git` is `tracked` / `untracked` / `ignored` / `absent` / `unknown` (git unavailable, not a repository, timed out, or a path git refuses to answer for, such as one that crosses a symlinked directory). A content edit is reported only when its path aliases another path in the batch, and then carries `resolved_path` and its status and nothing else. A lifecycle precondition, the destination guard, or the aliasing rule reports `status: "conflict: …"` spelled exactly like the abort it predicts; an argument failure reports `status: "failed: …"` — including an `edit_symbol` item whose file cannot be located because the request has no resolvable root or reads a committed tree, which the real run would refuse the same way; and the top-level `conflicts` counts both. Content edits are not checked against disk until the locked commit, so an absent path, a directory, or an `old_string` that is not there still reports `planned`.
 
 ### Content hashes: five fields, five meanings
 
@@ -444,8 +453,10 @@ Gortex captures every large tool response into a bounded per-session ring; these
 |------|-------------|
 | `analyze` | Unified graph analysis dispatcher. `kind` ∈ `dead_code`, `hotspots`, `cycles`, `would_create_cycle`, `connectivity_health`, `todos`, `blame`, `coverage`, `coverage_gaps`, `coverage_summary`, `stale_code`, `stale_flags`, `ownership`, `releases`, `cgo_users`, `wasm_users`, `orphan_tables`, `unreferenced_tables`, `channel_ops`, `goroutine_spawns`, `field_writers`, `race_writes`, `unclosed_channels`, `unsafe_patterns`, `health_score`, `impact`, `annotation_users`, `config_readers`, `env_var_users`, `sql_call_sites`, `fixes_history`, `edge_audit`, `domain`, `named`, `tests_as_edges`, `clusters`, `event_emitters`, `pubsub`, `string_emitters`, `error_surface`, `log_events`, `sql_rebuild`, `external_calls`, `routes`, `models`, `components`, `k8s_resources`, `images`, `kustomize`, `cross_repo`, `dbt_models`, `synthesizers`, `resolution_outcomes`. `clusters` takes an `algorithm` arg (`leiden` / `louvain` / `spectral`). `impact` takes an optional `target` (`{symbol}` or `{file}`): with one it ranks that target's blast radius — the target row first, then its transitive dependents with their `depth` — and reports the closure width plus whether it is exact; without one it ranks the whole repo. An unresolvable target is a structured error, never a silent fall-back to the repo-wide ranking. `synthesizers` rolls up every framework-dispatch-synthesized edge by the pass that produced it; `resolution_outcomes` classifies unresolved call/reference edges by why the resolver gave up (`ambiguous_multi_match` / `candidate_out_of_scope` / `cross_language_only` / `stub_only` / `no_definition`) |
 | `find_clones` | Near-duplicate function/method clusters from the MinHash + LSH `similar_to` layer; `dead_only: true` finds dead duplicates of live code |
-| `index_health` | Health score, parse failures, stale files, language coverage, tracked-repo path liveness (`tracked_repo_paths_ok` + `missing_repo_paths` — a repo whose directory was deleted still holds its registration and silently drops out of workspace-wide answers), per-(repo, provider) semantic-enrichment lifecycle (`semantic_enrichment`: running / completed / partial / abandoned / failed with edge counts, plus a `semantic_enrichment_ok` rollup) — a green file count with a `partial` enrichment state means LSP-tier edges are incomplete. `path_liveness` asks the same question one level down, per file: it stats the paths the graph itself claims and reports how many indexed files no longer exist on disk (`orphan_files` / `orphan_rate` / `orphans_by_repo`, sampled with `truncated: true` past 20k files). `stale_files` only covers files the daemon still tracks, so a deletion it never witnessed shows up here and nowhere else; a non-zero `orphan_files` caps `health_score` |
+| `index_health` | Health score, parse failures, stale files, language coverage, tracked-repo path liveness (`tracked_repo_paths_ok` + `missing_repo_paths` — a repo whose directory was deleted still holds its registration and silently drops out of workspace-wide answers), per-(repo, provider) semantic-enrichment lifecycle (`semantic_enrichment`: running / completed / partial / abandoned / failed with edge counts, plus a `semantic_enrichment_ok` rollup) — a green file count with a `partial` enrichment state means LSP-tier edges are incomplete. `path_liveness` asks the same question one level down, per file: it stats the paths the graph itself claims and reports how many indexed files no longer exist on disk (`orphan_files` / `orphan_rate` / `orphans_by_repo`, sampled with `truncated: true` past 20k files). `stale_files` only covers files the daemon still tracks, so a deletion it never witnessed shows up here and nowhere else; a non-zero `orphan_files` caps `health_score`. On a SQLite-backed daemon a `planner_stats` object reports the query planner's own view of the store: `nodes` / `edges` carry `believed` (the leading token of the index's `sqlite_stat1` row) against `actual_from_counters` (the `repo_index_state` counter sum across ALL view generations, flagged by `counters_known`; no counter row describes the external-call bucket or nodes carrying no repo prefix, and a leftover empty-prefix row on a store that later became multi-repo is summed on top of the per-repo rows, so the pair is an approximation of index cardinality and a difference between the two is not a measured discrepancy), `receivers` carries a `bounded: true` LIMIT-capped probe of the Go receiver index plus `complete` (false means the probe stopped at its cap, so `actual` is a lower bound and must not be compared with `believed`) and is omitted entirely when the receiver index is not in the schema — a bulk load has dropped it, or this store never had it, and a `believed: 0` there would read as the poisoned near-zero row rather than as an absent index. `stale` says whether the graph has outgrown what the planner believes — which can invert join order on receiver/edge queries — while `reason` names every verdict, staleness or not: `bulk_window_active` is why a cold load in progress reports zeros. `last_refresh_at` / `last_refresh_reason` appear once this process has rebuilt them. The field is read-only: statistics refresh at the next repository index, commit/HEAD move, whole-graph resolve or generation build, never from reading this payload — and that refresh is cooperative, so a busy writer, a spent per-pass budget or a per-index timeout defers the rest of the work to the following boundary (which resumes where the last one stopped) rather than stalling the pipeline that noticed |
 | `get_symbol_history` | Symbols modified this session with counts; flags churning (3+ edits) |
+The `analyze` dispatcher also accepts a set of **facade-aliased kinds** that route to the captured legacy handler instead of the dispatcher switch: `processes` → `get_processes`, `communities` → `get_communities`, `contracts` → `contracts`, `architecture` → `get_architecture`, `clones` → `find_clones`, `health` → `audit_health`, `inspections` → `run_inspections`, `recent_changes` → `get_recent_changes`, and the other entries of the facade analyze migration table (see `mcp-facade-v1.md`). These aliases are **surface-independent**: they work for named (facade-v1), unnamed (legacy), and session-less HTTP callers alike, with no `tools_search` promotion — the HTTP dashboard endpoints depend on this under the `core`/`defer` default.
+
 
 The in-graph coverage tools above (`analyze kind=coverage*`, `index_health` language coverage) have an offline, whole-corpus counterpart for regression testing: the `gortex eval parity` CLI benchmarks per-language *resolved cross-file-dependent* coverage against a frozen baseline and is CI-fenced three ways — a per-language coverage floor, a frozen at-or-beyond-parity language count, and per-feature extraction goldens. See [features.md](features.md#coverage-churn-ownership).
 
@@ -457,6 +468,8 @@ The in-graph coverage tools above (`analyze kind=coverage*`, `index_health` lang
 | `batch_edit` | Atomically apply `edit_symbol`, `edit_file`, `move_file`, and `delete_file` operations with durable rollback receipts |
 | `diff_context` | Git diff enriched with callers, callees, community, processes, per-file risk |
 | `prefetch_context` | Predict needed symbols from task description and recent activity. Accepts `max_bytes` / `max_tokens` budget caps |
+
+`batch_edit` selects each item by `op`: `edit_symbol` {id, old_source, new_source}, `edit_file` {path, old_string, new_string, replace_all?}, `move_file` {source, destination, expected_sha256?}, and `delete_file` {path, expected_sha256?}. The last two are the **whole-file** lifecycle operations — path-selected, language-agnostic, and rewriting no callers, unlike the symbol-selected `move_symbol` / `safe_delete_symbol` (see [Symbol refactors versus whole-file lifecycle](#symbol-refactors-versus-whole-file-lifecycle)). Compact-surface clients reach the same set through `edit(operation:"batch")` with the items under `changes`; `capabilities(domain:"edit", operation:"batch", detail:"schema")` returns one example per `op`.
 
 ## PR review
 
@@ -496,6 +509,128 @@ A graph-grounded pull-request review surface. The forge-data tools self-serve PR
 | `list_scopes` | List every saved repository scope |
 | `delete_scope` | Delete a saved repository scope by name |
 
+## Worktree views and checkouts
+
+A **view** is what one request reads through. The session CWD automatically selects its checkout: an ordinary linked worktree is discovered and represented as an overlay over the family's designated primary, without an explicit `track_repository` call. Explicit tracking is reserved for a user-requested dedicated logical graph. Any request may name a different view explicitly. See [multi-repo.md](multi-repo.md#checkout-families-and-worktree-views) for the storage and lifecycle model.
+
+### The `view` selector
+
+`view` is request context, not a tool parameter: the server reads it off the arguments and strips it before parameter reconciliation and before any handler runs, so every tool honours it and no tool schema declares it.
+
+```jsonc
+// Search the index as it stands on another branch.
+{"name":"search_symbols","arguments":{"query":"Login","view":{"kind":"git_ref","value":"refs/heads/release-2","graph_id":"graph-1f0c…"}}}
+
+// Read a file through one registered worktree.
+{"name":"read_file","arguments":{"path":"internal/auth/login.go","view":{"kind":"worktree","checkout_id":"018f…"}}}
+```
+
+Graph and checkout ids are opaque; `list_checkouts` (CLI: `gortex repos families`) lists them per family alongside the repo prefix each graph serves.
+
+| `kind` | Required field | Selects |
+|---|---|---|
+| `auto` (default when `view` is omitted) | — | the session's own view: its cwd's checkout when that checkout is served automatically, else the base corpus |
+| `base` | `graph_id` | one persisted base graph by id |
+| `worktree` | `checkout_id` | one registered checkout by id, including its working-tree edits |
+| `git_ref` | `value` | the commit a **full** ref points at — under `refs/heads/`, `refs/tags/`, or `refs/remotes/` |
+| `commit` | `value` | one commit by object id — a full lowercase hex oid, 40 (SHA-1) or 64 (SHA-256) characters |
+
+`git_ref` and `commit` also take an optional `graph_id`. `kind`, `graph_id`, `checkout_id` and `value` are the only accepted fields, and each must be a string.
+
+Rules worth knowing before a client builds selectors:
+
+- **Full names only.** Short refs (`main`), `HEAD`, revision expressions (`main~1`, `a..b`, `x@{1}`) and abbreviated object ids are rejected — they resolve against ambient state, and a pinned view may not. Values are never trimmed: surrounding whitespace is a malformed value, not a typo.
+- **Multi-repo disambiguation.** A `git_ref` / `commit` selector with no `graph_id` resolves only when the session reaches exactly one repository; reaching several fails with `invalid_view_selector` naming them, so name one with `graph_id`.
+- **Scope still applies.** A `base` or `worktree` selector naming a graph or checkout outside the session's workspace is refused with `selector_out_of_scope`, and the scope check runs before the readiness check so a session cannot probe a sibling workspace's build state.
+- **Substitution is always labelled.** `exact: false` means the requested view was not served. Every fallback is read-only. Set `require_exact: true` when substitution is unacceptable.
+- **Exact worktree edits are supported through the coordinator-backed write path.** Fallback, inactive ref, and commit views remain read-only and return `view_read_only` for mutation.
+- A view of a committed tree has no working copy, so its files are served out of the object store and a file location is reported as a `gortex-view://<view-fingerprint>/<repo-prefix>/<path>` identity instead of an on-disk path.
+
+The view is resolved before the session's overlay is prepared, so pushed editor buffers layer on top of whatever answers.
+
+### Freshness rider
+
+Every view-aware response says which view answered, in the same `freshness` block file-drift provenance already uses. It always rides on the response envelope's `_meta`, and is additionally merged into the payload where the wire format has a home for it — into a JSON object's own `freshness`, or into a GCX header's meta channel — so a client that reads only the payload still sees it. Shapes with no structural home (TOON, the one-line text form, a diagram) carry it on the envelope alone. An empty field is omitted.
+
+| Field | Meaning |
+|---|---|
+| `requested_view` | the selector the caller sent, rendered as `kind` plus its payload — `auto`, `base:<graph-id>`, `worktree:<checkout-id>`, `git_ref:<ref>` or `git_ref:<graph-id>:<ref>` |
+| `actual_view` | what served the request — a selector string, or the view fingerprint when the server pinned one |
+| `exact` | whether `actual_view` is the view that was requested |
+| `fallback_reason` | why it is not; set exactly when `exact` is false |
+| `view_fingerprint` | identity of the content that answered — the authority half of every `gortex-view://` URI in the same response |
+| `requested_ref` / `resolved_ref` / `resolved_commit` / `resolved_tree` | the ref or object id the selector named, and what it resolved to when the request was served (`resolved_ref` is empty for a `commit` selector) |
+| `build_token` | an in-progress build the caller can poll |
+| `retry_after` | poll hint, in whole seconds |
+| `degraded_capabilities` | capabilities this view does not serve completely that the request did not require — each with the state it was found in |
+| `base_scoped` | capabilities a base-scoped engine answered while a routed view served the request |
+
+### Capability arguments
+
+A view is rarely complete all at once: source bytes are readable long before the syntax graph is resolved, and vector search may never be enabled at all. Three request-level arguments — read and stripped on the same seam as `view` — let a caller state what it needs instead of accepting a silently thin answer.
+
+| Argument | Type | Effect |
+|---|---|---|
+| `require_complete` | bool (a `"true"` / `"false"` string is accepted) | promotes the calling operation's own default capabilities to required |
+| `required_capabilities` | array of names, or one comma-separated string | adds to whatever `require_complete` produced; the request fails if the view cannot serve them |
+| `optional_capabilities` | same shapes | annotates only — never fails a request |
+
+The schemas also publish three consistency controls on every view-aware tool: `require_exact` rejects substitution, `require_fresh` waits until the selected worktree reflects current filesystem state, and `wait_deadline` is the absolute RFC3339 deadline bounding that wait. A deadline without a wait requirement is rejected rather than ignored.
+
+Defaults that were not required are still evaluated and reported under `degraded_capabilities`. A request the base corpus serves is exempt: the base is a plain whole index with no producer rows to read.
+
+The capability vocabulary is closed — an unknown name is refused with `invalid_view_selector` rather than silently requiring nothing:
+
+| Group | Ids |
+|---|---|
+| source | `source.snapshot`, `source.config` |
+| graph | `graph.syntax`, `graph.resolution.local`, `graph.resolution.cross_repo`, `graph.incoming_edges`, `graph.similarity` |
+| search | `search.symbols`, `search.content`, `search.vector`, `search.text` |
+| lsp | `lsp.references`, `lsp.diagnostics`, `lsp.hover`, `lsp.rename`, `lsp.code_actions` |
+
+Each is in one of five states for a given view: `complete`, `incomplete`, `building`, `unavailable`, `disabled_by_config`. A required capability in a terminal state (`unavailable`, `disabled_by_config`, or undeclared by the view) refuses the request with `capability_unavailable` — waiting cannot clear it. One that is merely `building` or `incomplete` refuses with `required_capability_incomplete`, which a retry can clear.
+
+### Typed errors
+
+Every refusal on the view path carries a stable code as the first token of the message. The codes are a wire contract — a client may switch on them, and none is ever reworded.
+
+| Code | Meaning |
+|---|---|
+| `invalid_view_selector` | malformed selector — unknown kind or field, a non-string value, a missing required field, a ref name git itself would reject, an abbreviated object id, or an unresolvable repository for a bare ref |
+| `selector_conflict` | the selector carries a field its kind does not use |
+| `selector_out_of_scope` | the selector names a repository or checkout outside the caller's workspace |
+| `ref_not_commit` | the selector resolved to an object that is not a commit |
+| `ref_not_available_locally` | the ref or object is well-formed but the local object store does not have it |
+| `view_building` | the view exists but is still being built; the response carries `build_token` and `retry_after` (2 s for a ref view) |
+| `view_read_only` | the request would mutate a view that only serves reads |
+| `capability_unavailable` | a required capability cannot be served by this view at all |
+| `required_capability_incomplete` | a required capability exists but is still building or only partly populated |
+| `checkout_inaccessible` | the checkout backing the view cannot be read — not registered, not ready, unmounted, or permission denied |
+| `no_primary` | the family has no primary base graph to compose a view over |
+| `source_object_missing` | the source bytes a result points at are gone from the object store |
+
+A ref view that is rebuilding while already serving an older generation answers with that generation rather than refusing, marked `exact: false` with the `view_building` reason and the build token to poll — so the answer is never mistaken for the requested tree.
+
+### Tools
+
+Checkout administration is one surface with two front doors; the CLI verbs under `gortex repos` call exactly these tools ([cli.md](cli.md#worktrees-and-checkouts)). Every destructive tool previews by default: a call without `confirm` reads the catalog, returns what would happen, and writes nothing.
+
+Three of these verbs — `untrack_repository`, `forget_checkout` and `explain_view` — name their target explicitly, answer from catalog rows and read no graph, so they run **without binding the calling session's working directory to a checkout view**. Every other tool binds it first and refuses with `view_building` or `checkout_inaccessible` when that binding cannot be made.
+
+These three must not carry that gate, because a broken binding is the state they exist for. `gortex untrack <path>` relays through an MCP session whose cwd IS the checkout being removed, so requiring discovery of that checkout to succeed first makes the verb unavailable exactly when the working copy is one git is slow to answer for — or no longer answers for at all — and retrying the removal does not make it any easier to discover. `explain_view` is the tool you reach for to find out why, so refusing it for the reason it was called to report leaves nothing to diagnose with.
+
+A read that answers off the graph never joins them, however convenient it would be: serving it through an unbound cwd would answer from the wrong corpus.
+
+| Tool | Description |
+|------|-------------|
+| `list_checkouts` | List the checkout families this daemon tracks — per family the primary corpus and epoch, its dedicated graphs, every registered working copy (mode, state, both reconciler clocks with their deadlines, path evidence, route, whether a build coordinator is live) and the views rooted in its graphs. `family` narrows by family id / graph id / repo prefix / a path inside a tracked repo. Reads the catalog only |
+| `set_primary_checkout` | Make one corpus (`graph`: a graph id, repo prefix, or path) the base every automatic checkout of its family composes over. Previews the incumbent, the epoch, whether the move is accepted, and every checkout that must rebuild its layers; `confirm: true` runs it |
+| `forget_checkout` | Remove one checkout (`path`: a path or repo prefix), its corpus and everything rooted in it. Unlike `untrack_repository` it never demotes the checkout into the family's automatic lane. Previews the closure; `confirm: true` runs it |
+| `reconcile_checkouts` | Reconcile families against git and the filesystem now instead of waiting for the janitor — identities confirmed or allocated, the availability and removal clocks moved, build coordinators brought in line. `family` scopes it; omit for every family |
+| `explain_view` | Explain which graph answers for one filesystem `path`: the checkout it binds to, how that checkout is served, its route and the generations behind it — or the step in the chain that could not be taken and left the base corpus to answer |
+
+All five take `format` (`json` default, `gcx`, `toon`) and `max_bytes`.
+
 ## Live editor buffers (overlay sessions)
 
 Editor extensions push in-flight (unsaved) buffers as **overlays**. Gortex composes a per-request **shadow view** on top of the immutable base graph and threads it through the tool dispatch context — every subsequent `tools/call` from the same MCP session reads through the shadow. Graph-walking tools (`find_usages`, `get_call_chain`, `analyze`, …) and source-reading tools (`get_symbol_source`, `get_editing_context`, …) all see the editor-buffer state without per-tool changes.
@@ -523,7 +658,7 @@ Editor extensions push in-flight (unsaved) buffers as **overlays**. Gortex compo
 | `overlay_drop_branch` | Delete a named branch — refuses to drop the active branch or the implicit `main` |
 | `compare_branches` | Run `find_usages` / `get_callers` / `get_call_chain` / `get_dependencies` / `get_dependents` against two branches and report each side plus the delta |
 
-HTTP transport mirrors the surface at `/v1/overlay/sessions/*`; the `/v1/tools/<name>` entry point reads the overlay session from `Mcp-Session-Id` (preferred), `X-Gortex-Overlay-Session`, or `?session_id=`. Overlays are bound to their MCP session — when the session ends the overlay is dropped synchronously. Idle TTL is a fail-safe (default 30 m, configurable via `GORTEX_OVERLAY_IDLE_TTL`); every tool call against a live overlay refreshes it.
+HTTP transport mirrors the surface at `/v1/overlay/sessions/*`. The `/v1/tools/<name>` entry point resolves the caller's real session identity from `Mcp-Session-Id` (preferred) or `?session_id=` — this identity drives every per-session subsystem: tool-policy gating, token-stats accounting, notes/memory scoping, and so on. `X-Gortex-Overlay-Session`, when present, is a narrower, independent override that scopes *only* overlay state to a different cohort id than the caller's own session (e.g. a CI harness orchestrating several overlay scopes from one connection) — it never substitutes for the real session identity anywhere else. Overlays are bound to their cohort id; the synchronous drop-on-disconnect only fires for a cohort that matches its own MCP transport session (`ReleaseSession` drops by session id) — a cohort explicitly named via `X-Gortex-Overlay-Session` lives until the idle TTL regardless of the owning connection's lifetime. Idle TTL is a fail-safe (default 30 m, configurable via `GORTEX_OVERLAY_IDLE_TTL`); every tool call against a live overlay refreshes it.
 
 ## Speculative execution
 

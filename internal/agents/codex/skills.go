@@ -31,9 +31,9 @@ import (
 	"path/filepath"
 
 	"github.com/zzet/gortex/internal/agents"
-	"github.com/zzet/gortex/internal/agents/claudecode"
 	"github.com/zzet/gortex/internal/agents/internalutil"
 	"github.com/zzet/gortex/internal/agents/skillpack"
+	"github.com/zzet/gortex/internal/profiles"
 )
 
 // skillFileName is the file Codex loads inside each skill directory.
@@ -49,13 +49,11 @@ func codexSkillsRoot(base string) string {
 
 // Skills returns the curated Gortex playbook pack in host-neutral form.
 //
-// The bodies are single-sourced in internal/agents/claudecode and each
-// host re-wraps them in its own frontmatter dialect; skillpack does the
-// stripping. Reading claudecode's map directly from an adapter is the
-// established direction (hermes does the same) — claudecode never
-// imports another adapter, so there is no cycle to trip over.
+// The bodies are single-sourced in the agents package and each host
+// re-wraps them in its own frontmatter dialect; skillpack does the
+// stripping.
 func Skills() ([]skillpack.Skill, error) {
-	return skillpack.ParseAll(claudecode.GlobalSkills)
+	return skillpack.ParseAll(agents.GlobalSkills)
 }
 
 // renderSkill puts Codex's frontmatter envelope in front of a neutral
@@ -154,13 +152,11 @@ func syncCuratedSkills(w io.Writer, root string, allowed []string, opts agents.A
 	for _, s := range skills {
 		rendered[s.ID] = renderSkill(s)
 	}
-	// KnownHashes stays unset: this pack has only ever shipped one
-	// rendering, so the byte compare against `rendered` is the complete
-	// definition of "still ours".
 	return skillpack.Sync(w, skillpack.SyncSpec{
-		Dir:      root,
-		FileName: skillFileName,
-		Rendered: rendered,
+		Dir:         root,
+		FileName:    skillFileName,
+		Rendered:    rendered,
+		KnownHashes: skillpack.AddWorktreeV1Hashes(rendered, profiles.WorktreeBranchRoutingPolicy, skillpack.PreWorktreeAgentSkillHashes()),
 	}, allowed, opts)
 }
 

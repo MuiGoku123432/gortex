@@ -3,10 +3,14 @@ package hooks
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zzet/gortex/internal/daemon"
+	"github.com/zzet/gortex/internal/profiles"
 )
 
 func withFakeStatus(t *testing.T, fn func() (*daemon.StatusResponse, error)) {
@@ -26,6 +30,9 @@ func TestRunSessionStart_RejectsWrongEvent(t *testing.T) {
 
 func TestRulePreambleRoutesByOutcomeAndPreservesExactIdentifiers(t *testing.T) {
 	briefing := rulePreamble()
+	if got := strings.Count(briefing, profiles.WorktreeBranchRoutingPolicy); got != 1 {
+		t.Fatalf("rule preamble embeds canonical worktree policy %d times, want once", got)
+	}
 	for _, required := range []string{
 		"For an explicitly named file",
 		"options:{new_user_task:true}",
@@ -61,6 +68,59 @@ func TestRulePreambleRoutesByOutcomeAndPreservesExactIdentifiers(t *testing.T) {
 		if strings.Contains(briefing, forced) {
 			t.Fatalf("rule preamble contains forced-localize wording %q: %s", forced, briefing)
 		}
+	}
+}
+
+func sessionGuidanceGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+func TestRenderCwdCoverageWaitsForAutomaticFamilyCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	main := filepath.Join(t.TempDir(), "main")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionGuidanceGit(t, main, "init", "-q", "-b", "main")
+	sessionGuidanceGit(t, main, "config", "user.email", "test@example.com")
+	sessionGuidanceGit(t, main, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(main, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionGuidanceGit(t, main, "add", ".")
+	sessionGuidanceGit(t, main, "commit", "-q", "-m", "initial")
+	linked := filepath.Join(t.TempDir(), "linked")
+	sessionGuidanceGit(t, main, "worktree", "add", "-q", "-b", "feature", linked)
+
+	status := &daemon.StatusResponse{TrackedRepos: []daemon.TrackedRepoStatus{{Name: "main", Path: main}}}
+	got := renderCwdCoverage(linked, status)
+	if !strings.Contains(got, "awaiting automatic discovery") || !strings.Contains(got, "Do not run `gortex track`") {
+		t.Fatalf("linked worktree received no neutral discovery guidance:\n%s", got)
+	}
+	if strings.Contains(got, "`gortex track "+linked+"`") {
+		t.Fatalf("linked worktree was told to become a dedicated graph:\n%s", got)
+	}
+	reverse := &daemon.StatusResponse{TrackedRepos: []daemon.TrackedRepoStatus{{Name: "linked", Path: linked}}}
+	reverseGuidance := renderCwdCoverage(main, reverse)
+	if !strings.Contains(reverseGuidance, "awaiting automatic discovery") || strings.Contains(reverseGuidance, "`gortex track "+main+"`") {
+		t.Fatalf("primary checkout was not treated as automatic when a linked family member is tracked:\n%s", reverseGuidance)
+	}
+
+	unrelated := t.TempDir()
+	unrelatedGuidance := renderCwdCoverage(unrelated, status)
+	if !strings.Contains(unrelatedGuidance, "gortex track "+unrelated) {
+		t.Fatalf("truly unrelated directory lost explicit-track guidance:\n%s", unrelatedGuidance)
 	}
 }
 
@@ -150,8 +210,8 @@ func TestRunSessionStart_DaemonReady_CwdExactMatch(t *testing.T) {
 			UptimeSeconds: 3600,
 			Ready:         true,
 			TrackedRepos: []daemon.TrackedRepoStatus{
-				{Name: "gortex", Path: "/tmp/gortex", Workspace: "gortex", Nodes: 6604, Edges: 27403},
-				{Name: "cloud_web", Path: "/tmp/cloud_web", Workspace: "cloud_web", Nodes: 265, Edges: 276},
+				{Name: "gortex", Path: gortexTmpFixtureRoot, Workspace: "gortex", Nodes: 6604, Edges: 27403},
+				{Name: "cloud_web", Path: cloudWebTmpFixtureRoot, Workspace: "cloud_web", Nodes: 265, Edges: 276},
 			},
 			Workspaces: []daemon.WorkspaceSummary{
 				{Slug: "gortex"}, {Slug: "cloud_web"},
@@ -159,7 +219,7 @@ func TestRunSessionStart_DaemonReady_CwdExactMatch(t *testing.T) {
 		}, nil
 	})
 
-	data := []byte(`{"hook_event_name":"SessionStart","cwd":"/tmp/gortex"}`)
+	data := mustJSON(t, map[string]any{"hook_event_name": "SessionStart", "cwd": gortexTmpFixtureRoot})
 	out := captureStdout(t, func() { runSessionStart(data, 0) })
 
 	var payload HookOutput
@@ -185,14 +245,14 @@ func TestRunSessionStart_DaemonReady_CwdContainsRepos(t *testing.T) {
 			UptimeSeconds: 60,
 			Ready:         true,
 			TrackedRepos: []daemon.TrackedRepoStatus{
-				{Name: "gortex", Path: "/tmp/gortex"},
-				{Name: "cloud_web", Path: "/tmp/cloud_web"},
-				{Name: "project1", Path: "/opt/project1"}, // unrelated: NOT under cwd /tmp
+				{Name: "gortex", Path: gortexTmpFixtureRoot},
+				{Name: "cloud_web", Path: cloudWebTmpFixtureRoot},
+				{Name: "project1", Path: fixtureAbs("/opt/project1")}, // unrelated: NOT under cwd /tmp
 			},
 		}, nil
 	})
 
-	data := []byte(`{"hook_event_name":"SessionStart","cwd":"/tmp"}`)
+	data := mustJSON(t, map[string]any{"hook_event_name": "SessionStart", "cwd": fixtureAbs("/tmp")})
 	out := captureStdout(t, func() { runSessionStart(data, 0) })
 
 	var payload HookOutput
@@ -223,12 +283,13 @@ func TestRunSessionStart_DaemonReady_CwdNotTracked(t *testing.T) {
 			Version: "0.15.0",
 			Ready:   true,
 			TrackedRepos: []daemon.TrackedRepoStatus{
-				{Name: "gortex", Path: "/tmp/gortex"},
+				{Name: "gortex", Path: gortexTmpFixtureRoot},
 			},
 		}, nil
 	})
 
-	data := []byte(`{"hook_event_name":"SessionStart","cwd":"/tmp/playground"}`)
+	playground := fixtureAbs("/tmp/playground")
+	data := mustJSON(t, map[string]any{"hook_event_name": "SessionStart", "cwd": playground})
 	out := captureStdout(t, func() { runSessionStart(data, 0) })
 
 	var payload HookOutput
@@ -239,7 +300,7 @@ func TestRunSessionStart_DaemonReady_CwdNotTracked(t *testing.T) {
 	if !strings.Contains(ac, "is not covered by any tracked repo") {
 		t.Errorf("expected untracked notice, got:\n%s", ac)
 	}
-	if !strings.Contains(ac, "gortex track /tmp/playground") {
+	if !strings.Contains(ac, "gortex track "+playground) {
 		t.Errorf("expected actionable track command, got:\n%s", ac)
 	}
 }
@@ -343,7 +404,7 @@ func TestDispatch_RoutesSessionStart(t *testing.T) {
 		}, nil
 	})
 
-	data := []byte(`{"hook_event_name":"SessionStart","cwd":"/tmp"}`)
+	data := mustJSON(t, map[string]any{"hook_event_name": "SessionStart", "cwd": fixtureAbs("/tmp")})
 	withStdin(t, data, func() {
 		out := captureStdout(t, func() { Run(0, ModeDeny) })
 		if !strings.Contains(out, "Gortex Session Orientation") {

@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -49,8 +51,13 @@ func (s *Server) handleSearchText(ctx context.Context, req mcp.CallToolRequest) 
 	if limit < 1 {
 		limit = 100
 	}
-	if limit > 1000 {
-		limit = 1000
+	// The requested value is kept so the response can say the ceiling chose
+	// the effective limit rather than the caller: a caller who asked for
+	// 100000 and silently got 1000 has no way to tell that from a corpus that
+	// held exactly 1000 matches.
+	requestedLimit := limit
+	if maxLimit := searchTextMaxLimit(); limit > maxLimit {
+		limit = maxLimit
 	}
 
 	// Multi-repo mode: the daemon owns a MultiIndexer and the per-repo
@@ -70,7 +77,16 @@ func (s *Server) handleSearchText(ctx context.Context, req mcp.CallToolRequest) 
 	scopedMultiGrep := s.multiIndexer != nil && (resolved.RepoAllow != nil || len(pathFilter) > 0)
 	var matches []trigram.Match
 	needsFinalLimit := false
-	if useRegexp {
+	if view := requestViewFromContext(ctx); view.routed() {
+		// A request reading through a view answers out of that view's own
+		// working copy, or not at all. The canonical searchers below are built
+		// over a different tree.
+		viewMatches, refusal := s.searchTextInView(ctx, view, query, useRegexp, limit)
+		if refusal != nil {
+			return refusal, nil
+		}
+		matches = viewMatches
+	} else if useRegexp {
 		var err error
 		if scopedMultiGrep {
 			matches, err = s.multiIndexer.GrepRegexpForRepos(query, "", resolved.RepoAllow, limit)
@@ -92,6 +108,13 @@ func (s *Server) handleSearchText(ctx context.Context, req mcp.CallToolRequest) 
 		matches = s.indexer.GrepText(query, limit)
 	}
 
+	// Counted BEFORE the filters below, and that ordering is the whole point.
+	// The searcher stops at `limit`; the path and scope filters then run over
+	// what survived, so a response holding 952 matches can be a truncated
+	// 1000 rather than a complete 952. Measuring after the filters would miss
+	// exactly the case a caller cannot detect on its own.
+	rawMatches := len(matches)
+
 	// Sub-path scoping: a `path` argument or a `scope:`-named saved
 	// scope's paths narrow the literal hits to a monorepo service
 	// slice. In multi-repo mode MultiIndexer.GrepText stamps a repo
@@ -104,7 +127,7 @@ func (s *Server) handleSearchText(ctx context.Context, req mcp.CallToolRequest) 
 		}
 		matches = filterTextMatchesByPath(matches, pathFilter, repoPrefixes)
 	}
-	matches = s.filterTextMatchesByResolvedScope(matches, resolved)
+	matches = s.filterTextMatchesByResolvedScope(ctx, matches, resolved)
 	if needsFinalLimit {
 		matches = limitTextMatches(matches, limit)
 	}
@@ -116,13 +139,67 @@ func (s *Server) handleSearchText(ctx context.Context, req mcp.CallToolRequest) 
 		"matches": enriched,
 		"count":   len(enriched),
 	}
+	// A result bound by `limit` was byte-indistinguishable from a complete
+	// one: `count` was set to the same ceiling the array stopped at, so the
+	// two corroborated each other at the wrong number. The byte budget has
+	// always disclosed its own truncation (`_truncated_by_budget`); this is
+	// the limit path's equivalent.
+	if searchTextBoundByLimit(rawMatches, limit) {
+		resp["_truncated_by_limit"] = true
+		resp["_limit_applied"] = limit
+		resp["count_is_exact"] = false
+		resp["truncation_note"] = searchTextTruncationNote
+		if requestedLimit > limit {
+			resp["_limit_requested"] = requestedLimit
+		}
+	}
 	// Body-visible disclosure for a repo-narrowed zero (the _meta scope
 	// fields are invisible in CLI output and most clients). No recheck
 	// here — the note still names the scope and the widen escape hatch.
 	if len(enriched) == 0 && len(resolved.RepoAllow) > 0 {
 		resp["scope_note"] = scopeZeroNote(resolved, -1)
 	}
+	stampIndexFileFailureWarning(resp, s.indexFileFailureWarning(ctx, resolved, pathFilter))
 	return s.respondScopedJSONOrTOON(ctx, req, resp, resolved)
+}
+
+// searchTextDefaultMaxLimit is the ceiling `limit` is clamped to. It has been
+// 1000 since search_text was added and is kept as the default so no existing
+// caller's response changes shape.
+const searchTextDefaultMaxLimit = 1000
+
+// searchTextMaxLimit returns the effective ceiling, overridable through
+// GORTEX_SEARCH_TEXT_MAX_LIMIT for the sweep this tool exists to serve —
+// search_text is the literal-search backbone agents reach for in place of
+// grep, where an unbounded pass is the normal request. An unset, unparseable
+// or non-positive value keeps the default rather than lifting the bound: a
+// typo must not turn into an unbounded scan.
+//
+// Raising it is not the fix on its own. Without the disclosure below a higher
+// ceiling only moves the silent cliff, which is why the flag lands with it.
+func searchTextMaxLimit() int {
+	v := strings.TrimSpace(os.Getenv("GORTEX_SEARCH_TEXT_MAX_LIMIT"))
+	if v == "" {
+		return searchTextDefaultMaxLimit
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return searchTextDefaultMaxLimit
+	}
+	return n
+}
+
+const searchTextTruncationNote = "the search stopped at `limit`, so `count` is a floor rather than a total and the matches are a prefix of the real result set. Raise `limit` (or the GORTEX_SEARCH_TEXT_MAX_LIMIT ceiling) to widen. Narrowing with `path` will NOT recover the remainder: the path filter runs over what survived truncation, not over the corpus, so a subtree slice returns whatever was left of the global cut."
+
+// searchTextBoundByLimit reports whether the search stopped because of the
+// limit rather than because the corpus ran out.
+//
+// rawMatches is the count the searcher returned, before the path and scope
+// filters. Landing on the effective limit is the signal, and it can fire on a
+// corpus holding exactly that many matches — a spurious "verify this" is the
+// safe direction to be wrong in, against silently losing most of the result.
+func searchTextBoundByLimit(rawMatches, limit int) bool {
+	return limit > 0 && rawMatches >= limit
 }
 
 // filterTextMatchesByPath keeps only the trigram matches whose file
@@ -152,7 +229,7 @@ func limitTextMatches(matches []trigram.Match, limit int) []trigram.Match {
 	return matches
 }
 
-func (s *Server) filterTextMatchesByResolvedScope(matches []trigram.Match, resolved ResolvedScope) []trigram.Match {
+func (s *Server) filterTextMatchesByResolvedScope(ctx context.Context, matches []trigram.Match, resolved ResolvedScope) []trigram.Match {
 	if resolved.WorkspaceID == "" && resolved.ProjectID == "" && len(resolved.RepoAllow) == 0 {
 		return matches
 	}
@@ -161,6 +238,9 @@ func (s *Server) filterTextMatchesByResolvedScope(matches []trigram.Match, resol
 		ProjectID:   resolved.ProjectID,
 		RepoAllow:   resolved.RepoAllow,
 	}
+	// Every match in the batch is attributed through the same reader,
+	// so the request-reader lookup is hoisted out of the loop.
+	reader := s.readerFor(ctx)
 	out := make([]trigram.Match, 0, len(matches))
 	for _, m := range matches {
 		repo, _, ok := strings.Cut(m.Path, "/")
@@ -181,18 +261,17 @@ func (s *Server) filterTextMatchesByResolvedScope(matches []trigram.Match, resol
 		// graph never turned into a node) cannot be proven in-scope, so
 		// dropping it is the safe choice — keeping it was a latent
 		// cross-scope leak.
-		if s.graph == nil {
+		if reader == nil {
 			continue
 		}
-		n := s.graph.GetNode(m.Path)
+		n := reader.GetNode(m.Path)
 		if n == nil {
-			// A trigram match path is always forward-slash, but node IDs
-			// keep the repo-relative remainder in the OS separator. The two
-			// spellings agree only for a file at the repo root, so on
-			// Windows every match below the root failed attribution here and
-			// the fail-closed drop below emptied the entire result set.
-			if key := graphMatchPathKey(m.Path, knownRepo); key != m.Path {
-				n = s.graph.GetNode(key)
+			// Both spellings are forward-slash — a trigram match path by
+			// construction, a graph node ID because the indexer folds every
+			// key through filepath.ToSlash — so this retry only catches a
+			// natively-spelled path that reached the batch from elsewhere.
+			if key := graphPathKey(m.Path); key != m.Path {
+				n = reader.GetNode(key)
 			}
 		}
 		// GrepTextForRepos stamps the registry prefix onto every match path,
@@ -209,23 +288,16 @@ func (s *Server) filterTextMatchesByResolvedScope(matches []trigram.Match, resol
 	return out
 }
 
-// graphMatchPathKey spells a trigram match path the way graph node IDs
-// spell it. Match paths are always forward-slash; a node ID joins the repo
-// prefix with "/" but keeps the repo-relative remainder in the OS separator,
-// so the two forms diverge on Windows for every file below the repo root.
-// repoPrefixed says whether the first segment names a tracked repo rather
-// than an ordinary directory. Returns path unchanged where the separators
-// already agree, so POSIX callers pay nothing.
-func graphMatchPathKey(path string, repoPrefixed bool) string {
-	if filepath.Separator == '/' {
-		return path
-	}
-	if repoPrefixed {
-		if repo, rest, ok := strings.Cut(path, "/"); ok {
-			return repo + "/" + filepath.FromSlash(rest)
-		}
-	}
-	return filepath.FromSlash(path)
+// graphPathKey spells a repo-relative path the way graph node IDs spell it:
+// forward slashes on every platform, because the indexer folds every key it
+// mints through filepath.ToSlash (Indexer.relKey). The repo prefix and the
+// remainder therefore share one separator, so no prefix-aware split is
+// needed. Identity on POSIX, where a backslash is an ordinary filename byte
+// and must survive; on Windows it converts a natively-spelled path
+// (filepath.Rel / filepath.Join output) into the graph's spelling, which is
+// where the two vocabularies actually meet.
+func graphPathKey(path string) string {
+	return filepath.ToSlash(path)
 }
 
 // enrichTextMatchesContext decorates every trigram match with its enclosing
@@ -248,7 +320,7 @@ func (s *Server) enrichTextMatchesContext(
 			exactSeen[match.Path] = struct{}{}
 			exactPaths = append(exactPaths, match.Path)
 		}
-		if alias := graphMatchPathKey(match.Path, true); alias != match.Path {
+		if alias := graphPathKey(match.Path); alias != match.Path {
 			if _, duplicate := aliasSeen[alias]; !duplicate {
 				aliasSeen[alias] = struct{}{}
 				aliasPaths = append(aliasPaths, alias)
@@ -278,7 +350,7 @@ func fileSymbolIndexForPath(indexes map[string]*fileSymbolIndex, path string) *f
 	if index := indexes[path]; index != nil {
 		return index
 	}
-	if key := graphMatchPathKey(path, true); key != path {
+	if key := graphPathKey(path); key != path {
 		return indexes[key]
 	}
 	return nil

@@ -550,6 +550,9 @@ type Graph struct {
 	fileMetasMu sync.Mutex
 	fileMetas   map[string]map[string]FileMetaRow
 
+	fileIndexFailuresMu sync.Mutex
+	fileIndexFailures   map[string]map[string]FileIndexFailure
+
 	// mutationReceipts backs the optional, in-memory-only mutation receipt
 	// capability used to bound post-enrichment resolution. It is intentionally
 	// absent from disk stores until they can provide the same completeness
@@ -2914,7 +2917,13 @@ func (g *Graph) reindexEdge(e *Edge, oldTo string, oldKind EdgeKind) {
 	if receiptActive {
 		defer g.endReceiptMutation()
 	}
-	g.markMutationReceiptsIncomplete()
+	if receiptActive {
+		// Mirror the SQLite reindex recorder: only a write that leaves the
+		// edge at an unresolved target creates resolver work; replacing a
+		// stub with a resolved target creates none. The source-node lookup
+		// happens before the shard write locks below.
+		g.recordReindexedEdgeForReceipts(e)
+	}
 	// Must lock the From shard too — we mutate sFrom.outEdgeIdx below,
 	// and without its lock a concurrent AddEdge on From panics the
 	// runtime with "concurrent map read and map write".
@@ -3213,43 +3222,16 @@ func (g *Graph) EvictFile(filePath string) (nodesRemoved, edgesRemoved int) {
 	if receiptActive {
 		defer g.endReceiptMutation()
 	}
-	g.markMutationReceiptsIncomplete()
 	g.lockAllWrite()
-	defer g.unlockAllWrite()
-
-	// Gather nodes across shards.
-	var nodes []*Node
-	for _, s := range g.shards {
-		nodes = append(nodes, s.byFile[filePath]...)
-	}
-	if len(nodes) == 0 {
-		return 0, 0
-	}
-	// id → source-repo captured BEFORE we delete the node from
-	// s.nodes; evictEdgesLocked needs the repo to debit per-repo
-	// edge counters and the live node would already be gone.
-	evictedIDs := make(map[string]string, len(nodes))
-	for _, n := range nodes {
-		evictedIDs[n.ID] = n.RepoPrefix
-	}
-
-	for _, n := range nodes {
-		s := g.shardFor(n.ID)
-		s.repoNodeRemove(n)
-		delete(s.nodes, n.ID)
-		if n.QualName != "" {
-			if cur, ok := s.byQual[n.QualName]; ok && cur.ID == n.ID {
-				delete(s.byQual, n.QualName)
-			}
+	var scalarInvalidated bool
+	defer func() {
+		g.unlockAllWrite()
+		if scalarInvalidated {
+			g.markMutationReceiptsIncomplete()
 		}
-		removeNodeFromBucket(s.byName, s.byNameIdx, n.Name, n.ID)
-		removeNodeFromBucket(s.byFile, s.byFileIdx, filePath, n.ID)
-		removeNodeFromBucket(s.byRepo, s.byRepoIdx, n.RepoPrefix, n.ID)
-	}
-	nodesRemoved = len(nodes)
-	g.nodeMutGen.Add(1)
-
-	edgesRemoved = g.evictEdgesLocked(evictedIDs)
+	}()
+	// Direct eviction historically accepts the empty file-path bucket.
+	nodesRemoved, edgesRemoved, scalarInvalidated = g.evictFileNodesLocked(map[string]struct{}{filePath: {}}, true)
 	return nodesRemoved, edgesRemoved
 }
 
@@ -3930,6 +3912,7 @@ func (g *Graph) EvictRepo(repoPrefix string) (nodesRemoved, edgesRemoved int) {
 	if repoPrefix == "" {
 		return 0, 0
 	}
+	_ = g.ReplaceFileIndexFailures(repoPrefix, nil)
 	receiptActive := g.beginReceiptMutation()
 	if receiptActive {
 		defer g.endReceiptMutation()
@@ -3968,6 +3951,19 @@ func (g *Graph) EvictRepo(repoPrefix string) (nodesRemoved, edgesRemoved int) {
 
 	edgesRemoved = g.evictEdgesLocked(evictedIDs)
 	return nodesRemoved, edgesRemoved
+}
+
+// EvictRepoCurrentGeneration declares the in-memory store's one-generation
+// semantics to generation-aware callers.
+func (g *Graph) EvictRepoCurrentGeneration(repoPrefix string) (nodesRemoved, edgesRemoved int) {
+	return g.EvictRepo(repoPrefix)
+}
+
+// EvictRepoAllGenerations declares the destructive capability explicitly. An
+// in-memory Graph has exactly one logical generation, so the implementation is
+// identical to EvictRepo; its empty-prefix guard is inherited.
+func (g *Graph) EvictRepoAllGenerations(repoPrefix string) (nodesRemoved, edgesRemoved int) {
+	return g.EvictRepo(repoPrefix)
 }
 
 // RepoStats returns per-repository node and edge counts.

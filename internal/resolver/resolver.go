@@ -211,13 +211,25 @@ type Resolver struct {
 	// `RegisterAll` resolving to `OverlayManager.Register` simply
 	// because "OverlayManager" sorts before "Registry".
 	reachableDirsByFile map[string]map[string]struct{}
-	// dirByFilePath memoises filepath.Dir(path) for every indexed file,
+	// dirByFilePath memoises filePathDir(path) for every indexed file,
 	// built once alongside reachableDirsByFile. filterByReachability runs in
-	// the parallel resolver workers and otherwise recomputes filepath.Dir
+	// the parallel resolver workers and otherwise recomputes filePathDir
 	// per candidate per edge — ~20% of resolution CPU on a large TS monorepo
 	// (filepathlite.Dir/Clean dominate). Read-only after build, so the
 	// workers share it lock-free.
 	dirByFilePath map[string]string
+	// retargetedTestCallFiles accumulates the caller files of EdgeCalls
+	// edges a resolution pass bound where the caller is test-classified
+	// (test file path, or an is_test-stamped source symbol). The test
+	// projection skips unresolved calls, so a call that resolves LATER
+	// needs its caller reconciled — but the definition-side derived plan
+	// never names the caller file. Consumers drain this frontier via
+	// TakeRetargetedTestCallFiles after resolution and re-run the scoped
+	// test projection over it. Guarded by retargetedMu: the parallel
+	// apply loop holds r.mu, but single-file passes and the deferred LSP
+	// apply note entries on their own paths.
+	retargetedMu            sync.Mutex
+	retargetedTestCallFiles map[string]struct{}
 	// importEdgeGen counts imports-kind edge writes noted while a resolve
 	// pass may hold pass-scoped import-adjacency retention. Write-site
 	// verdicts live at noteImportEdgeWrite's callers.
@@ -1057,6 +1069,9 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 				placeholderStart := time.Now()
 				reconcilePlaceholderSources(r.graph, &r.placeholderSrcIdx, reindexBatch)
 				applyPlaceholderElapsed += time.Since(placeholderStart)
+				for _, ri := range reindexBatch {
+					r.noteRetargetedCall(ri.Edge)
+				}
 				reindexTotal += len(reindexBatch)
 				if pageRevisionKnown {
 					// Ignore this pass's own committed mutations. A later delta
@@ -1585,6 +1600,35 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 	passIndexes.prepareTail()
 	tailPhase("go_attribution")
 	if len(r.scope) == 0 || r.scopedTailExceedsFileBudget() {
+		// The whole-graph arm is the one whose plans depend on the store
+		// believing its own size: the receiver rebind and the bare-name /
+		// builtin passes below join the node and edge corpora, and a planner
+		// costing them against a fraction of the real cardinality inverts the
+		// outer loop (issue #651). This is a whole-graph boundary, not a
+		// per-file resolve, so the check is paid once per full pass and is a
+		// handful of seeks unless the store has actually outgrown its
+		// statistics.
+		//
+		// The store's write gate is not held here, but the resolver's own
+		// ResolveMutex is, and on the daemon's paths so is the caller's batch
+		// gate. A refresh that queued on the store gate — or held it across a
+		// whole-store ANALYZE — would hold ResolveMutex for the same span and
+		// block every other resolve pass on this store. EnsurePlannerStatsFresh
+		// is cooperative for exactly that reason: it try-locks the store gate,
+		// analyzes ONE index per hold under a per-index timeout, and stops
+		// rather than waits, so other store writers — including the
+		// bounded-gate writers that drop their batches after 15 s — keep
+		// making progress.
+		//
+		// That bounds what this pass pays while holding ResolveMutex; it does
+		// not make it zero. A stale store costs this boundary the refresh's
+		// pass budget, plus the one index already in flight, plus one bounded
+		// sqlite_schema reload at the end of a completed pass, and the
+		// remaining indexes ride a resume cursor to the next boundary rather
+		// than being re-started from the head there. Outside that bound, and
+		// still under ResolveMutex: two health probes, the present-index list
+		// and the stat-row set — read-pool queries taking no store lock.
+		graph.MaybeEnsurePlannerStatsFresh(ctx, r.graph)
 		r.runFileAttributionPassesLocked()
 	} else {
 		for _, fp := range r.scopedFiles() {
@@ -1890,7 +1934,7 @@ func (r *Resolver) scopedFiles() []string {
 // buildDirIndexes builds two lookup maps for resolveImport. Populated
 // once per ResolveAll / ResolveFile pass and torn down after.
 //
-//   - dirIndex     keys on filepath.Dir(file.FilePath) for exact
+//   - dirIndex     keys on filePathDir(file.FilePath) for exact
 //     importPath == dir matches.
 //   - lastDirIndex keys on the last path component of that directory
 //     so an import of "logger" matches any file under .../logger/.
@@ -1898,7 +1942,7 @@ func (r *Resolver) buildDirIndexes() {
 	r.dirIndex = make(map[string][]graph.FileNodeIdentity, 128)
 	r.lastDirIndex = make(map[string][]graph.FileNodeIdentity, 128)
 	for file := range graph.FileNodeIdentitiesSeq(r.graph, nil) {
-		dir := filepath.Dir(file.FilePath)
+		dir := filePathDir(file.FilePath)
 		r.dirIndex[dir] = append(r.dirIndex[dir], file)
 		last := lastPathComponent(dir)
 		if last != "" && last != dir {
@@ -2458,6 +2502,10 @@ type incrementalFileFrontier struct {
 	outByNode   map[string][]*graph.Edge
 	stubKeys    []string
 	pending     []*graph.Edge
+	// Admissions may overlap between outgoing and incoming frontiers.
+	outgoingPending int
+	outgoingCollect time.Duration
+	incomingCollect time.Duration
 }
 
 func (r *Resolver) pendingEdgesForFileAndIncoming(filePath string) []*graph.Edge {
@@ -2513,6 +2561,7 @@ func collectIncrementalFileFrontierMode(
 		return frontier
 	}
 
+	outgoingStarted := time.Now()
 	frontier.nodesByFile = g.GetFileNodesByPaths(frontier.paths)
 	var nodeIDs []string
 	for _, path := range frontier.paths {
@@ -2548,12 +2597,19 @@ func collectIncrementalFileFrontierMode(
 			if node.Name == "" || !graph.IsReferenceableSymbol(node.Kind) {
 				continue
 			}
-			appendStubKey(graph.UnresolvedMarker + node.Name)
-			if node.RepoPrefix != "" {
-				appendStubKey(node.RepoPrefix + "::" + graph.UnresolvedMarker + node.Name)
+			// The four name-owned forms are one contract. This builder is
+			// the batched incremental path's incoming leg, and it was the
+			// last one still hand-building the bare pair: a member
+			// reference parked under a wildcard form stayed pending until
+			// the next whole-graph resolve.
+			for _, key := range graph.UnresolvedNameCandidateIDs(node) {
+				appendStubKey(key)
 			}
 		}
 	}
+	frontier.outgoingPending = len(frontier.pending)
+	frontier.outgoingCollect = time.Since(outgoingStarted)
+	incomingStarted := time.Now()
 	// The unresolved target string is the incoming-edge bucket key even when
 	// no node with that ID exists.
 	if lightweightIncoming {
@@ -2581,6 +2637,7 @@ func collectIncrementalFileFrontierMode(
 			}
 		}
 	}
+	frontier.incomingCollect = time.Since(incomingStarted)
 	return frontier
 }
 
@@ -2596,52 +2653,161 @@ func (r *Resolver) ResolveFilesAndIncoming(filePaths []string) *ResolveStats {
 		return stats
 	}
 	started := time.Now()
+	logger := r.logger.With(zap.Int("input_files", len(filePaths)))
+	var frontier incrementalFileFrontier
+	var lockDuration, visibilityDuration, pendingDuration, indexDuration, warmDuration time.Duration
+	var outgoingDuration, incomingDuration, attributionDuration time.Duration
+	outcome := "interrupted"
+	defer func() {
+		logger.Info("resolver: incremental files phases",
+			zap.String("outcome", outcome),
+			zap.Int("files", len(frontier.paths)),
+			zap.Int("pending", len(frontier.pending)),
+			zap.Int("outgoing_pending", frontier.outgoingPending),
+			zap.Int("incoming_pending", len(frontier.pending)-frontier.outgoingPending),
+			zap.Duration("wait_lock", lockDuration),
+			zap.Duration("visibility", visibilityDuration),
+			zap.Duration("pending_collect", pendingDuration),
+			zap.Duration("outgoing_collect", frontier.outgoingCollect),
+			zap.Duration("incoming_collect", frontier.incomingCollect),
+			zap.Duration("build_indexes", indexDuration),
+			zap.Duration("warm_lookup", warmDuration),
+			zap.Duration("resolve_outgoing", outgoingDuration),
+			zap.Duration("resolve_incoming", incomingDuration),
+			zap.Duration("resolve", outgoingDuration+incomingDuration),
+			zap.Duration("attribution", attributionDuration),
+			zap.Duration("total", time.Since(started)))
+	}()
+	finish := startIncrementalPhase(logger, "wait_lock")
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lockDuration = finish()
 	// The edited files may have (re)stamped global usings — reconcile the
 	// persistent index instead of paying the workspace rescan per save.
+	finish = startIncrementalPhase(logger, "visibility")
 	r.scopedCSharpVisibilityInvalidate(filePaths)
+	visibilityDuration = finish()
 
-	pendingStarted := time.Now()
-	frontier := r.collectIncrementalFileFrontier(filePaths)
-	pendingDuration := time.Since(pendingStarted)
+	finish = startIncrementalPhase(logger, "pending_collect")
+	frontier = r.collectIncrementalFileFrontier(filePaths)
+	pendingDuration = finish(
+		zap.Int("files", len(frontier.paths)),
+		zap.Int("outgoing_pending", frontier.outgoingPending),
+		zap.Int("incoming_pending", len(frontier.pending)-frontier.outgoingPending),
+		zap.Int("stub_keys", len(frontier.stubKeys)),
+		zap.Duration("outgoing_collect", frontier.outgoingCollect),
+		zap.Duration("incoming_collect", frontier.incomingCollect))
 	if len(frontier.pending) == 0 {
+		outcome = "no_pending"
 		return stats
 	}
-	indexStarted := time.Now()
+	finish = startIncrementalPhase(logger, "build_indexes")
 	clear := r.buildPassIndexesForPending(frontier.pending)
-	indexDuration := time.Since(indexStarted)
+	indexDuration = finish(zap.Int("pending", len(frontier.pending)))
 	defer clear()
-	warmStarted := time.Now()
+	finish = startIncrementalPhase(logger, "warm_lookup")
 	r.warmLookupCache(frontier.pending)
-	warmDuration := time.Since(warmStarted)
+	warmDuration = finish()
 	defer r.clearLookupCache()
+	repos, omittedRepos, omittedAdmissions := incrementalAdmissionSummary(frontier, r.nodeByID)
+	logger.Info("resolver: incremental pending admissions",
+		zap.Any("repositories", repos),
+		zap.Int("repositories_omitted", omittedRepos),
+		zap.Int("admissions_omitted", omittedAdmissions),
+		zap.Int("outgoing_pending", frontier.outgoingPending),
+		zap.Int("incoming_pending", len(frontier.pending)-frontier.outgoingPending))
 
-	resolveStarted := time.Now()
 	// Resolve every changed file from the preloaded frontier, flush once, then
 	// read the incoming restub buckets afresh. The fresh read preserves the
 	// old forward-before-reverse semantics without one query/transaction per
-	// file.
+	// file. Phase durations include each leg's batched graph mutation.
+	finish = startIncrementalPhase(logger, "resolve_outgoing")
 	r.resolvePreparedFileEdgesLocked(frontier.paths, frontier.nodesByFile, frontier.outByNode, stats)
+	outgoingDuration = finish(
+		zap.Int("resolved", stats.Resolved), zap.Int("unresolved", stats.Unresolved), zap.Int("external", stats.External))
+	beforeIncoming := *stats
+	finish = startIncrementalPhase(logger, "resolve_incoming")
 	r.resolveIncomingStubKeysLocked(frontier.stubKeys, stats)
-	resolveDuration := time.Since(resolveStarted)
-	attributionStarted := time.Now()
+	incomingDuration = finish(
+		zap.Int("resolved", stats.Resolved-beforeIncoming.Resolved),
+		zap.Int("unresolved", stats.Unresolved-beforeIncoming.Unresolved),
+		zap.Int("external", stats.External-beforeIncoming.External))
+	finish = startIncrementalPhase(logger, "attribution")
 	r.prepareIncrementalAttributionCache(frontier)
 	r.runFileAttributionPassesForFilesLocked(frontier)
 	r.clearIncrementalAttributionCache()
-	attributionDuration := time.Since(attributionStarted)
-	if elapsed := time.Since(started); elapsed >= time.Second {
-		r.logger.Info("resolver: incremental files phases",
-			zap.Int("files", len(frontier.paths)),
-			zap.Int("pending", len(frontier.pending)),
-			zap.Duration("pending_collect", pendingDuration),
-			zap.Duration("build_indexes", indexDuration),
-			zap.Duration("warm_lookup", warmDuration),
-			zap.Duration("resolve", resolveDuration),
-			zap.Duration("attribution", attributionDuration),
-			zap.Duration("total", elapsed))
-	}
+	attributionDuration = finish()
+	outcome = "complete"
 	return stats
+}
+
+// Keep one bounded summary per pass, never one log record per admitted edge.
+const incrementalRepoLogLimit = 32
+
+type incrementalRepoAdmission struct {
+	Repo     string `json:"repo"`
+	Outgoing int    `json:"outgoing"`
+	Incoming int    `json:"incoming"`
+}
+
+// incrementalAdmissionSummary only inspects the already hydrated frontier and
+// lookup cache. Missing provenance is reported explicitly, never hydrated with
+// an extra store query just for logging. Counts are admissions, not unique
+// edges: one edge may legitimately occur in both the outgoing and incoming legs.
+func incrementalAdmissionSummary(frontier incrementalFileFrontier, sources map[string]*graph.Node) ([]incrementalRepoAdmission, int, int) {
+	byRepo := make(map[string]*incrementalRepoAdmission)
+	for i, edge := range frontier.pending {
+		repo := "(unknown)"
+		if edge != nil {
+			if source := sources[edge.From]; source != nil && source.RepoPrefix != "" {
+				repo = source.RepoPrefix
+			}
+		}
+		counts := byRepo[repo]
+		if counts == nil {
+			counts = &incrementalRepoAdmission{Repo: repo}
+			byRepo[repo] = counts
+		}
+		if i < frontier.outgoingPending {
+			counts.Outgoing++
+		} else {
+			counts.Incoming++
+		}
+	}
+	repos := make([]incrementalRepoAdmission, 0, len(byRepo))
+	for _, counts := range byRepo {
+		repos = append(repos, *counts)
+	}
+	sort.Slice(repos, func(i, j int) bool {
+		left, right := repos[i].Outgoing+repos[i].Incoming, repos[j].Outgoing+repos[j].Incoming
+		if left != right {
+			return left > right
+		}
+		return repos[i].Repo < repos[j].Repo
+	})
+	omittedRepos, omittedAdmissions := 0, 0
+	if len(repos) > incrementalRepoLogLimit {
+		omittedRepos = len(repos) - incrementalRepoLogLimit
+		for _, counts := range repos[incrementalRepoLogLimit:] {
+			omittedAdmissions += counts.Outgoing + counts.Incoming
+		}
+		repos = repos[:incrementalRepoLogLimit]
+	}
+	return repos, omittedRepos, omittedAdmissions
+}
+
+// A start event leaves the active operation visible even if it blocks or never
+// returns. Durations use the monotonic component of time.Now, not wall-clock
+// subtraction or sleeps.
+func startIncrementalPhase(logger *zap.Logger, phase string) func(...zap.Field) time.Duration {
+	started := time.Now()
+	logger.Info("resolver: incremental phase starting", zap.String("phase", phase))
+	return func(fields ...zap.Field) time.Duration {
+		elapsed := time.Since(started)
+		fields = append(fields, zap.String("phase", phase), zap.Duration("elapsed", elapsed))
+		logger.Info("resolver: incremental phase complete", fields...)
+		return elapsed
+	}
 }
 
 // resolveFileLocked is the forward-pass core. Caller holds r.mu and
@@ -2750,6 +2916,9 @@ func (r *Resolver) applyIncrementalReindexesLocked(
 		// nil index: incremental batches are file-sized, direct probes
 		// stay under the single-save latency budget.
 		reconcilePlaceholderSources(r.graph, nil, reindexBatch)
+		for _, ri := range reindexBatch {
+			r.noteRetargetedCall(ri.Edge)
+		}
 	}
 	// Cross-package name-match guard — same contract as in ResolveAll.
 	if len(jobs) == 0 {
@@ -2896,6 +3065,79 @@ func (r *Resolver) ResolveIncomingForFile(filePath string) *ResolveStats {
 	return stats
 }
 
+// ResolveIncomingForNames rebinds the pending references parked under the
+// given symbol names' unresolved stubs, probing the bare and the
+// `<repoPrefix>::` multi-repo stub forms for every supplied prefix. The
+// receipt-exact eviction path records the names whose definitions were
+// removed; their pending references live OUTSIDE any file frontier (the
+// definition's file no longer declares the name, so a file-scoped incoming
+// pass never enumerates its stub) and were previously retried only by the
+// whole-graph fallback the exact receipt now avoids. The gates are unchanged:
+// resolveEdge refuses ambiguity identically here, so a name whose surviving
+// candidates are still ambiguous binds no differently and stays pending.
+func (r *Resolver) ResolveIncomingForNames(names, repoPrefixes []string) *ResolveStats {
+	stats := &ResolveStats{}
+	if len(names) == 0 {
+		return stats
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(names))
+	var stubKeys []string
+	appendKeys := func(keys []string) {
+		for _, key := range keys {
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			stubKeys = append(stubKeys, key)
+		}
+	}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		appendKeys(graph.UnresolvedNameCandidateIDsForName(name, ""))
+		for _, prefix := range repoPrefixes {
+			if prefix != "" {
+				appendKeys(graph.UnresolvedNameCandidateIDsForName(name, prefix))
+			}
+		}
+	}
+	if len(stubKeys) == 0 {
+		return stats
+	}
+	// Probe the pending buckets before paying for the pass indexes: the
+	// receipt consumers call this on every apply, and the common case is
+	// that no edge is parked under any requested name. buildPassIndexes is
+	// graph-wide (it scales with the store, not with the request), so a
+	// no-work call must cost one bounded read instead. The probe's
+	// materialized read is retained and handed to the resolution helper:
+	// it is exactly the batch that helper needs, and re-reading it doubled
+	// the hit path's store time and allocations at scale.
+	inByStub := r.graph.GetInEdgesByNodeIDs(stubKeys)
+	pending := false
+	for _, edges := range inByStub {
+		for _, edge := range edges {
+			if edge != nil && graph.IsUnresolvedTarget(edge.To) {
+				pending = true
+				break
+			}
+		}
+		if pending {
+			break
+		}
+	}
+	if !pending {
+		return stats
+	}
+	clear := r.buildPassIndexes()
+	defer clear()
+	r.resolveIncomingStubEdgesLocked(stubKeys, inByStub, stats)
+	return stats
+}
+
 // resolveIncomingLocked is the core of the reverse pass. Caller holds
 // r.mu and has built the per-pass indexes. For each distinct
 // referenceable symbol name defined in filePath it looks up the pending
@@ -2919,10 +3161,7 @@ func (r *Resolver) resolveIncomingLocked(filePath string, stats *ResolveStats) {
 			continue
 		}
 		seen[n.Name] = struct{}{}
-		stubKeys = append(stubKeys, graph.UnresolvedMarker+n.Name)
-		if n.RepoPrefix != "" {
-			stubKeys = append(stubKeys, n.RepoPrefix+"::"+graph.UnresolvedMarker+n.Name)
-		}
+		stubKeys = append(stubKeys, graph.UnresolvedNameCandidateIDs(n)...)
 	}
 	if len(stubKeys) == 0 {
 		return
@@ -2937,9 +3176,18 @@ func (r *Resolver) resolveIncomingStubKeysLocked(stubKeys []string, stats *Resol
 	if len(stubKeys) == 0 {
 		return
 	}
+	r.resolveIncomingStubEdgesLocked(stubKeys, r.graph.GetInEdgesByNodeIDs(stubKeys), stats)
+}
+
+// resolveIncomingStubEdgesLocked is resolveIncomingStubKeysLocked over a
+// caller-supplied incoming-edge batch, for callers that already materialized
+// the frontier (the names-pass probe). Caller holds r.mu.
+func (r *Resolver) resolveIncomingStubEdgesLocked(stubKeys []string, inByStub map[string][]*graph.Edge, stats *ResolveStats) {
+	if len(stubKeys) == 0 {
+		return
+	}
 	var reindexBatch []graph.EdgeReindex
 	var jobs []reindexJob
-	inByStub := r.graph.GetInEdgesByNodeIDs(stubKeys)
 	for _, key := range stubKeys {
 		for _, edge := range inByStub[key] {
 			if edge == nil || !graph.IsUnresolvedTarget(edge.To) {
@@ -3057,8 +3305,24 @@ func releaseResolverClone(clone *graph.Edge) {
 // caller decides whether to call graph.ReindexEdge immediately
 // (single-threaded ResolveFile) or to defer the reindex (parallel
 // ResolveAll). When nothing changed the returned bool is false.
+// resolutionExempt reports whether the resolver must never bind this edge
+// independently, on ANY path — the heuristic cascade, the inline LSP
+// hot-path, the deferred bulk LSP batch, and the cross-repository pass all
+// consult it. A tests edge is DERIVED: the test-linkage pass clones a test
+// caller's calls edges, meta-free. Re-running the bind WITHOUT the
+// original's receiver evidence bypasses every receiver-gated guard (a
+// List<int> site's clone bound a `this List<string>` extension the guarded
+// calls edge itself refuses). The tests layer follows its calls edge; the
+// resolver never binds it.
+func resolutionExempt(e *graph.Edge) bool {
+	return e != nil && e.Kind == graph.EdgeTests
+}
+
 func (r *Resolver) resolveEdge(e *graph.Edge, stats *ResolveStats) (oldTo string, changed bool) {
 	oldTo = e.To
+	if resolutionExempt(e) {
+		return oldTo, false
+	}
 	// graph.UnresolvedName handles both `unresolved::Name` (legacy)
 	// and `<repoPrefix>::unresolved::Name` (multi-repo COPY rewrite).
 	// strings.TrimPrefix only stripped the bare form, leaving every
@@ -3490,7 +3754,7 @@ func (r *Resolver) resolveImport(e *graph.Edge, importPath string, stats *Resolv
 		// the last path component only, so without this gate an import
 		// of `.../tree-sitter-c/bindings/go` would resolve to whichever
 		// `*/bindings/go` directory sorts first.
-		if !crossRepoFound && dirMatchesImport(filepath.Dir(file.FilePath), importPath) {
+		if !crossRepoFound && dirMatchesImport(filePathDir(file.FilePath), importPath) {
 			crossRepoFile, crossRepoFound = file, true
 		}
 	}
@@ -3517,7 +3781,7 @@ func (r *Resolver) resolveImport(e *graph.Edge, importPath string, stats *Resolv
 		}
 	} else {
 		for file := range graph.FileNodeIdentitiesSeq(r.graph, nil) {
-			dir := filepath.Dir(file.FilePath)
+			dir := filePathDir(file.FilePath)
 			if strings.HasSuffix(dir, lastPathComponent(importPath)) || dir == importPath {
 				consider(file)
 				if stop() {
@@ -3593,6 +3857,16 @@ func (r *Resolver) resolveImport(e *graph.Edge, importPath string, stats *Resolv
 }
 
 func (r *Resolver) resolveFunctionCall(e *graph.Edge, funcName string, stats *ResolveStats) {
+	// A restubbed C# using-static bind keeps its tag through the restub;
+	// the tier re-stamps it on a rebind, and nothing else may inherit it.
+	csharpDropStaleUsingStaticTag(e)
+	// A C# simple name the caller's own declaration space binds (local
+	// function, delegate parameter, local) is that binding, which no tier
+	// below can point at — the stub stays, honestly unresolved.
+	if csharpLocalShadowed(e) {
+		stats.Unresolved++
+		return
+	}
 	callerRepo := r.callerRepoPrefix(e)
 	candidates := withoutReExportForwarders(r.cachedFindNodesByNameInRepoForEdge(funcName, callerRepo, e))
 	if len(candidates) == 0 {
@@ -3699,6 +3973,17 @@ func (r *Resolver) resolveFunctionCall(e *graph.Edge, funcName string, stats *Re
 			e.Confidence = 0.9
 		}
 		stats.Resolved++
+		return
+	}
+
+	// C# `using static Ns.Cls;` puts Cls's static members in scope by
+	// simple name — an explicit directive naming the owner, which
+	// outranks every locality tier below (directory means nothing in
+	// C#). Behind the same-file pick on purpose: the graph records no
+	// outer-type chain, and a nested type's call to an enclosing type's
+	// static member is exactly what the same-file tier already binds
+	// right. Member calls never take it — they carry a receiver.
+	if !csharpMember && r.csharpBindUsingStaticCall(e, funcName, candidates, stats) {
 		return
 	}
 
@@ -4546,10 +4831,10 @@ func (r *Resolver) buildReachabilityIndex() {
 	}
 
 	// Seed with each indexed file's own directory, and memoise the per-file
-	// dir so filterByReachability never recomputes filepath.Dir per edge.
+	// dir so filterByReachability never recomputes filePathDir per edge.
 	dirByPath := make(map[string]string)
 	seedFile := func(file graph.FileNodeIdentity) {
-		dir := filepath.Dir(file.FilePath)
+		dir := filePathDir(file.FilePath)
 		dirByPath[file.FilePath] = dir
 		addDir(file.ID, dir)
 	}
@@ -4600,7 +4885,7 @@ func (r *Resolver) buildReachabilityIndex() {
 			// External / unindexed package — nothing to add.
 		default:
 			if placement, ok := placements[e.To]; ok && placement.Kind == graph.KindFile {
-				importedDir = filepath.Dir(placement.FilePath)
+				importedDir = filePathDir(placement.FilePath)
 			}
 		}
 		if importedDir != "" {
@@ -4724,7 +5009,7 @@ func (r *Resolver) buildReachabilityIndexForPendingCached(
 	dirs := make(map[string]string, len(filePaths))
 	missingFiles := make([]string, 0, len(filePaths))
 	for _, filePath := range filePaths {
-		dir := filepath.Dir(filePath)
+		dir := filePathDir(filePath)
 		dirs[filePath] = dir
 		if cached, ok := stableByFile[filePath]; ok {
 			reachable[filePath] = cached
@@ -4811,7 +5096,7 @@ func (r *Resolver) buildReachabilityIndexForPendingCached(
 			case strings.HasPrefix(targetID, "external::"):
 			default:
 				if target, ok := targets[targetID]; ok && target.FilePath != "" {
-					importedDir = filepath.Dir(target.FilePath)
+					importedDir = filePathDir(target.FilePath)
 					dirs[target.FilePath] = importedDir
 				}
 			}
@@ -5003,7 +5288,7 @@ func (r *Resolver) importedDirForSpec(callerFile, spec string) string {
 			if bare && !isJSTSDirEntryPoint(f.FilePath) {
 				continue
 			}
-			return filepath.Dir(f.FilePath)
+			return filePathDir(f.FilePath)
 		}
 		return ""
 	}
@@ -5016,16 +5301,16 @@ func (r *Resolver) importedDirForSpec(callerFile, spec string) string {
 	return ""
 }
 
-// dirFor returns filepath.Dir(path), served from the per-file memo built in
+// dirFor returns filePathDir(path), served from the per-file memo built in
 // buildReachabilityIndex (every indexed file is keyed) and falling back to a
 // live computation for paths not in the index. The memo turns the per-edge
-// filepath.Dir in filterByReachability — ~20% of resolution CPU on a large
+// filePathDir in filterByReachability — ~20% of resolution CPU on a large
 // monorepo — into a map lookup.
 func (r *Resolver) dirFor(path string) string {
 	if d, ok := r.dirByFilePath[path]; ok {
 		return d
 	}
-	return filepath.Dir(path)
+	return filePathDir(path)
 }
 
 // filterByReachability narrows candidates to those whose defining file
@@ -5237,7 +5522,7 @@ func bestTypeCandidate(candidates []*graph.Node, callerDir string) *graph.Node {
 			continue
 		}
 		rank := typeCandidateRank(c)
-		sameDir := filepath.Dir(c.FilePath) == callerDir
+		sameDir := filePathDir(c.FilePath) == callerDir
 		if best == nil || candidateBeats(rank, sameDir, c.ID, bestRank, bestSameDir, best.ID) {
 			best, bestRank, bestSameDir = c, rank, sameDir
 		}

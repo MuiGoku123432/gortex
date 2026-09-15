@@ -10,6 +10,7 @@ import (
 	"github.com/zzet/gortex/internal/analysis"
 	"github.com/zzet/gortex/internal/contracts"
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graphview"
 )
 
 func (s *Server) registerAnalysisTools() {
@@ -66,7 +67,7 @@ func (s *Server) registerAnalysisTools() {
 			mcp.WithDescription("Trigram-accelerated literal (or regexp) code search across the indexed repository — the alt grep backbone. Each hit carries the enclosing graph symbol (symbol_id / symbol_name) so you see which function or method a match landed in without a follow-up call. A trigram index narrows the candidate files, so a repo-wide search costs roughly the size of the matching files, not the whole tree. Use for literal-string / regexp lookups; use search_symbols for symbol-name / concept queries."),
 			mcp.WithString("query", mcp.Description("Literal substring (case-sensitive) to search for — or a regular expression when regexp=true.")),
 			mcp.WithBoolean("regexp", mcp.Description("Treat query as a regular expression instead of a literal substring. An invalid pattern is returned as a tool error. Default false.")),
-			mcp.WithNumber("limit", mcp.Description("Max matching lines to return (default 100, capped at 1000).")),
+			mcp.WithNumber("limit", mcp.Description("Max matching lines to return (default 100, capped at 1000). A bound result sets _truncated_by_limit.")),
 			mcp.WithString("path", mcp.Description("Restrict matches to one or more sub-paths (comma-separated) -- a monorepo-service slice. Anchored, slash-segment-boundary prefixes relative to the repo root.")),
 			mcp.WithString("repo", mcp.Description("Restrict matches to a single repository prefix.")),
 			mcp.WithString("project", mcp.Description("Restrict matches to repositories in a specific project.")),
@@ -105,6 +106,10 @@ func (s *Server) handleGetCommunities(ctx context.Context, req mcp.CallToolReque
 	// probeable, and a community that straddles the boundary still has its
 	// foreign members dropped.
 	comms := s.communitiesInSessionScope(ctx, s.getCommunities())
+	// The partition is the server-wide one, computed over the base corpus
+	// rather than through this request's reader, so under a view every answer
+	// built from it describes the base.
+	annotateBaseScoped(ctx, graphview.CapSyntaxGraph)
 
 	// If id is provided, return the single community in detail.
 	if id := req.GetString("id", ""); id != "" {
@@ -196,6 +201,10 @@ func (s *Server) handleGetProcesses(ctx context.Context, req mcp.CallToolRequest
 	// Clamp before the id branch so an out-of-scope process id reports the
 	// same "not found" as a fabricated one.
 	procs := s.processesInSessionScope(ctx, s.getProcesses())
+	// Process discovery is the server-wide pass over the base corpus, not a
+	// walk of this request's reader, so under a view every answer built from
+	// it describes the base.
+	annotateBaseScoped(ctx, graphview.CapSyntaxGraph)
 
 	// If id is provided, return the single process in detail.
 	if id := req.GetString("id", ""); id != "" {
@@ -327,15 +336,52 @@ func (s *Server) handleDetectChanges(ctx context.Context, req mcp.CallToolReques
 	// Resolve the working tree: explicit repo selector, lone tracked repo,
 	// or the session's cwd-bound repo. The "." fallback keeps the standalone
 	// (indexer-less) server working from its own cwd.
-	repoRoot, repoPrefix, rootErr := s.resolveDiffRoot(ctx, strings.TrimSpace(req.GetString("repo", "")))
+	repoSelector := strings.TrimSpace(req.GetString("repo", ""))
+	control := checkoutControlFromContext(ctx)
+	var repoRoot, repoPrefix string
+	var rootErr error
+	if control != nil && control.CheckoutScoped {
+		rootErr = control.validateRepoSelector(repoSelector)
+		repoRoot, repoPrefix = control.Checkout.RootPath, control.RepoPrefix
+	} else {
+		repoRoot, repoPrefix, rootErr = s.resolveDiffRoot(ctx, repoSelector)
+	}
 	if rootErr != nil {
 		return mcp.NewToolResultError(rootErr.Error()), nil
 	}
-	if freshnessErr := s.awaitMutationFreshnessForRepos(ctx, repoPrefix); freshnessErr != nil {
-		return mcp.NewToolResultError("change detection refused a stale graph: " + freshnessErr.Error()), nil
+	if scopeErr := s.repoPrefixInSessionScope(ctx, repoPrefix, repoPrefix); scopeErr != nil {
+		return mcp.NewToolResultError(scopeErr.Error()), nil
+	}
+	var pending bool
+	var freshnessErr error
+	if control != nil && control.CheckoutScoped {
+		pending, freshnessErr = s.mutationFreshnessSummaryForRepos(ctx, repoPrefix)
+	} else if err := s.awaitMutationFreshnessForRepos(ctx, repoPrefix); err != nil {
+		return mcp.NewToolResultError("change detection refused a stale graph: " + err.Error()), nil
+	}
+	reader := s.readerFor(ctx)
+	graphStatus, graphDetail := "ready", ""
+	if pending {
+		graphStatus, graphDetail = "pending", "checkout changes are committed but graph publication is pending"
+	}
+	if freshnessErr != nil {
+		graphStatus, graphDetail = "failed", freshnessErr.Error()
+	}
+	if control != nil && control.CheckoutScoped {
+		view := requestViewFromContext(ctx)
+		if view == nil || view.rider == nil || !view.rider.Exact || !view.routed() {
+			if graphStatus == "ready" {
+				graphStatus, graphDetail = "pending", "the selected checkout has no exact published graph view"
+			}
+		}
+	}
+	if graphStatus != "ready" {
+		// Git can still report file changes, but stale/base symbols must not
+		// impersonate the selected checkout's changed symbols or impact.
+		reader = nil
 	}
 
-	diff, err := analysis.MapGitDiff(s.graph, repoRoot, repoPrefix, scope, baseRef)
+	diff, err := analysis.MapGitDiff(reader, repoRoot, repoPrefix, scope, baseRef)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -350,6 +396,14 @@ func (s *Server) handleDetectChanges(ctx context.Context, req mcp.CallToolReques
 	fileChanges := diff.FileChanges
 	if fileChanges == nil {
 		fileChanges = []analysis.FileChange{}
+	}
+	if graphStatus != "ready" {
+		return s.respondJSONOrTOON(ctx, req, map[string]any{
+			"changed_symbols": []any{}, "changed_files": changedFiles, "file_changes": fileChanges,
+			"risk": "UNKNOWN", "complete": false, "graph_status": graphStatus,
+			"summary": "Git file changes are available; symbol mapping and impact await an exact published graph",
+			"detail":  graphDetail, "scope": scope, "repo": repoPrefix, "repo_root": repoRoot,
+		})
 	}
 
 	if len(diff.ChangedSymbols) == 0 {
@@ -379,7 +433,7 @@ func (s *Server) handleDetectChanges(ctx context.Context, req mcp.CallToolReques
 		symbolIDs[i] = cs.ID
 	}
 
-	impact := analysis.AnalyzeImpact(s.graph, symbolIDs, s.getCommunities(), s.getProcesses())
+	impact := analysis.AnalyzeImpact(s.readerFor(ctx), symbolIDs, s.getCommunities(), s.getProcesses())
 
 	detectResult := map[string]any{
 		"changed_symbols":      diff.ChangedSymbols,
@@ -441,7 +495,7 @@ func (s *Server) handleEnhancedChangeImpact(ctx context.Context, req mcp.CallToo
 	impactCtx, cancelImpact := context.WithTimeout(ctx, 3*time.Second)
 	defer cancelImpact()
 	communities, processes := s.tryImpactAnalysisSnapshots()
-	impact := analysis.AnalyzeImpactContext(impactCtx, s.graph, ids, communities, processes)
+	impact := analysis.AnalyzeImpactContext(impactCtx, s.readerFor(ctx), ids, communities, processes)
 
 	result := map[string]any{
 		"risk":                 impact.Risk,
@@ -490,11 +544,12 @@ func (s *Server) handleEnhancedChangeImpact(ctx context.Context, req mcp.CallToo
 		// cheaply — so the safety gate is armed everywhere, not only on small
 		// embedded graphs.
 		var caveats []graph.ZeroImpactCaveat
+		reader := s.readerFor(ctx)
 		for _, id := range ids {
 			if id == "" {
 				continue
 			}
-			if c := graph.CaveatForZeroEdge(s.graph, id); c != nil {
+			if c := graph.CaveatForZeroEdge(reader, id); c != nil {
 				caveats = append(caveats, graph.ZeroImpactCaveat{
 					ID:      id,
 					Class:   c.Class,
@@ -657,13 +712,14 @@ func (s *Server) computeContractImpactContext(ctx context.Context, changedIDs []
 		}
 	}
 	aborted := false
+	reader := s.readerFor(ctx)
 	lookup := contracts.ShapeLookup(func(id string) *contracts.Shape {
-		if ctx.Err() != nil || s.graph == nil {
+		if ctx.Err() != nil || reader == nil {
 			aborted = true
 			return nil
 		}
 		var n *graph.Node
-		if getter, ok := s.graph.(contractImpactNodeContextGetter); ok {
+		if getter, ok := reader.(contractImpactNodeContextGetter); ok {
 			var err error
 			n, err = getter.GetNodeContext(ctx, id)
 			if err != nil {
@@ -678,7 +734,7 @@ func (s *Server) computeContractImpactContext(ctx context.Context, changedIDs []
 				aborted = true
 				return nil
 			}
-			n = s.graph.GetNode(id)
+			n = reader.GetNode(id)
 			if ctx.Err() != nil {
 				aborted = true
 				return nil

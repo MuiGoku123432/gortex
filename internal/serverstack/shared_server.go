@@ -18,10 +18,13 @@ import (
 	"github.com/zzet/gortex/internal/daemon"
 	"github.com/zzet/gortex/internal/embedding"
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
+	"github.com/zzet/gortex/internal/graphview"
 	"github.com/zzet/gortex/internal/indexer"
 	gortexmcp "github.com/zzet/gortex/internal/mcp"
 	"github.com/zzet/gortex/internal/parser"
 	"github.com/zzet/gortex/internal/parser/languages"
+	"github.com/zzet/gortex/internal/persistence"
 	"github.com/zzet/gortex/internal/platform"
 	"github.com/zzet/gortex/internal/query"
 	"github.com/zzet/gortex/internal/savings"
@@ -74,14 +77,15 @@ type SharedServerConfig struct {
 	Watch       bool   // filesystem watcher / incremental reindex
 
 	// Entry-point-resolved options (not part of the authoritative surface).
-	Config         *config.Config       // loaded .gortex.yaml (required)
-	Global         *config.GlobalConfig // loaded ~/.gortex/config.yaml
-	Logger         *zap.Logger
-	Version        string
-	Embedder       EmbedderRequest
-	SideStores     SideStores
-	ScopeWorkspace string
-	ScopeProject   string
+	Config            *config.Config       // loaded .gortex.yaml (required)
+	Global            *config.GlobalConfig // loaded ~/.gortex/config.yaml
+	Logger            *zap.Logger
+	Version           string
+	MigrationObserver store_sqlite.MigrationObserver
+	Embedder          EmbedderRequest
+	SideStores        SideStores
+	ScopeWorkspace    string
+	ScopeProject      string
 	// ActiveProject names the project the MCP server should start scoped
 	// to (multi-repo mode hint). Empty leaves it unset.
 	ActiveProject string
@@ -137,6 +141,11 @@ type SharedServer struct {
 	MCP          *gortexmcp.Server
 	ConfigMgr    *config.ConfigManager
 	Overlays     *daemon.OverlayManager
+	// CheckoutLifecycle owns every checkout lifecycle side effect — track,
+	// forget, reload, the periodic sweep — for every entry point wired to
+	// this stack. Nil in single-repo standalone, where there is no
+	// multi-repo indexer to own a tracked set.
+	CheckoutLifecycle *indexer.CheckoutLifecycle
 	// StorePath is the graph store file this stack actually opened: the
 	// caller's BackendPath expanded to an absolute path, or the platform
 	// default when it was empty. Entry points publish it so out-of-band
@@ -150,13 +159,30 @@ type SharedServer struct {
 	LSPRouter           *lsp.Router
 
 	cleanup []func() // run LIFO by Close (backend close, savings flush).
+	// sidecarPaths are the sidecar databases this stack caused to be
+	// opened — the side stores and the savings ledger. They are released
+	// after the teardown chain, not inside it.
+	sidecarPaths []string
 }
 
-// Close runs the teardown chain LIFO.
+// Close runs the teardown chain LIFO, then releases every sidecar database
+// the stack opened.
+//
+// The sidecar handles go last, outside the chain: every cleanup step that
+// might still write a note, a memory or a saving has finished by then.
+// Leaving them open pins the sidecar files for the life of the process,
+// which the daemon can afford and a one-shot stack cannot — on Windows an
+// open file cannot be deleted, so the directory holding it survives
+// teardown. persistence.CloseSidecar is a no-op for a path nothing opened,
+// so listing a store that stayed in memory costs nothing.
 func (s *SharedServer) Close() error {
 	for i := len(s.cleanup) - 1; i >= 0; i-- {
 		s.cleanup[i]()
 	}
+	for _, path := range s.sidecarPaths {
+		_ = persistence.CloseSidecar(path)
+	}
+	s.sidecarPaths = nil
 	return nil
 }
 
@@ -284,7 +310,7 @@ func NewSharedServer(cfg SharedServerConfig) (*SharedServer, error) {
 
 	// allowRebuild is gated on actually holding the store lock: only then may
 	// the sqlite backend drop and recreate an incompatible-schema DB.
-	g, backendCleanup, err := OpenBackend(cfg.Backend, storePath, logger, storeLockHeld)
+	g, backendCleanup, err := OpenBackend(cfg.Backend, storePath, logger, storeLockHeld, cfg.MigrationObserver)
 	if err != nil {
 		return nil, err
 	}
@@ -580,6 +606,33 @@ func NewSharedServer(cfg SharedServerConfig) (*SharedServer, error) {
 		}
 	}
 	s.MultiIndexer = mi
+	// One reconciler per stack, built here so every entry point — the daemon
+	// controller, the MCP tools, the auto-index path, the janitor — drives
+	// the same identities, clocks and cleanup hooks. It binds to the store's
+	// catalog when the backend has one and degrades to the plain
+	// index/watcher/config side effects when it does not.
+	if mi != nil {
+		if conf.Views.RetainInactive != "" && conf.Views.RetainInactiveDuration() == 0 {
+			logger.Warn("serverstack: views.retain_inactive is not a positive duration; using the shipped window",
+				zap.String("value", conf.Views.RetainInactive))
+		}
+		lifecycle, lerr := indexer.NewCheckoutLifecycle(indexer.CheckoutLifecycleConfig{
+			MultiIndexer:  mi,
+			ConfigManager: cm,
+			Graph:         g,
+			Logger:        logger,
+			LazyWorktrees: conf.Views.LazyWorktreeActivation,
+			RefViews: indexer.RefViewRetention{
+				RetainInactive:       conf.Views.RetainInactiveDuration(),
+				MaxCachedGenerations: conf.Views.MaxCachedGenerations,
+				MaxBytesPerGraph:     conf.Views.MaxBytesPerGraph,
+			},
+		})
+		if lerr != nil {
+			return nil, fmt.Errorf("build checkout lifecycle: %w", lerr)
+		}
+		s.CheckoutLifecycle = lifecycle
+	}
 	// Appended after backendCleanup but before MCP background drain. LIFO
 	// teardown therefore drains background work first, then closes per-repo
 	// parser workers, then the standalone Indexer, and only then the graph and
@@ -604,6 +657,7 @@ func NewSharedServer(cfg SharedServerConfig) (*SharedServer, error) {
 	multiOpts := []gortexmcp.MultiRepoOptions{{
 		MultiIndexer:        mi,
 		ConfigManager:       cm,
+		CheckoutLifecycle:   s.CheckoutLifecycle,
 		ActiveProject:       cfg.ActiveProject,
 		ScopeWorkspace:      cfg.ScopeWorkspace,
 		ScopeProject:        cfg.ScopeProject,
@@ -622,6 +676,30 @@ func NewSharedServer(cfg SharedServerConfig) (*SharedServer, error) {
 	// detached store-writing goroutines (analysis-generation prune) before
 	// the backend store closes underneath them.
 	s.cleanup = append(s.cleanup, srv.DrainBackground)
+	// The server is the session/analysis fan-out, so it can only be bound
+	// after it exists. Every lifecycle side effect — including the ones the
+	// daemon controller drives — reaches sessions through it from here on.
+	s.CheckoutLifecycle.SetNotifier(srv)
+	// One materializer per stack, over the same store and catalog every other
+	// collaborator uses, so a routed view and the sweep that retires its
+	// generations agree on which leases are live. The lease manager must be
+	// the lifecycle's own: retirement runs in the coordinators with that
+	// manager as its in-use predicate, so a request leasing through any other
+	// manager would be invisible to the sweep and its generations could be
+	// deleted mid-read. A backend without a catalog hands the server nothing
+	// and every request stays on the base corpus.
+	if store, ok := g.(*store_sqlite.Store); ok {
+		leases := s.CheckoutLifecycle.ViewLeases()
+		if leases == nil {
+			leases = graphview.NewLeaseManager()
+		}
+		srv.SetMaterializer(&graphview.Materializer{
+			Store:   store,
+			Catalog: store.Catalog(),
+			Leases:  leases,
+			Logger:  logger,
+		})
+	}
 	srv.SetArchitecture(conf.Architecture)
 	srv.SetEventRules(conf.Events.Rules)
 	srv.SetArtifacts(conf.Artifacts)
@@ -668,12 +746,25 @@ func NewSharedServer(cfg SharedServerConfig) (*SharedServer, error) {
 	// Side-stores. The HTTP path previously wired NONE of these; routing it
 	// through the shared constructor adds notes/memories/savings to it.
 	sideCfg := cfg.SideStores
+	// Every side store resolves its dir to <dir>/sidecar.sqlite and holds
+	// that handle open; record the files so Close can release them.
+	for _, dir := range []string{sideCfg.NotesDir, sideCfg.FeedbackDir} {
+		if dir != "" {
+			s.sidecarPaths = append(s.sidecarPaths, persistence.DefaultSidecarPath(dir))
+		}
+	}
 	srv.InitFeedback(sideCfg.FeedbackDir, sideCfg.FeedbackRepo)
 	srv.InitNotes(sideCfg.NotesDir, sideCfg.NotesRepo)
 	// Learned tool surface: re-promote tools this workspace promoted in
 	// prior sessions (demoting the ones that fell out of use). Runs after
 	// the NewServer register sweep, so the cold tools are already deferred.
 	srv.InitLearnedTools(sideCfg.NotesDir, sideCfg.NotesRepo)
+	// InitMemories opens a second store the SideStores dirs do not name: the
+	// user-level global memories, always mounted at platform.MemoriesDir()
+	// even when this stack configured no side-store dirs at all. Its sidecar
+	// handle is as durable as the others, so record it here or a stack whose
+	// SideStores are empty still leaves one file open at Close.
+	s.sidecarPaths = append(s.sidecarPaths, persistence.DefaultSidecarPath(platform.MemoriesDir()))
 	srv.InitMemories(sideCfg.NotesDir, sideCfg.NotesRepo)
 	srv.InitSuppressions(sideCfg.NotesDir, sideCfg.NotesRepo)
 	srv.InitNotebook(sideCfg.NotebookPath)
@@ -697,6 +788,7 @@ func NewSharedServer(cfg SharedServerConfig) (*SharedServer, error) {
 			logger.Warn("serverstack: legacy savings import failed", zap.Error(ierr))
 		}
 		srv.InitSavings(savingsStore, cfg.SavingsRepo)
+		s.sidecarPaths = append(s.sidecarPaths, savingsPath)
 		s.cleanup = append(s.cleanup, func() { _ = srv.FlushSavings() })
 	} else {
 		logger.Warn("serverstack: savings persistence disabled", zap.Error(err))

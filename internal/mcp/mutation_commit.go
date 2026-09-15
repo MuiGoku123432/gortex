@@ -106,11 +106,21 @@ type mutationCommitRecord struct {
 
 	disk  string
 	graph string
+	// graphRecorded says whether graph carries an outcome or is still the
+	// seed beginMutationCommit wrote. The status string cannot answer that on
+	// its own: "stale" means both "the reindex reported without confirming an
+	// index write" (terminal) and "nothing has reported yet" (in flight), and
+	// terminality is the opposite in the two cases.
+	graphRecorded bool
 
-	newSHA         string
-	bytesWritten   int
-	reindexReceipt string
-	errText        string
+	newSHA              string
+	bytesWritten        int
+	reindexReceipt      string
+	reindexGeneration   uint64
+	appliedGeneration   uint64
+	checkoutID          string
+	checkoutIncarnation string
+	errText             string
 
 	startedAt   time.Time
 	committedAt time.Time
@@ -122,32 +132,48 @@ type mutationCommitRecord struct {
 }
 
 type mutationCommitSnapshot struct {
-	Receipt      string `json:"receipt"`
-	Tool         string `json:"tool,omitempty"`
-	MutationID   string `json:"mutation_id,omitempty"`
-	Path         string `json:"path,omitempty"`
-	DiskStatus   string `json:"disk_status"`
-	GraphStatus  string `json:"graph_status"`
-	NewSHA       string `json:"new_sha,omitempty"`
-	BytesWritten int    `json:"bytes_written,omitempty"`
-	Error        string `json:"error,omitempty"`
-	StartedAt    string `json:"started_at,omitempty"`
-	CommittedAt  string `json:"committed_at,omitempty"`
+	Receipt     string `json:"receipt"`
+	Tool        string `json:"tool,omitempty"`
+	MutationID  string `json:"mutation_id,omitempty"`
+	Path        string `json:"path,omitempty"`
+	DiskStatus  string `json:"disk_status"`
+	GraphStatus string `json:"graph_status"`
+	// GraphRecorded is not published on its own; it decides
+	// graph_status_terminal and graph_note, which is the form a caller can act
+	// on. Ordering matters for the listing: it is filled from the same
+	// snapshot the flag is derived from, so the two cannot disagree.
+	GraphRecorded       bool   `json:"-"`
+	NewSHA              string `json:"new_sha,omitempty"`
+	BytesWritten        int    `json:"bytes_written,omitempty"`
+	Error               string `json:"error,omitempty"`
+	StartedAt           string `json:"started_at,omitempty"`
+	CommittedAt         string `json:"committed_at,omitempty"`
+	ReindexReceipt      string `json:"reindex_receipt,omitempty"`
+	ReindexGeneration   uint64 `json:"reindex_generation,omitempty"`
+	AppliedGeneration   uint64 `json:"applied_generation,omitempty"`
+	CheckoutID          string `json:"checkout_id,omitempty"`
+	CheckoutIncarnation string `json:"checkout_incarnation,omitempty"`
 }
 
 func (r *mutationCommitRecord) snapshot() mutationCommitSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	snap := mutationCommitSnapshot{
-		Receipt:      r.id,
-		Tool:         r.tool,
-		MutationID:   r.key,
-		Path:         r.relPath,
-		DiskStatus:   r.disk,
-		GraphStatus:  r.graph,
-		NewSHA:       r.newSHA,
-		BytesWritten: r.bytesWritten,
-		Error:        r.errText,
+		Receipt:             r.id,
+		Tool:                r.tool,
+		MutationID:          r.key,
+		Path:                r.relPath,
+		DiskStatus:          r.disk,
+		GraphStatus:         r.graph,
+		GraphRecorded:       r.graphRecorded,
+		NewSHA:              r.newSHA,
+		BytesWritten:        r.bytesWritten,
+		Error:               r.errText,
+		ReindexReceipt:      r.reindexReceipt,
+		ReindexGeneration:   r.reindexGeneration,
+		AppliedGeneration:   r.appliedGeneration,
+		CheckoutID:          r.checkoutID,
+		CheckoutIncarnation: r.checkoutIncarnation,
 	}
 	if !r.startedAt.IsZero() {
 		snap.StartedAt = r.startedAt.UTC().Format(time.RFC3339Nano)
@@ -169,6 +195,7 @@ func (r *mutationCommitRecord) markNotApplied(err error) {
 	defer r.mu.Unlock()
 	r.disk = mutationDiskNotApplied
 	r.graph = mutationGraphStale
+	r.graphRecorded = true
 	if err != nil {
 		r.errText = err.Error()
 	}
@@ -179,6 +206,7 @@ func (r *mutationCommitRecord) markFailed(err error) {
 	defer r.mu.Unlock()
 	r.disk = mutationDiskFailed
 	r.graph = mutationGraphStale
+	r.graphRecorded = true
 	if err != nil {
 		r.errText = err.Error()
 	}
@@ -203,8 +231,26 @@ func (r *mutationCommitRecord) recordGraph(outcome mutationReindexOutcome) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Concurrent pollers can hold an earlier pending snapshot after another
+	// poller observed completion. Never regress that same ticket to pending.
+	if outcome.Pending && r.graphRecorded && r.graph != mutationGraphPending && r.reindexReceipt != "" && r.reindexReceipt == outcome.Receipt {
+		return
+	}
 	r.graph = graphStatusFor(outcome)
+	r.graphRecorded = true
 	r.reindexReceipt = outcome.Receipt
+	r.reindexGeneration = outcome.Generation
+	r.appliedGeneration = outcome.AppliedGeneration
+	if outcome.checkoutID != "" {
+		r.checkoutID = outcome.checkoutID
+		r.checkoutIncarnation = outcome.checkoutIncarnation
+	}
+	// Preserve graph publication errors without changing the disk verdict.
+	if outcome.Err != nil {
+		r.errText = outcome.Err.Error()
+	} else if r.disk == mutationDiskCommitted {
+		r.errText = ""
+	}
 }
 
 // retainResponse stores the successful payload for idempotent replay. Only
@@ -437,8 +483,14 @@ func (s *Server) beginMutationCommit(ctx context.Context, tool, mutationID, fing
 		relPath:     relPath,
 		absPath:     absPath,
 		disk:        mutationDiskInFlight,
-		graph:       mutationGraphStale,
-		startedAt:   time.Now(),
+		// Seed, not an outcome: graphRecorded stays false until something
+		// reports back, and that is what makes the difference visible.
+		graph:     mutationGraphStale,
+		startedAt: time.Now(),
+	}
+	if state := checkoutMutationFromContext(ctx); state != nil {
+		record.checkoutID = state.checkoutID
+		record.checkoutIncarnation = state.incarnation
 	}
 	s.mutationCommits.put(record)
 	mutationCommitNoteFrom(ctx).observe(record)
@@ -467,9 +519,24 @@ func (s *Server) commitFileMutation(
 		record.markNotApplied(err)
 		return record, fmt.Errorf("%w: %w", errMutationNotApplied, err)
 	}
+	if err := prepareCheckoutMutation(ctx, absPath); err != nil {
+		record.markNotApplied(err)
+		return record, fmt.Errorf("%w: %w", errMutationNotApplied, err)
+	}
+	// Preparing may wait for durable route invalidation. Cancellation during
+	// that wait still guarantees that this handler has not written any bytes.
+	if err := ctx.Err(); err != nil {
+		record.markNotApplied(err)
+		return record, fmt.Errorf("%w: %w", errMutationNotApplied, err)
+	}
 	if err := agents.AtomicWriteFile(absPath, data, perm); err != nil {
 		record.markFailed(err)
 		return record, err
+	}
+	if state := checkoutMutationFromContext(ctx); state != nil {
+		sum := sha256.Sum256(data)
+		state.committedHash = hex.EncodeToString(sum[:])
+		state.committedPath = absPath
 	}
 	record.markCommitted(gitBlobSHA(data), len(data))
 	return record, nil

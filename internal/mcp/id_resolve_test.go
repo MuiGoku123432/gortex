@@ -32,10 +32,10 @@ func nameResolveServer(t *testing.T) *Server {
 //
 // The absolute-path spelling is deliberate: it exercises the rung on every
 // platform, so the linux/macos matrix protects this. On Windows the same rung
-// additionally reconciles the separator, which is what graphPathSpelling exists
-// for — the store holds `pkga\a.go::Foo` while every agent writes
-// `pkga/a.go::Foo`, and move_symbol answered "symbol not found" for an indexed
-// symbol.
+// additionally reconciles the separator, which is what graphPathKey exists
+// for — filepath.Rel hands back `pkga\a.go` while the store holds
+// `pkga/a.go::Foo`, and move_symbol answered "symbol not found" for an
+// indexed symbol.
 func TestResolveSymbolID_WithoutMultiIndexer_StillAnchorsThePath(t *testing.T) {
 	srv, dir := setupMoveInlineRepo(t, map[string]string{
 		"pkga/a.go": "package pkga\n\nfunc Foo() int { return 42 }\n",
@@ -59,14 +59,15 @@ func TestResolveSymbolID_WithoutMultiIndexer_StillAnchorsThePath(t *testing.T) {
 
 func TestResolveNameToIDs(t *testing.T) {
 	s := nameResolveServer(t)
-	got := s.resolveNameToIDs("Bar")
+	ctx := context.Background()
+	got := s.resolveNameToIDs(ctx, "Bar")
 	// Two definitions, the KindLocal excluded, sorted.
 	require.Equal(t, []string{"pkg/foo.go::Bar", "pkg/other.go::Bar"}, got)
 
 	// Unique name → single id.
-	require.Equal(t, []string{"pkg/foo.go::Baz"}, s.resolveNameToIDs("Baz"))
+	require.Equal(t, []string{"pkg/foo.go::Baz"}, s.resolveNameToIDs(ctx, "Baz"))
 	// No match → nil.
-	require.Nil(t, s.resolveNameToIDs("Nope"))
+	require.Nil(t, s.resolveNameToIDs(ctx, "Nope"))
 }
 
 func TestSymbolTargetArgExactIDWins(t *testing.T) {
