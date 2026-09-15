@@ -1,8 +1,8 @@
 # Feature Landscape
 
-**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation  
-**Domain:** Trustworthy mainframe code knowledge graph  
-**Researched:** 2026-09-15  
+**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+**Domain:** Trustworthy mainframe code knowledge graph
+**Researched:** 2026-09-15
 **Overall confidence:** HIGH for current-code and parser-baseline findings; MEDIUM for later AI workflow scope
 
 ## Product Principle

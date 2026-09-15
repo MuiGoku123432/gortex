@@ -1,8 +1,8 @@
 # Architecture Patterns
 
-**Project:** Gortex Mainframe Engine -- v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation  
-**Domain:** Provenance-aware mainframe code knowledge graph  
-**Researched:** 2026-09-15  
+**Project:** Gortex Mainframe Engine -- v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+**Domain:** Provenance-aware mainframe code knowledge graph
+**Researched:** 2026-09-15
 **Overall confidence:** HIGH for current Gortex architecture and the recommended first slice; MEDIUM for later claim-ledger details pending query and retention requirements
 
 ## Executive Decision
@@ -266,37 +266,37 @@ External graph stores receive a projection from SQLite. No edits or reviews flow
 
 ### Parallel COBOL graph package
 
-**Why bad:** It bypasses existing prefixing, resolver, incremental eviction, search, analyzers, and MCP scope.  
+**Why bad:** It bypasses existing prefixing, resolver, incremental eviction, search, analyzers, and MCP scope.
 **Instead:** Emit standard `graph.Node`/`graph.Edge` records and add only necessary domain vocabulary.
 
 ### Broad schema-first implementation
 
-**Why bad:** New kinds, claims, Neo4j, and AI can all appear correct while the enhanced parser is still not the registered production path.  
+**Why bad:** New kinds, claims, Neo4j, and AI can all appear correct while the enhanced parser is still not the registered production path.
 **Instead:** Require the one-node walking skeleton as Phase 1.
 
 ### Line-number declaration IDs
 
-**Why bad:** Moving code produces delete/recreate churn, breaks lineage, and invalidates claims unnecessarily.  
+**Why bad:** Moving code produces delete/recreate churn, breaks lineage, and invalidates claims unnecessarily.
 **Instead:** Use logical scoped declaration IDs; ranges are provenance.
 
 ### Confidence as truth class
 
-**Why bad:** A 0.99 model output is still inferred, while a certain unresolved reference still lacks target contents.  
+**Why bad:** A 0.99 model output is still inferred, while a certain unresolved reference still lacks target contents.
 **Instead:** Separate evidence class, origin, confidence, and review status.
 
 ### Dual-write indexing
 
-**Why bad:** Partial SQLite/Neo4j success creates divergent active graphs and retry ambiguity.  
+**Why bad:** Partial SQLite/Neo4j success creates divergent active graphs and retry ambiguity.
 **Instead:** Commit SQLite once, then build a replayable downstream projection if later justified.
 
 ### Free-form `ask` as the enrichment API
 
-**Why bad:** `ask` is designed to answer questions, not enforce claim identity, validation, evidence linking, or review lineage.  
+**Why bad:** `ask` is designed to answer questions, not enforce claim identity, validation, evidence linking, or review lineage.
 **Instead:** Reuse the provider/service foundation behind a dedicated structured-review boundary.
 
 ### Claims owned by source-file eviction
 
-**Why bad:** Reindexing a file would erase audit history and human decisions.  
+**Why bad:** Reindexing a file would erase audit history and human decisions.
 **Instead:** Store append-only claim/review history separately and project current eligible state.
 
 ## Build Order

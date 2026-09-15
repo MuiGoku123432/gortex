@@ -1,8 +1,8 @@
 # v1.0 Threat Model
 
-**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation  
-**Status:** Planning security contract  
-**Date:** 2026-09-15  
+**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+**Status:** Planning security contract
+**Date:** 2026-09-15
 **Method:** Asset/trust-boundary analysis with release-blocking verification gates
 
 ## Security Objective

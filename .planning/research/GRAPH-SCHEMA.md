@@ -1,7 +1,7 @@
 # v1.0 Graph Schema Evidence and Direction
 
-**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation  
-**Status:** Planning contract; candidate vocabulary remains subject to thin-tracer evidence  
+**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+**Status:** Planning contract; candidate vocabulary remains subject to thin-tracer evidence
 **Date:** 2026-09-15
 
 ## Purpose

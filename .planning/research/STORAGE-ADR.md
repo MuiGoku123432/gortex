@@ -1,8 +1,8 @@
 # Storage Authority and Projection ADR
 
-**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation  
-**Status:** Accepted for milestone planning  
-**Date:** 2026-09-15  
+**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+**Status:** Accepted for milestone planning
+**Date:** 2026-09-15
 **Decision owners:** Milestone planning; implementation remains subject to phase acceptance gates
 
 ## Decision
