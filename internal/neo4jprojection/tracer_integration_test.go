@@ -62,14 +62,14 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 		t.Fatal(err)
 	}
 	store.AddBatch([]*graph.Node{
-		{ID: graphfixture.ScopedNodeID, RepoPrefix: "fixture/repo", FilePath: "fixture/repo/main.go", Kind: graph.KindFunction, Name: "Run", Meta: map[string]any{"secret_canary": "fixture-secret"}},
-		{ID: graphfixture.ScopedTargetID, RepoPrefix: "fixture/repo", FilePath: "fixture/repo/main.go", Kind: graph.KindType, Name: "Store"},
+		{ID: graphfixture.ScopedNodeID, RepoPrefix: "fixture/repo", WorkspaceID: "fixture", ProjectID: "fixture", FilePath: "fixture/repo/main.go", Kind: graph.KindFunction, Name: "Run", Meta: map[string]any{"secret_canary": "fixture-secret"}},
+		{ID: graphfixture.ScopedTargetID, RepoPrefix: "fixture/repo", WorkspaceID: "fixture", ProjectID: "fixture", FilePath: "fixture/repo/main.go", Kind: graph.KindType, Name: "Store"},
 		{ID: "neighbor/repo/main.go::Run", RepoPrefix: "neighbor/repo", FilePath: "neighbor/repo/main.go", Kind: graph.KindFunction, Name: "Neighbor"},
 	}, []*graph.Edge{{From: graphfixture.ScopedNodeID, To: graphfixture.ScopedTargetID, Kind: graph.EdgeReferences, FilePath: "fixture/repo/main.go", Line: 12}})
 	if err := store.CheckpointWAL(); err != nil {
 		t.Fatal(err)
 	}
-	scope := graph.ProjectionScope{Repositories: []string{"fixture/repo"}}
+	scope := graph.ProjectionScope{Workspace: "fixture", Project: "fixture", Repositories: []string{"fixture/repo"}}
 	warm, err := store.OpenScopedProjectionSnapshot(ctx, scope)
 	if err != nil {
 		t.Fatal(err)
