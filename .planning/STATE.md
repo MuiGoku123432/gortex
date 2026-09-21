@@ -1,21 +1,21 @@
 ---
-gsd_state_version: "1.0"
+gsd_state_version: 1.0
 milestone: v1.0
+milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 01
-current_phase_name: general-neo4j-projection-command
+current_phase_name: General Neo4j Projection Command
 status: executing
-stopped_at: Phase 1 Neo4j projection context gathered
-last_updated: "2026-09-21T20:33:41.027Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-21T20:54:43.675Z"
 last_activity: 2026-09-21
-last_activity_desc: Immediate priority changed to a general SQLite-to-Neo4j projection; 120/120 requirements mapped, with COBOL phases deferred for grammar readiness
-state_head: 61f77b26520fb09504b424c8de8e38d4d7fd3df9
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 7
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
-milestone_name: Neo4j Projection and Mainframe Graph Foundation
+state_head: 3c44f1fac75c26bd579d1fd96270e74f36e7d699
 ---
 
 # Project State
@@ -25,16 +25,16 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 See: .planning/PROJECT.md (updated 2026-09-21)
 
 **Core value:** A trustworthy graph representation of a mainframe estate that modernization cutover decisions can be made against -- deterministic and reproducible first, enriched and simulated later.
-**Current focus:** Phase 1 -- General Neo4j Projection Command
+**Current focus:** Phase 01 — General Neo4j Projection Command
 
 ## Current Position
 
-Phase: 01 (general-neo4j-projection-command) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
+Phase: 01 (General Neo4j Projection Command) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-09-21 -- Immediate priority changed to a general SQLite-to-Neo4j projection; 120/120 requirements mapped, with COBOL phases deferred for grammar readiness
+Last activity: 2026-09-21 — Phase 01 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -56,6 +56,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: No execution data
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 6 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -69,6 +74,8 @@ Recent decisions affecting current work:
 - [Phase 2]: Parser behavior must be reproducibly equivalent to baseline `97ac9f1`; the tracer resumes only when parser/grammar integration is ready.
 - [Phase 5]: `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` remain distinct deterministic findings.
 - [Phases 7-9]: AI-facing work requires the AI-SPEC workflow before implementation planning; existing artifacts must be renumbered by the orchestrator.
+- [Phase 01]: Keep graphfixture independent of store_sqlite so downstream same-package tests can open the fixture without an import cycle.
+- [Phase 01]: Register future real-server scenarios now, and make the final mandatory gate fail while any remain skipped.
 
 ### Pending Todos
 
@@ -92,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T17:54:43.625Z
-Stopped at: Phase 1 Neo4j projection context gathered
-Resume file: .planning/phases/01-general-neo4j-projection-command/01-CONTEXT.md
+Last session: 2026-09-21T20:54:43.668Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
