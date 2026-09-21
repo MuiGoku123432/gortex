@@ -38,8 +38,8 @@ type tracerTransport struct {
 	closed     bool
 }
 
-func (t *tracerTransport) Inspect(context.Context) error { return t.record("inspect") }
-func (t *tracerTransport) Acquire(context.Context, string, string) (string, error) {
+func (t *tracerTransport) Inspect(context.Context, bool) error { return t.record("inspect") }
+func (t *tracerTransport) Acquire(context.Context, string, string, string) (string, error) {
 	if err := t.record("lock"); err != nil {
 		return "", err
 	}
@@ -52,6 +52,9 @@ func (t *tracerTransport) Activate(_ context.Context, owner, operation, generati
 	}
 	t.active = generation
 	return nil
+}
+func (t *tracerTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+	return CleanupCounts{}, t.record("cleanup")
 }
 func (t *tracerTransport) Close(context.Context) error { t.closed = true; return t.record("close") }
 func (t *tracerTransport) record(operation string) error {
@@ -117,8 +120,8 @@ type batchTransport struct {
 	dryRuns int
 }
 
-func (t *batchTransport) Inspect(context.Context) error { return nil }
-func (t *batchTransport) Acquire(context.Context, string, string) (string, error) {
+func (t *batchTransport) Inspect(context.Context, bool) error { return nil }
+func (t *batchTransport) Acquire(context.Context, string, string, string) (string, error) {
 	return "prior", nil
 }
 func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
@@ -134,6 +137,9 @@ func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 }
 func (t *batchTransport) Activate(context.Context, string, string, string, string, Result) error {
 	return nil
+}
+func (t *batchTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+	return CleanupCounts{}, nil
 }
 func (t *batchTransport) Close(context.Context) error { return nil }
 
@@ -244,7 +250,7 @@ func TestNeo4jTracerContract(t *testing.T) {
 		if !result.Complete || result.ActiveGeneration == "" || result.ActiveGeneration == "generation-old" || result.NodeCount != 2 || result.EdgeCount != 1 {
 			t.Fatalf("unexpected result: %#v", result)
 		}
-		if want := []string{"inspect", "lock", "stage", "stage", "activate", "close"}; !reflect.DeepEqual(transport.operations, want) {
+		if want := []string{"inspect", "lock", "stage", "stage", "activate", "cleanup", "close"}; !reflect.DeepEqual(transport.operations, want) {
 			t.Fatalf("operations = %v, want %v", transport.operations, want)
 		}
 		if !snapshot.closed || !transport.closed {

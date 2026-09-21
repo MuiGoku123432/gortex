@@ -11,13 +11,13 @@ import (
 )
 
 type protocolTransport struct {
-	active             string
-	lockOperation      string
-	lockGeneration     string
-	staged             []ProjectionBatch
-	activated          bool
-	cleanupRemaining   CleanupCounts
-	cleanupErr         error
+	active              string
+	lockOperation       string
+	lockGeneration      string
+	staged              []ProjectionBatch
+	activated           bool
+	cleanupRemaining    CleanupCounts
+	cleanupErr          error
 	cancelDuringCleanup bool
 }
 

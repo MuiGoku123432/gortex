@@ -30,9 +30,13 @@ type Result struct {
 	SourceGeneration  int64
 	NodeCount         int
 	EdgeCount         int
+	StaleNodeCount    int
+	StaleEdgeCount    int
 	Phase             string
 	Complete          bool
 	CleanupComplete   bool
+	CleanupStatus     string
+	CleanupAction     string
 	DryRun            bool
 	Cancelled         bool
 }
@@ -47,13 +51,21 @@ type ProjectionBatch struct {
 	Edges             []graph.ScopedEdgeRow
 }
 
+type CleanupCounts struct {
+	Nodes         int
+	Relationships int
+}
+
+var ErrCleanupIncomplete = errors.New("neo4j projection cleanup incomplete")
+
 // Transport is an invocation-local projection target. Activate is the only
 // operation allowed to change the exact owner's visible generation pointer.
 type Transport interface {
-	Inspect(context.Context) error
-	Acquire(context.Context, string, string) (string, error)
+	Inspect(context.Context, bool) error
+	Acquire(context.Context, string, string, string) (string, error)
 	Stage(context.Context, ProjectionBatch) error
 	Activate(context.Context, string, string, string, string, Result) error
+	Reconcile(context.Context, string, string, int) (CleanupCounts, error)
 	Close(context.Context) error
 }
 
@@ -118,7 +130,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 
 	result.Phase = "inspecting"
 	report(result.Phase, 0)
-	if err := transport.Inspect(ctx); err != nil {
+	if err := transport.Inspect(ctx, request.DryRun); err != nil {
 		result.Cancelled = errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 		return result, fmt.Errorf("inspect neo4j: %w", err)
 	}
@@ -139,7 +151,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	}
 	result.Phase = "locking"
 	report(result.Phase, 0)
-	prior, err := transport.Acquire(ctx, request.Owner, request.OperationID)
+	prior, err := transport.Acquire(ctx, request.Owner, request.OperationID, result.PendingGeneration)
 	if err != nil {
 		return result, fmt.Errorf("acquire projection owner: %w", err)
 	}
@@ -210,10 +222,26 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 		return result, fmt.Errorf("activate projection: %w", err)
 	}
 	result.ActiveGeneration = result.PendingGeneration
-	result.Phase = "complete"
 	result.Complete = true
+	result.Phase = "cleanup"
 	report(result.Phase, processed)
-	return result, nil
+	remaining, cleanupErr := transport.Reconcile(ctx, request.Owner, result.ActiveGeneration, request.BatchSize)
+	result.StaleNodeCount = remaining.Nodes
+	result.StaleEdgeCount = remaining.Relationships
+	result.CleanupComplete = cleanupErr == nil && remaining.Nodes == 0 && remaining.Relationships == 0
+	if result.CleanupComplete {
+		result.CleanupStatus = "complete"
+		result.Phase = "complete"
+		report(result.Phase, processed)
+		return result, nil
+	}
+	result.CleanupStatus = "incomplete"
+	result.CleanupAction = "rerun the same projection command to resume exact-owner cleanup"
+	result.Cancelled = errors.Is(cleanupErr, context.Canceled) || errors.Is(cleanupErr, context.DeadlineExceeded)
+	if cleanupErr == nil {
+		cleanupErr = ErrCleanupIncomplete
+	}
+	return result, cleanupErr
 }
 
 func generationKey(owner, operation string, sourceGeneration int64) string {
