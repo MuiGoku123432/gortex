@@ -167,6 +167,16 @@ func (gc *GlobalConfig) ResolveNeo4jProfile(name string) (ResolvedNeo4jProfile, 
 	if password == "" {
 		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: environment variable %s is empty", name, profile.PasswordEnv)
 	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "neo4j+s", "neo4j+ssc", "bolt+s", "bolt+ssc":
+	case "neo4j", "bolt":
+		host := strings.ToLower(parsed.Hostname())
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: unencrypted uri is permitted only for loopback hosts", name)
+		}
+	default:
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: uri scheme must use Neo4j driver encryption semantics", name)
+	}
 	return ResolvedNeo4jProfile{Name: name, URI: profile.URI, Database: profile.Database, Username: username, Password: password}, nil
 }
 

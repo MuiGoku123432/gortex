@@ -14,6 +14,11 @@ import (
 	"github.com/zzet/gortex/internal/graph"
 )
 
+const (
+	maxMetadataDepth = 8
+	maxMetadataBytes = 1 << 20
+)
+
 type projectedNode struct {
 	Labels     []string       `json:"labels"`
 	Properties map[string]any `json:"properties"`
@@ -141,6 +146,13 @@ func sensitiveMetadataKey(key string) bool {
 }
 
 func projectMetadataValue(value any) (any, string, bool) {
+	return projectMetadataValueAtDepth(value, 0)
+}
+
+func projectMetadataValueAtDepth(value any, depth int) (any, string, bool) {
+	if depth > maxMetadataDepth {
+		return nil, "", false
+	}
 	if value == nil {
 		return nil, "", false
 	}
@@ -191,10 +203,10 @@ func projectMetadataValue(value any) (any, string, bool) {
 		out := make([]any, rv.Len())
 		var elementType reflect.Type
 		for i := 0; i < rv.Len(); i++ {
-			projected, encoding, ok := projectMetadataValue(rv.Index(i).Interface())
+			projected, encoding, ok := projectMetadataValueAtDepth(rv.Index(i).Interface(), depth+1)
 			if !ok || encoding != "" || elementType != nil && reflect.TypeOf(projected) != elementType {
 				data, err := canonicalJSON(value)
-				return string(data), "json", err == nil
+				return string(data), "json", err == nil && len(data) <= maxMetadataBytes
 			}
 			out[i] = projected
 			elementType = reflect.TypeOf(projected)
@@ -203,7 +215,7 @@ func projectMetadataValue(value any) (any, string, bool) {
 	}
 	if rv.Kind() == reflect.Map || rv.Kind() == reflect.Struct {
 		data, err := canonicalJSON(value)
-		return string(data), "json", err == nil
+		return string(data), "json", err == nil && len(data) <= maxMetadataBytes
 	}
 	return nil, "", false
 }
