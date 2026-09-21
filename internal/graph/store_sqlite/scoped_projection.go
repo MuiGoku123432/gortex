@@ -1,11 +1,183 @@
 package store_sqlite
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"iter"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/zzet/gortex/internal/graph"
 )
+
+type scopedProjectionSnapshot struct {
+	tx         *sql.Tx
+	descriptor graph.ProjectionSnapshotDescriptor
+	mu         sync.Mutex
+	closed     bool
+}
+
+func (s *Store) OpenScopedProjectionSnapshot(ctx context.Context, scope graph.ProjectionScope) (graph.ScopedProjectionSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(scope.Repositories))
+	repos := make([]string, 0, len(scope.Repositories))
+	for _, repo := range scope.Repositories {
+		repo = strings.TrimSpace(repo)
+		if repo == "" {
+			return nil, fmt.Errorf("scoped projection: repository allow-set contains an empty value")
+		}
+		if _, ok := seen[repo]; ok {
+			continue
+		}
+		seen[repo] = struct{}{}
+		repos = append(repos, repo)
+	}
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("scoped projection: repository allow-set is required")
+	}
+	sort.Strings(repos)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("scoped projection: begin read snapshot: %w", err)
+	}
+	return &scopedProjectionSnapshot{
+		tx: tx,
+		descriptor: graph.ProjectionSnapshotDescriptor{
+			SourceGeneration: s.viewGen,
+			Scope:            graph.ProjectionScope{Repositories: repos},
+		},
+	}, nil
+}
+
+func (s *scopedProjectionSnapshot) Descriptor() graph.ProjectionSnapshotDescriptor {
+	return s.descriptor
+}
+
+func (s *scopedProjectionSnapshot) ReadNodes(ctx context.Context) ([]*graph.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, fmt.Errorf("scoped projection snapshot is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	reposJSON, _ := projectionJSON(s.descriptor.Scope.Repositories)
+	query := `WITH requested(repo_prefix) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) ` +
+		`SELECT ` + qualifiedNodeColumns("n", lookupNodeCols) +
+		` FROM nodes AS n JOIN requested AS r ON r.repo_prefix = n.repo_prefix` +
+		` WHERE n.view_gen = ? ORDER BY n.id`
+	rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration)
+	if err != nil {
+		return nil, fmt.Errorf("scoped projection nodes: %w", err)
+	}
+	defer rows.Close()
+	var nodes []*graph.Node
+	for rows.Next() {
+		node, scanErr := scanNodeCursor(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scoped projection nodes: %w", scanErr)
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scoped projection nodes: %w", err)
+	}
+	return nodes, nil
+}
+
+func (s *scopedProjectionSnapshot) ReadEdges(ctx context.Context) ([]graph.ScopedEdgeRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, fmt.Errorf("scoped projection snapshot is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	reposJSON, _ := projectionJSON(s.descriptor.Scope.Repositories)
+	query := `WITH requested(repo_prefix) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) ` +
+		`SELECT e.id, ` + lookupQualifiedEdgeCols +
+		` FROM edges AS e JOIN nodes AS n ON n.id = e.from_id AND n.view_gen = e.view_gen` +
+		` JOIN requested AS r ON r.repo_prefix = n.repo_prefix` +
+		` WHERE e.view_gen = ? ORDER BY e.id`
+	rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration)
+	if err != nil {
+		return nil, fmt.Errorf("scoped projection edges: %w", err)
+	}
+	var edges []*graph.Edge
+	for rows.Next() {
+		var edgeID int64
+		edge, scanErr := (&Store{}).scanEdgeCursor(edgeIDScanner{scanner: rows, id: &edgeID})
+		if scanErr != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scoped projection edges: %w", scanErr)
+		}
+		edges = append(edges, edge)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("scoped projection edges: %w", err)
+	}
+	endpointIDs := make([]string, 0, len(edges)*2)
+	for _, edge := range edges {
+		endpointIDs = append(endpointIDs, edge.From)
+		if edge.To != "" && !graph.IsUnresolvedTarget(edge.To) {
+			endpointIDs = append(endpointIDs, edge.To)
+		}
+	}
+	endpoints, err := s.readEndpointNodes(ctx, endpointIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]graph.ScopedEdgeRow, 0, len(edges))
+	for _, edge := range edges {
+		result = append(result, graph.ScopedEdgeRow{Edge: edge, Source: endpoints[edge.From], Target: endpoints[edge.To]})
+	}
+	return result, nil
+}
+
+func (s *scopedProjectionSnapshot) readEndpointNodes(ctx context.Context, ids []string) (map[string]*graph.Node, error) {
+	result := make(map[string]*graph.Node)
+	for start := 0; start < len(ids); start += scopedProjectionPage {
+		end := min(start+scopedProjectionPage, len(ids))
+		idsJSON, _ := projectionJSON(ids[start:end])
+		query := `WITH requested(id) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) SELECT ` +
+			qualifiedNodeColumns("n", lookupNodeCols) + ` FROM nodes AS n JOIN requested AS r ON r.id = n.id WHERE n.view_gen = ?`
+		rows, err := s.tx.QueryContext(ctx, query, idsJSON, s.descriptor.SourceGeneration)
+		if err != nil {
+			return nil, fmt.Errorf("scoped projection endpoints: %w", err)
+		}
+		for rows.Next() {
+			node, scanErr := scanNodeCursor(rows)
+			if scanErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scoped projection endpoints: %w", scanErr)
+			}
+			result[node.ID] = node
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("scoped projection endpoints: %w", err)
+		}
+	}
+	return result, nil
+}
+
+func (s *scopedProjectionSnapshot) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return fmt.Errorf("scoped projection snapshot is closed")
+	}
+	s.closed = true
+	if err := s.tx.Rollback(); err != nil && err != sql.ErrTxDone {
+		return fmt.Errorf("scoped projection snapshot close: %w", err)
+	}
+	return nil
+}
 
 // scopedProjectionPage is deliberately small: framework partial passes may
 // inspect a very large changed repository, but neither the SQLite cursor nor a

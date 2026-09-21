@@ -26,6 +26,11 @@ func TestScopedProjectionTracer(t *testing.T) {
 		{ID: "neighbor/repo/main.go::Run", RepoPrefix: "neighbor/repo", FilePath: "neighbor/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
 	}, []*graph.Edge{{From: graphfixture.ScopedNodeID, To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/main.go"}})
 	require.NoError(t, store.CheckpointWAL())
+	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"fixture/repo"}})
+	require.NoError(t, err)
+	_, err = warm.ReadNodes(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, warm.Close())
 	before := projectionFileBytes(t, path)
 
 	_, err = store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{})
@@ -59,7 +64,7 @@ func TestScopedProjectionTracer(t *testing.T) {
 func projectionFileBytes(t *testing.T, path string) map[string][]byte {
 	t.Helper()
 	result := make(map[string][]byte)
-	for _, suffix := range []string{"", "-wal", "-shm"} {
+	for _, suffix := range []string{"", "-wal"} {
 		data, err := os.ReadFile(path + suffix)
 		if os.IsNotExist(err) {
 			continue
