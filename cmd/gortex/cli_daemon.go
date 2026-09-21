@@ -63,7 +63,7 @@ type daemonExecutor struct {
 	pinJSONDefault bool
 }
 
-func (d *daemonExecutor) CallTool(_ context.Context, tool string, args map[string]any) (json.RawMessage, error) {
+func (d *daemonExecutor) CallTool(ctx context.Context, tool string, args map[string]any) (json.RawMessage, error) {
 	d.nextID++
 	frame, err := buildToolCallFrameWithDefault(d.nextID, tool, args, d.pinJSONDefault)
 	if err != nil {
@@ -72,11 +72,25 @@ func (d *daemonExecutor) CallTool(_ context.Context, tool string, args map[strin
 	if err := d.client.WriteMCPFrame(frame); err != nil {
 		return nil, err
 	}
-	resp, err := d.client.ReadMCPFrame()
-	if err != nil {
-		return nil, err
+	type response struct {
+		body []byte
+		err  error
 	}
-	return extractToolResult(resp)
+	done := make(chan response, 1)
+	go func() {
+		body, readErr := d.client.ReadMCPFrame()
+		done <- response{body: body, err: readErr}
+	}()
+	select {
+	case <-ctx.Done():
+		_ = d.client.Close()
+		return nil, ctx.Err()
+	case received := <-done:
+		if received.err != nil {
+			return nil, received.err
+		}
+		return extractToolResult(received.body)
+	}
 }
 
 // buildToolCallFrame constructs the JSON-RPC tools/call frame, pinning the

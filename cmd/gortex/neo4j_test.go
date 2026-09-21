@@ -25,7 +25,7 @@ func TestNeo4jPushFlags(t *testing.T) {
 	var got map[string]any
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	withNeo4jPushTool(t, func(_ context.Context, _ string, args map[string]any) ([]byte, error) {
+	withNeo4jPushTool(t, func(_ context.Context, _ string, _ string, args map[string]any) ([]byte, error) {
 		got = args
 		return json.Marshal(neo4jprojection.Result{Complete: true, DryRun: true, Phase: "complete"})
 	})
@@ -52,7 +52,7 @@ func TestNeo4jPushJSON(t *testing.T) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--profile", "prod", "--namespace", "view", "--workspace", "ws", "--project", "p", "--repo", "a", "--json"})
-	withNeo4jPushTool(t, func(_ context.Context, _ string, _ map[string]any) ([]byte, error) {
+	withNeo4jPushTool(t, func(_ context.Context, _ string, _ string, _ map[string]any) ([]byte, error) {
 		return []byte(`{"profile":"prod","namespace":"view","phase":"complete","complete":true,"cleanup_complete":true,"node_count":2,"edge_count":1}`), nil
 	})
 	require.NoError(t, cmd.Execute())
@@ -67,7 +67,7 @@ func TestNeo4jPushProgress(t *testing.T) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--profile", "prod", "--namespace", "view", "--workspace", "ws", "--project", "p", "--repo", "a"})
-	withNeo4jPushTool(t, func(_ context.Context, _ string, _ map[string]any) ([]byte, error) {
+	withNeo4jPushTool(t, func(_ context.Context, _ string, _ string, _ map[string]any) ([]byte, error) {
 		return json.Marshal(neo4jprojection.Result{Profile: "prod", Namespace: "view", Phase: "complete", Complete: true, CleanupComplete: true, NodeCount: 1500, EdgeCount: 12})
 	})
 	require.NoError(t, cmd.Execute())
@@ -83,7 +83,7 @@ func TestNeo4jPushIncomplete(t *testing.T) {
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--profile", "prod", "--namespace", "view", "--workspace", "ws", "--project", "p", "--repo", "a"})
-	withNeo4jPushTool(t, func(ctx context.Context, _ string, _ map[string]any) ([]byte, error) {
+	withNeo4jPushTool(t, func(ctx context.Context, _ string, _ string, _ map[string]any) ([]byte, error) {
 		require.NotNil(t, ctx)
 		return json.Marshal(neo4jprojection.Result{Profile: "prod", Namespace: "view", Phase: "activating", Complete: false, ErrorCode: "activation_failed", ErrorMessage: "activation failed", CleanupAction: "rerun the same projection command"})
 	})
@@ -98,7 +98,7 @@ func TestNeo4jPushIncomplete(t *testing.T) {
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs([]string{"--profile", "prod", "--namespace", "view", "--workspace", "ws", "--project", "p", "--repo", "a"})
-	withNeo4jPushTool(t, func(ctx context.Context, _ string, _ map[string]any) ([]byte, error) {
+	withNeo4jPushTool(t, func(ctx context.Context, _ string, _ string, _ map[string]any) ([]byte, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})
@@ -108,10 +108,9 @@ func TestNeo4jPushIncomplete(t *testing.T) {
 	require.ErrorIs(t, cmd.Execute(), context.DeadlineExceeded)
 }
 
-func withNeo4jPushTool(t *testing.T, fn func(context.Context, string, map[string]any) ([]byte, error)) {
+func withNeo4jPushTool(t *testing.T, fn func(context.Context, string, string, map[string]any) ([]byte, error)) {
 	t.Helper()
 	old := callNeo4jPushTool
 	callNeo4jPushTool = fn
 	t.Cleanup(func() { callNeo4jPushTool = old })
 }
-
