@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 01
 current_phase_name: General Neo4j Projection Command
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-09-21T21:53:54.292Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-09-21T22:44:23.118Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 state_head: 3c44f1fac75c26bd579d1fd96270e74f36e7d699
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 01 (General Neo4j Projection Command) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 01 execution started
 
-Progress: [███████░░░] 71%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [███████░░░] 71%
 | Phase 01 P03 | 13 min | 2 tasks | 8 files |
 | Phase 01 P04 | 8 min | 2 tasks | 6 files |
 | Phase 01 P05 | 17 min | 2 tasks | 8 files |
+| Phase 01 P06 | 38 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Filter normalized secret-like metadata keys before reversible key encoding, and omit non-finite or unsupported values with deterministic warning counts.
 - [Phase ?]: Expose callback-based snapshot pages so SQLite cursors close before transport work while one read transaction preserves a coherent source view.
 - [Phase ?]: Count and stage nodes before edges in batches capped at 500 records, with progress emitted only after successful transport calls.
+- [Phase 01]: Treat manifest activation as logical completion, then report physical reconciliation independently.
+- [Phase 01]: Use operation plus pending generation as the exact-owner idempotent lock identity.
 
 ### Pending Todos
 
@@ -111,6 +114,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T21:53:54.287Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-09-21T22:44:23.113Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None
