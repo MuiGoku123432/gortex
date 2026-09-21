@@ -1,0 +1,43 @@
+{
+  "phase": "2",
+  "phase_name": "Thin Deterministic Native Tracer and Minimum Contracts",
+  "timestamp": "2026-09-15T19:15:00Z",
+  "areas_completed": ["Parser pinning"],
+  "areas_remaining": ["Extractor transition", "Provenance contract", "Acceptance surface"],
+  "decisions": {
+    "Parser pinning": [
+      {
+        "question": "How should Gortex reproducibly consume parser baseline 97ac9f1?",
+        "answer": "Pinned fork module",
+        "options_presented": ["Pinned fork module", "Vendor shim in Gortex", "Pinned bootstrap checkout"]
+      },
+      {
+        "question": "Should the pinned module keep the upstream forest import path or use a fork-owned module path?",
+        "answer": "Fork-owned path",
+        "options_presented": ["Fork-owned path", "Upstream path + replace", "Research decides"]
+      },
+      {
+        "question": "What parser identity should each extraction record expose?",
+        "answer": "Commit + grammar hash",
+        "options_presented": ["Commit + grammar hash", "Module version only", "Grammar hash only"]
+      },
+      {
+        "question": "If the enhanced parser is unavailable or its fingerprint differs, what should indexing do for COBOL?",
+        "answer": "Fail COBOL extraction",
+        "options_presented": ["Fail COBOL extraction", "Skip COBOL files", "Use regex with warning"]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    "docs/ai-enhanced-cobol-graph-handoff.md",
+    ".planning/PROJECT.md",
+    ".planning/REQUIREMENTS.md",
+    ".planning/ROADMAP.md",
+    ".planning/research/STACK.md",
+    ".planning/research/ARCHITECTURE.md",
+    ".planning/research/GRAPH-SCHEMA.md",
+    ".planning/research/STORAGE-ADR.md",
+    "internal/parser/forest/cobolprobe/README.md"
+  ]
+}

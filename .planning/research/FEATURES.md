@@ -1,23 +1,24 @@
 # Feature Landscape
 
-**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
-**Domain:** Trustworthy mainframe code knowledge graph
-**Researched:** 2026-09-15
-**Overall confidence:** HIGH for current-code and parser-baseline findings; MEDIUM for later AI workflow scope
+**Milestone:** v1.0 Neo4j Projection and Mainframe Graph Foundation
+**Domain:** Language-agnostic graph projection first; trustworthy mainframe graph later
+**Researched:** 2026-09-15; reconciled 2026-09-21
+**Overall confidence:** HIGH for the current SQLite/export/scope foundation and the approved projection boundary; MEDIUM for intentionally open projection UX/transport details and later AI workflow scope
 
 ## Product Principle
 
-The milestone is not an AI code-understanding product with a parser attached. It is a deterministic, queryable COBOL graph that remains useful when source is incomplete, with AI added only as an optional and separately labeled review layer.
+SQLite remains the sole authority. v1.0 starts with a general, manually invoked, explicitly scoped projection of an authoritative SQLite snapshot into Neo4j through equivalent CLI and MCP operations. The projection is downstream, rebuildable, and language-agnostic. It must not become continuous synchronization, index-time dual-write, reverse write, or a Neo4j replacement.
 
-The required delivery order is strict:
+The earlier recommendation to begin with the COBOL tracer and defer Neo4j is **superseded by the user's 2026-09-21 decision**. Preserve the deterministic-first rule for grammar-dependent mainframe work, but apply this delivery order:
 
-1. Thin deterministic tracer through the existing native graph and query surfaces.
-2. Deterministic breadth across the accepted COBOL parser contract.
-3. Stable identity and incremental lifecycle.
-4. Explicit `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` modeling.
-5. Optional, bounded AI enrichment and human review.
+1. General scoped SQLite-to-Neo4j projection through CLI and MCP.
+2. Thin deterministic COBOL tracer after parser/grammar readiness.
+3. Deterministic breadth across the accepted COBOL parser contract.
+4. Stable identity and incremental lifecycle.
+5. Explicit `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` modeling.
+6. Optional, bounded AI enrichment and human review.
 
-This order prevents later features from depending on unstable identities, silent parser loss, or inferred facts disguised as parser truth.
+Phase 1 must project the existing graph model without depending on COBOL node kinds, parser availability, or AI claims.
 
 ## Current Baseline and Gap
 
@@ -35,11 +36,17 @@ Parser acceptance evidence is strong but has an integration caveat:
 
 ## Table Stakes
 
-Missing any of these means the v1.0 graph is not trustworthy enough for modernization queries.
+Missing any of these means the v1.0 graph/projection boundary is not trustworthy enough for downstream analysis.
 
 | Feature | User outcome | Why expected | Complexity | Delivery order / acceptance note |
 |---------|--------------|--------------|------------|----------------------------------|
-| Thin deterministic vertical tracer | A user can select one accepted COBOL parser node, index it, retrieve its native graph node/edge through CLI and MCP, and navigate back to exact source | Proves the real parser-to-extractor-to-SQLite-to-query path before schema breadth multiplies risk | Medium | **First.** Use one existing parser construct and existing storage/query machinery; no AI and no Neo4j dependency |
+| General scoped projection | A user can manually materialize a selected workspace/project/repository SQLite snapshot into Neo4j through equivalent CLI and MCP operations | Delivers the immediate language-agnostic priority without waiting for COBOL grammar work | High | **First.** Fail closed on absent/ambiguous scope; keep SQLite authoritative |
+| Stable projected identity and constraints | Repeated application preserves one node/relationship per material authoritative identity while retaining distinct evidence-bearing occurrences | Retry safety and stale reconciliation are impossible without enforceable target identity | High | Derive keys from authoritative graph identity and material relationship provenance; do not use Neo4j-generated identity |
+| Bounded retry-safe apply | Projection uses bounded transactions, idempotent upserts, cancellation, actionable failures, and incomplete-snapshot disclosure | Remote failures and retries are expected operational states | High | Test replay and failure at batch boundaries; never mutate SQLite |
+| Dry-run and redacted observability | A user can preview selected scope/actions and observe progress/final scoped counts without secret disclosure | Manual operations need inspectability before remote mutation | Medium | Exact output shape and credential syntax remain discuss-phase decisions |
+| Explicit stale-record reconciliation | Records owned by the selected projection scope/generation can be identified and reconciled without touching other scopes | An upsert-only snapshot leaves removed SQLite records active downstream | High | Required capability; default stale-record policy remains a discuss-phase gray area |
+| Neo4j-optional ordinary operation | Indexing, daemon startup, native queries, and all non-projection tests work without Neo4j | Protects SQLite authority and Gortex availability | Medium | Acceptance must prove absence from index-time paths |
+| Thin deterministic vertical tracer | After grammar readiness, a user can select one accepted COBOL parser node, index it, retrieve its native graph node/edge through CLI and MCP, and navigate back to exact source | Proves the real parser-to-extractor-to-SQLite-to-query path before schema breadth multiplies risk | Medium | **After Phase 1.** Use one existing parser construct and existing storage/query machinery; no AI and no Neo4j dependency |
 | Parser baseline pin and runtime verification | A user can tell which grammar produced a fact and can detect accidental fallback to the stock parser | Current acceptance depends on local `go.work`; silent fallback would make graph results incomparable | Medium | Gate the tracer on a parser content/version identity and an acceptance fixture that fails against the stock grammar |
 | Exact source provenance | Every material fact answers "which repository, revision, file, range, parser, and extractor produced this?" | Trustworthy impact and modernization decisions require evidence, not names alone | Medium | Reuse source line/column and provenance fields; add only missing revision/version metadata |
 | Deterministic COBOL structure | Users can query programs, divisions, sections, paragraphs, statements, and data items and navigate containment | These are the minimum semantic units for understanding a COBOL estate | High | **Second.** Walk named AST nodes rather than extending regex coverage |
@@ -101,7 +108,7 @@ These features create value beyond a conventional syntax index, but only after t
 | Generic unresolved bucket | Conflates parser failure, missing source, dynamic dispatch, and ordinary unresolved resolution | Model `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` explicitly; retain dynamic-call semantics separately |
 | Silent dropping of `ERROR`, `MISSING`, or unparsed tails | Creates false completeness and unsafe impact answers | Emit bounded findings with containing context and exact range |
 | New parallel graph engine | Duplicates persistence, incremental reconciliation, scoping, and query behavior | Extend the existing Gortex graph, SQLite store, resolver, and CLI/MCP surfaces |
-| Neo4j as a v1 prerequisite or authoritative replacement | Adds synchronization and deployment risk before proving a query need; current support is manual Cypher export | Keep SQLite authoritative; defer projection until measured queries justify it |
+| Neo4j as an indexing prerequisite, continuous synchronization target, or authoritative replacement | Creates split-brain and availability coupling beyond the approved explicit projection | Keep SQLite authoritative; invoke the Phase 1 projection manually and keep all ordinary paths Neo4j-free |
 | Full JCL symbolic resolution | Expands scope into PROC/include/symbolic/library-order semantics before the COBOL graph contract is proven | Represent referenced but unavailable JCL as `EXTERNAL_UNRESOLVED`; plan full JCL later |
 | Full behavioral or live digital twin | Requires runtime events, schedules, datasets, subsystem metadata, simulation semantics, and operational synchronization far beyond this foundation | Deliver static deterministic graph and evidence-aware claims; defer behavioral and live stages |
 | Inventing missing artifact contents | Converts absence into false certainty | Record the missing artifact and what evidence would resolve it |
@@ -112,6 +119,13 @@ These features create value beyond a conventional syntax index, but only after t
 ## Feature Dependencies and Mandatory Ordering
 
 ```text
+Authoritative SQLite graph + explicit workspace/project/repository scope
+  -> General manual Neo4j projection
+     -> stable node/relationship keys + target constraints
+     -> bounded idempotent batches + retry/cancellation/results
+     -> explicit selected-scope stale reconciliation
+     -> equivalent CLI/MCP behavior
+
 Accepted parser baseline (97ac9f1) + parser-version verification
   -> Thin deterministic tracer
      -> Native SQLite persistence
@@ -140,13 +154,15 @@ Deterministic facts + stable lifecycle + explicit gaps
      -> human confirmation/contradiction/supersession
 
 All deterministic outcomes proven
-  -> optional Neo4j projection decision
+  -> later continuous-synchronization decision, if separately justified
   -> later JCL resolution
   -> later behavioral/digital-twin work
 ```
 
 Critical dependency rules:
 
+- Phase 1 projection must remain language-agnostic and depend only on current authoritative graph identity, scope, generation, and read/export seams.
+- Do not make exact command name, credential syntax, driver choice, or default stale-record action a research-locked decision; settle them in discuss-phase.
 - Do not broaden extraction before the tracer proves one end-to-end path. Otherwise failures are impossible to localize across parser, extractor, persistence, and query layers.
 - Do not add durable findings before stable identity and lifecycle semantics. Otherwise every reindex creates duplicate gaps and AI review work.
 - Implement both unresolved classes before AI. AI context selection and evaluation depend on knowing whether evidence is malformed or absent.
@@ -155,13 +171,19 @@ Critical dependency rules:
 
 ## Milestone Slice Recommendation
 
-### Phase 1: Thin Deterministic Tracer
+### Phase 1: General Neo4j Projection
 
-Deliver one parser-backed COBOL construct end to end using the existing graph store and CLI/MCP query surfaces. Include exact source range, parser identity, deterministic evidence class, and a failing fallback check proving the enhanced parser is active.
+Deliver a language-agnostic manual projection from an explicit SQLite workspace/project/repository snapshot through equivalent CLI and MCP operations. Preserve authoritative node/relationship identity and material properties, establish target constraints, use bounded idempotent writes, expose dry-run/progress/cancellation/results, and make stale selected-scope records reconcilable. Leave command naming, credential syntax, driver choice, and default stale policy open for discuss-phase.
+
+**Exit outcome:** A user can safely preview, apply, retry, and rebuild a scoped Neo4j projection while SQLite remains unchanged and every non-projection operation remains Neo4j-independent.
+
+### Phase 2: Thin Deterministic Tracer
+
+After parser/grammar readiness, deliver one parser-backed COBOL construct end to end using the existing graph store and CLI/MCP query surfaces. Include exact source range, parser identity, deterministic evidence class, and a failing fallback check proving the enhanced parser is active.
 
 **Exit outcome:** A user can index a small fixture and query the same source-backed fact by stable ID through native surfaces with AI disabled.
 
-### Phase 2: Deterministic Breadth
+### Phase 3: Deterministic Breadth
 
 Expand AST walking across program structure, paragraphs/control flow, calls, copybooks, data items, IDMS, CICS, and SQL. Preserve distinctions such as literal versus dynamic calls and physical SQL tables versus aliases/CTEs/dynamic sources.
 
@@ -189,17 +211,18 @@ Build deterministic context packages, provider policy gates, strict output schem
 
 Prioritize:
 
-1. One thin parser-to-SQLite-to-CLI/MCP deterministic tracer with source provenance and parser-version guard.
-2. Deterministic AST breadth for the accepted COBOL, DATA DIVISION, IDMS, CICS, and SQL contracts.
-3. Stable IDs and idempotent lifecycle before any durable unresolved or AI records.
-4. Explicit `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` findings with user-facing impact queries.
-5. One narrow optional AI workflow, preferably classification of an existing parse finding into a schema-valid `AI_INFERRED` claim, followed by human confirmation or rejection.
+1. General, manually invoked, fail-closed scoped SQLite-to-Neo4j projection through CLI and MCP.
+2. One thin parser-to-SQLite-to-CLI/MCP deterministic tracer after grammar readiness, with source provenance and parser-version guard.
+3. Deterministic AST breadth for the accepted COBOL, DATA DIVISION, IDMS, CICS, and SQL contracts.
+4. Stable IDs and idempotent lifecycle before any durable unresolved or AI records.
+5. Explicit `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` findings with user-facing impact queries.
+6. One narrow optional AI workflow, preferably classification of an existing parse finding into a schema-valid `AI_INFERRED` claim, followed by human confirmation or rejection.
 
 Defer:
 
 - **Full JCL parsing, PROC expansion, symbolic resolution, and execution modeling:** separate mainframe language/runtime problem; only missing-JCL references belong in v1 gap reporting.
 - **Behavioral and live-synchronized digital twin:** requires trustworthy static identity plus runtime/scheduler/data feeds not established here.
-- **Neo4j synchronization:** keep current SQLite authority and manual export unless a measured modernization query cannot be served acceptably by native traversal.
+- **Continuous Neo4j synchronization:** Phase 1 is a manual snapshot projection only; change capture, index-time dual-write, reverse writes, and continuous refresh require a later ADR.
 - **Broad AI business-concept and end-to-end transaction inference:** first prove one bounded claim lifecycle and an evaluation dataset.
 - **Automatic promotion of AI claims:** human confirmation and deterministic evidence remain separate trust transitions.
 

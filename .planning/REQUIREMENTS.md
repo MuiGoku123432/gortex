@@ -1,4 +1,4 @@
-# Requirements: v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
+# Requirements: v1.0 Neo4j Projection and Mainframe Graph Foundation
 
 **Defined:** 2026-09-15
 **Status:** Draft for roadmap planning
@@ -9,6 +9,26 @@
 Deterministic extraction establishes facts. Missing evidence remains explicit. AI may propose evidence-linked claims, but it must not rewrite parser truth, invent unavailable source, or become a dependency of indexing and deterministic queries.
 
 ## Current Milestone
+
+### General Neo4j Projection
+
+- [ ] **NEO-01**: A user MUST be able to explicitly invoke a language-agnostic projection through both a CLI command and an MCP tool with equivalent scope and behavior.
+- [ ] **NEO-02**: The projection MUST read a selected snapshot from authoritative SQLite under explicit workspace, project, and repository scope and MUST fail closed when required scope is absent or ambiguous.
+- [ ] **NEO-03**: Neo4j connection and credential configuration MUST be explicit, and credentials or secret-bearing connection details MUST NOT appear in command output, logs, plans, progress, or result summaries.
+- [ ] **NEO-04**: Projected nodes MUST use stable projection keys derived from authoritative Gortex identity rather than language-specific or Neo4j-generated identity.
+- [ ] **NEO-05**: Projected relationships MUST use stable projection keys that preserve endpoint identity, relationship kind, and occurrence/provenance distinctions needed to avoid collapsing material evidence.
+- [ ] **NEO-06**: The projection MUST establish or verify the Neo4j constraints required to enforce its stable node and relationship identity contract before applying records.
+- [ ] **NEO-07**: Projection writes MUST use idempotent `MERGE`/upsert semantics so retrying identical work does not create duplicate nodes or relationships.
+- [ ] **NEO-08**: Projection work MUST use bounded batches and transactions rather than loading an unbounded selected graph in one transaction.
+- [ ] **NEO-09**: A dry-run or plan mode MUST report intended scope and materialization actions without mutating Neo4j or SQLite.
+- [ ] **NEO-10**: An invoked projection MUST expose progress and a final result summary with scoped counts and failures while redacting secrets.
+- [ ] **NEO-11**: Cancellation or a Neo4j error MUST stop further work promptly, leave SQLite unchanged, and return an actionable non-success result.
+- [ ] **NEO-12**: Partial failure and retry MUST be safe: completed batches may be replayed without duplication, and the result MUST identify incomplete work without claiming a complete snapshot.
+- [ ] **NEO-13**: Projected records MUST preserve selected repository/workspace/project scope plus relevant provenance, evidence, origin, confidence, lifecycle, and source-location properties present in SQLite.
+- [ ] **NEO-14**: Stale records for the selected scope MUST be identifiable and reconcilable through explicit snapshot ownership/generation or equivalent replace-scope semantics without affecting records outside that scope.
+- [ ] **NEO-15**: Projection MUST never mutate SQLite, accept reverse writes from Neo4j, or participate in synchronous index-time dual-write.
+- [ ] **NEO-16**: Automated acceptance MUST exercise success, retry, stale-record, cancellation/error, and scope-isolation behavior against a disposable Neo4j instance or a protocol seam with equivalent observable guarantees.
+- [ ] **NEO-17**: Neo4j availability MUST be required only when the explicit projection command/tool or its integration tests run; indexing, native queries, daemon startup, and all other Gortex operations MUST remain functional without Neo4j.
 
 ### Parser Baseline
 
@@ -92,9 +112,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 - [ ] **STORE-01**: SQLite MUST remain the sole authoritative read/write store for active graph facts, findings, claims, and review state in v1.0.
 - [ ] **STORE-02**: Deterministic indexing MUST perform one authoritative SQLite commit and MUST NOT dual-write to Neo4j.
-- [ ] **STORE-03**: Cypher output MUST be generated only as a one-way, rebuildable snapshot derived from SQLite.
-- [ ] **STORE-04**: Cypher export MUST preserve selected repository, workspace, project, evidence-class, lifecycle, and provenance scope.
-- [ ] **STORE-05**: No v1.0 feature or acceptance test MUST require Neo4j synchronization, Neo4j availability, or reverse writes from Neo4j.
+- [ ] **STORE-03**: Neo4j materialization MUST remain a one-way, manually invoked, rebuildable projection derived from SQLite.
+- [ ] **STORE-04**: The explicit projection MUST NOT turn continuous synchronization, index-time dual-write, or Neo4j replacement into a v1.0 requirement.
+- [ ] **STORE-05**: Neo4j availability MUST NOT be required outside explicit projection invocation and projection-specific tests, and no reverse-write path from Neo4j may exist.
 
 ### Optional AI Context and Provider Policy
 
@@ -155,7 +175,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 ## Future Requirements
 
 - **FUT-01**: Benchmark named modernization queries and estate-scale graph sizes before reconsidering the storage boundary.
-- **FUT-02**: Add a synchronized Neo4j projection only after an accepted ADR defines stable IDs, constraints, idempotent upserts, tombstones, checkpoints, lag reporting, scope enforcement, failure recovery, and full rebuild from SQLite.
+- **FUT-02**: Add continuous or incremental Neo4j synchronization only after a separate accepted ADR defines change capture, tombstones, checkpoints, lag reporting, failure recovery, and operational ownership beyond the v1.0 manual snapshot projection.
 - **FUT-03**: Add full JCL parsing, PROC expansion, include resolution, symbolic substitution, and execution relationships in a later milestone.
 - **FUT-04**: Add behavioral execution modeling only after the static deterministic graph and identity lifecycle are stable.
 - **FUT-05**: Add runtime-fed or live-synchronized digital-twin behavior only after static and behavioral stages prove operational value.
@@ -166,7 +186,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 ## Out of Scope
 
 - Replacing SQLite with Neo4j or any other graph store.
-- Building or requiring live Neo4j synchronization.
+- Building or requiring continuous/live Neo4j synchronization.
 - Dual-writing deterministic index mutations to SQLite and Neo4j.
 - Reverse-synchronizing Neo4j edits or reviews into Gortex.
 - Parsing every COBOL dialect or every mainframe language.
@@ -182,106 +202,123 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 | Requirement | Roadmap Phase | Status |
 |-------------|---------------|--------|
-| BASE-01 | Phase 1 | Pending |
-| BASE-02 | Phase 1 | Pending |
-| BASE-03 | Phase 1 | Pending |
-| BASE-04 | Phase 5 | Pending |
-| TRACE-01 | Phase 1 | Pending |
-| TRACE-02 | Phase 1 | Pending |
-| TRACE-03 | Phase 1 | Pending |
-| TRACE-04 | Phase 1 | Pending |
-| TRACE-05 | Phase 1 | Pending |
-| TRACE-06 | Phase 1 | Pending |
-| TRACE-07 | Phase 1 | Pending |
-| PROV-01 | Phase 1 | Pending |
-| PROV-02 | Phase 1 | Pending |
-| PROV-03 | Phase 1 | Pending |
-| PROV-04 | Phase 1 | Pending |
-| PROV-05 | Phase 1 | Pending |
-| PROV-06 | Phase 1 | Pending |
-| DET-01 | Phase 2 | Pending |
-| DET-02 | Phase 2 | Pending |
-| DET-03 | Phase 2 | Pending |
-| DET-04 | Phase 2 | Pending |
-| DET-05 | Phase 2 | Pending |
-| DET-06 | Phase 2 | Pending |
-| DET-07 | Phase 2 | Pending |
-| DET-08 | Phase 2 | Pending |
-| DET-09 | Phase 2 | Pending |
-| DET-10 | Phase 2 | Pending |
-| DET-11 | Phase 2 | Pending |
-| DET-12 | Phase 2 | Pending |
-| ID-01 | Phase 1 | Pending |
-| ID-02 | Phase 1 | Pending |
-| ID-03 | Phase 3 | Pending |
-| ID-04 | Phase 3 | Pending |
-| ID-05 | Phase 3 | Pending |
-| ID-06 | Phase 3 | Pending |
-| ID-07 | Phase 3 | Pending |
-| ID-08 | Phase 3 | Pending |
-| ID-09 | Phase 3 | Pending |
-| GAP-01 | Phase 4 | Pending |
-| GAP-02 | Phase 4 | Pending |
-| GAP-03 | Phase 4 | Pending |
-| GAP-04 | Phase 4 | Pending |
-| GAP-05 | Phase 4 | Pending |
-| GAP-06 | Phase 4 | Pending |
-| GAP-07 | Phase 4 | Pending |
-| GAP-08 | Phase 4 | Pending |
-| QUERY-01 | Phase 5 | Pending |
-| QUERY-02 | Phase 5 | Pending |
-| QUERY-03 | Phase 5 | Pending |
-| QUERY-04 | Phase 5 | Pending |
-| QUERY-05 | Phase 5 | Pending |
-| QUERY-06 | Phase 5 | Pending |
-| QUERY-07 | Phase 5 | Pending |
-| QUERY-08 | Phase 5 | Pending |
-| QUERY-09 | Phase 5 | Pending |
-| QUERY-10 | Phase 5 | Pending |
-| QUERY-11 | Phase 7 | Pending |
+| NEO-01 | Phase 1 | Pending |
+| NEO-02 | Phase 1 | Pending |
+| NEO-03 | Phase 1 | Pending |
+| NEO-04 | Phase 1 | Pending |
+| NEO-05 | Phase 1 | Pending |
+| NEO-06 | Phase 1 | Pending |
+| NEO-07 | Phase 1 | Pending |
+| NEO-08 | Phase 1 | Pending |
+| NEO-09 | Phase 1 | Pending |
+| NEO-10 | Phase 1 | Pending |
+| NEO-11 | Phase 1 | Pending |
+| NEO-12 | Phase 1 | Pending |
+| NEO-13 | Phase 1 | Pending |
+| NEO-14 | Phase 1 | Pending |
+| NEO-15 | Phase 1 | Pending |
+| NEO-16 | Phase 1 | Pending |
+| NEO-17 | Phase 1 | Pending |
+| BASE-01 | Phase 2 | Pending |
+| BASE-02 | Phase 2 | Pending |
+| BASE-03 | Phase 2 | Pending |
+| BASE-04 | Phase 6 | Pending |
+| TRACE-01 | Phase 2 | Pending |
+| TRACE-02 | Phase 2 | Pending |
+| TRACE-03 | Phase 2 | Pending |
+| TRACE-04 | Phase 2 | Pending |
+| TRACE-05 | Phase 2 | Pending |
+| TRACE-06 | Phase 2 | Pending |
+| TRACE-07 | Phase 2 | Pending |
+| PROV-01 | Phase 2 | Pending |
+| PROV-02 | Phase 2 | Pending |
+| PROV-03 | Phase 2 | Pending |
+| PROV-04 | Phase 2 | Pending |
+| PROV-05 | Phase 2 | Pending |
+| PROV-06 | Phase 2 | Pending |
+| DET-01 | Phase 3 | Pending |
+| DET-02 | Phase 3 | Pending |
+| DET-03 | Phase 3 | Pending |
+| DET-04 | Phase 3 | Pending |
+| DET-05 | Phase 3 | Pending |
+| DET-06 | Phase 3 | Pending |
+| DET-07 | Phase 3 | Pending |
+| DET-08 | Phase 3 | Pending |
+| DET-09 | Phase 3 | Pending |
+| DET-10 | Phase 3 | Pending |
+| DET-11 | Phase 3 | Pending |
+| DET-12 | Phase 3 | Pending |
+| ID-01 | Phase 2 | Pending |
+| ID-02 | Phase 2 | Pending |
+| ID-03 | Phase 4 | Pending |
+| ID-04 | Phase 4 | Pending |
+| ID-05 | Phase 4 | Pending |
+| ID-06 | Phase 4 | Pending |
+| ID-07 | Phase 4 | Pending |
+| ID-08 | Phase 4 | Pending |
+| ID-09 | Phase 4 | Pending |
+| GAP-01 | Phase 5 | Pending |
+| GAP-02 | Phase 5 | Pending |
+| GAP-03 | Phase 5 | Pending |
+| GAP-04 | Phase 5 | Pending |
+| GAP-05 | Phase 5 | Pending |
+| GAP-06 | Phase 5 | Pending |
+| GAP-07 | Phase 5 | Pending |
+| GAP-08 | Phase 5 | Pending |
+| QUERY-01 | Phase 6 | Pending |
+| QUERY-02 | Phase 6 | Pending |
+| QUERY-03 | Phase 6 | Pending |
+| QUERY-04 | Phase 6 | Pending |
+| QUERY-05 | Phase 6 | Pending |
+| QUERY-06 | Phase 6 | Pending |
+| QUERY-07 | Phase 6 | Pending |
+| QUERY-08 | Phase 6 | Pending |
+| QUERY-09 | Phase 6 | Pending |
+| QUERY-10 | Phase 6 | Pending |
+| QUERY-11 | Phase 8 | Pending |
 | STORE-01 | Phase 1 | Pending |
 | STORE-02 | Phase 1 | Pending |
-| STORE-03 | Phase 8 | Pending |
-| STORE-04 | Phase 8 | Pending |
-| STORE-05 | Phase 8 | Pending |
-| AI-01 | Phase 6 | Pending |
-| AI-02 | Phase 6 | Pending |
-| AI-03 | Phase 6 | Pending |
-| AI-04 | Phase 6 | Pending |
-| AI-05 | Phase 6 | Pending |
-| AI-06 | Phase 6 | Pending |
-| AI-07 | Phase 6 | Pending |
-| AI-08 | Phase 6 | Pending |
-| AI-09 | Phase 6 | Pending |
-| CLAIM-01 | Phase 7 | Pending |
-| CLAIM-02 | Phase 7 | Pending |
-| CLAIM-03 | Phase 7 | Pending |
-| CLAIM-04 | Phase 7 | Pending |
-| CLAIM-05 | Phase 7 | Pending |
-| CLAIM-06 | Phase 7 | Pending |
-| CLAIM-07 | Phase 7 | Pending |
-| CLAIM-08 | Phase 7 | Pending |
-| CLAIM-09 | Phase 7 | Pending |
-| REVIEW-01 | Phase 7 | Pending |
-| REVIEW-02 | Phase 7 | Pending |
-| REVIEW-03 | Phase 7 | Pending |
-| REVIEW-04 | Phase 7 | Pending |
-| REVIEW-05 | Phase 7 | Pending |
-| REVIEW-06 | Phase 7 | Pending |
-| EVAL-01 | Phase 5 | Pending |
-| EVAL-02 | Phase 5 | Pending |
-| EVAL-03 | Phase 5 | Pending |
-| EVAL-04 | Phase 8 | Pending |
-| EVAL-05 | Phase 8 | Pending |
-| EVAL-06 | Phase 5 | Pending |
-| EVAL-07 | Phase 8 | Pending |
-| EVAL-08 | Phase 8 | Pending |
-| EVAL-09 | Phase 8 | Pending |
-| SEC-01 | Phase 3 | Pending |
-| SEC-02 | Phase 3 | Pending |
-| SEC-03 | Phase 3 | Pending |
-| SEC-04 | Phase 6 | Pending |
-| SEC-05 | Phase 6 | Pending |
-| SEC-06 | Phase 8 | Pending |
-| SEC-07 | Phase 6 | Pending |
-| SEC-08 | Phase 3 | Pending |
+| STORE-03 | Phase 1 | Pending |
+| STORE-04 | Phase 1 | Pending |
+| STORE-05 | Phase 1 | Pending |
+| AI-01 | Phase 7 | Pending |
+| AI-02 | Phase 7 | Pending |
+| AI-03 | Phase 7 | Pending |
+| AI-04 | Phase 7 | Pending |
+| AI-05 | Phase 7 | Pending |
+| AI-06 | Phase 7 | Pending |
+| AI-07 | Phase 7 | Pending |
+| AI-08 | Phase 7 | Pending |
+| AI-09 | Phase 7 | Pending |
+| CLAIM-01 | Phase 8 | Pending |
+| CLAIM-02 | Phase 8 | Pending |
+| CLAIM-03 | Phase 8 | Pending |
+| CLAIM-04 | Phase 8 | Pending |
+| CLAIM-05 | Phase 8 | Pending |
+| CLAIM-06 | Phase 8 | Pending |
+| CLAIM-07 | Phase 8 | Pending |
+| CLAIM-08 | Phase 8 | Pending |
+| CLAIM-09 | Phase 8 | Pending |
+| REVIEW-01 | Phase 8 | Pending |
+| REVIEW-02 | Phase 8 | Pending |
+| REVIEW-03 | Phase 8 | Pending |
+| REVIEW-04 | Phase 8 | Pending |
+| REVIEW-05 | Phase 8 | Pending |
+| REVIEW-06 | Phase 8 | Pending |
+| EVAL-01 | Phase 6 | Pending |
+| EVAL-02 | Phase 6 | Pending |
+| EVAL-03 | Phase 6 | Pending |
+| EVAL-04 | Phase 9 | Pending |
+| EVAL-05 | Phase 9 | Pending |
+| EVAL-06 | Phase 6 | Pending |
+| EVAL-07 | Phase 9 | Pending |
+| EVAL-08 | Phase 9 | Pending |
+| EVAL-09 | Phase 9 | Pending |
+| SEC-01 | Phase 4 | Pending |
+| SEC-02 | Phase 4 | Pending |
+| SEC-03 | Phase 4 | Pending |
+| SEC-04 | Phase 7 | Pending |
+| SEC-05 | Phase 7 | Pending |
+| SEC-06 | Phase 9 | Pending |
+| SEC-07 | Phase 7 | Pending |
+| SEC-08 | Phase 4 | Pending |

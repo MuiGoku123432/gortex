@@ -1,9 +1,9 @@
 # Domain Pitfalls
 
-**Domain:** Deterministic COBOL graph extraction with optional AI enrichment
-**Milestone:** v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
-**Researched:** 2026-09-15
-**Overall confidence:** HIGH for repository-specific risks; MEDIUM for the future Neo4j synchronization design
+**Domain:** Scoped SQLite-to-Neo4j projection, then deterministic COBOL graph extraction with optional AI enrichment
+**Milestone:** v1.0 Neo4j Projection and Mainframe Graph Foundation
+**Researched:** 2026-09-15; reconciled 2026-09-21
+**Overall confidence:** HIGH for repository-specific and manual-projection risks; MEDIUM for intentionally open projection transport/UX details and any future continuous synchronization design
 
 The central failure mode is a graph that looks precise while mixing different identities, revisions, repositories, evidence classes, or storage generations. This milestone should optimize for falsifiability: every active fact must say what produced it, from which source revision and parser build, and why it is still active.
 
@@ -170,25 +170,29 @@ The central failure mode is a graph that looks precise while mixing different id
 - Golden AST/query and graph fingerprint must match on a clean machine without the developer's absolute path.
 - Deliberately remove/rename the local parser checkout and verify the build fails closed rather than falling back unnoticed.
 
-### Pitfall 9: Neo4j dual-write or projection consistency is assumed
+### Pitfall 9: Manual projection is implemented as raw export replay or mistaken for synchronization
 
-**What goes wrong:** SQLite commits while Neo4j fails, or Neo4j accepts a partial/retried batch that duplicates nodes and relationships. Reads then depend on which store is queried. Deletes and supersessions are especially likely to lag.
+**What goes wrong:** The approved Phase 1 operation replays current `CREATE` output into a non-empty target, loads the whole graph unbounded, accepts ambiguous scope, collapses evidence-bearing relationships, leaves stale selected-scope records active, or reports completion after partial failure. A worse variant joins indexing and creates split-brain authority.
 
-**Why it happens:** Current Neo4j support is a manual snapshot exporter, not synchronization. `WriteCypher` emits `CREATE` for every node and relationship and intentionally emits no DDL; replay duplicates data. Neo4j documents that `MERGE` without identifying constraints does not guarantee uniqueness under concurrent loads. There is no atomic transaction spanning SQLite and Neo4j.
+**Why it happens:** Current Neo4j support is a file/inline snapshot serializer, not a database projection service. `WriteCypher` snapshots through `CREATE`; current MCP export filtering is repository-oriented; the scoped SQLite readers and mutation generations are separate lower-level seams. There is no atomic transaction spanning SQLite and Neo4j, and target idempotency requires stable application keys plus constraints.
 
 **Consequences:** Split-brain graph, duplicate relationships, resurrected stale facts, projection of unauthorized repositories, and operational complexity that undermines SQLite's current authority.
 
 **Prevention:**
-- Keep SQLite authoritative for v1.0 unless measured requirements prove otherwise. Prefer snapshot export first; do not place Neo4j in the indexing commit path.
-- If synchronized projection is selected, use an outbox/change-generation protocol committed with SQLite, stable globally unique node/edge IDs, Neo4j uniqueness/key constraints, idempotent apply, tombstones/supersession, per-scope checkpoints, and replayable batches.
-- Define consistency semantics explicitly: projection lag, read authority, failure recovery, rebuild procedure, and schema migration.
-- Never mirror raw `CREATE` exporter output as a dual-write protocol.
+- Keep SQLite authoritative without qualification and keep Neo4j outside indexing and ordinary availability paths.
+- Resolve explicit workspace/project/repository scope and authoritative SQLite snapshot/generation before planning writes; fail closed on absence or ambiguity.
+- Derive stable node and relationship projection keys from authoritative identity plus material occurrence/provenance distinctions, and establish required target constraints before upserts.
+- Stream bounded scoped rows and use retry-safe idempotent transactions; stop promptly on cancellation/error and mark incomplete work honestly.
+- Define selected-scope stale ownership/reconciliation explicitly without affecting other scopes. The capability is required, but the default stale action remains a discuss-phase decision.
+- Never use raw `CREATE` exporter output as the apply protocol and never add reverse writes.
+- Reserve outbox/change capture, checkpoints, and lag semantics for a later continuous-synchronization ADR.
 
 **Detection:**
-- Failure injection after every batch boundary: before SQLite commit, after SQLite commit/before projection, mid-Neo4j transaction, after Neo4j commit/before acknowledgement, and during retry.
-- Reapply each batch multiple times and assert one projected node/edge per stable ID.
-- Periodic reconciliation compares per-generation counts and deterministic identity hashes by workspace/repo, plus tombstone closure.
-- Block Neo4j-backed product queries when projection checkpoint is behind the required SQLite generation unless stale reads are explicitly allowed and labeled.
+- Disposable-Neo4j or protocol-seam tests cover empty and non-empty targets, repeated apply, mid-batch error, cancellation, retry, stale selected-scope records, and neighboring-scope canaries.
+- Reapply each batch multiple times and assert one projected node/relationship per stable key while preserving distinct evidence-bearing occurrences.
+- Compare dry-run expected counts/scope with final result and assert incomplete work is never labeled complete.
+- Snapshot SQLite before/after success and failure and assert no authoritative mutation.
+- Run indexing, daemon startup, native queries, and non-projection tests with Neo4j absent.
 
 ## Moderate Pitfalls
 
@@ -248,12 +252,12 @@ The central failure mode is a graph that looks precise while mixing different id
 
 | Phase topic | Likely pitfall | Required prevention gate | Required detection gate |
 |-------------|----------------|--------------------------|-------------------------|
-| 1. Architecture and schema decision | Identity/evidence/lifecycle remain implicit | Approve canonical-key matrix, evidence-state model, ownership/reconciliation contract, SQLite authority, and scope propagation before extractor work | Review adversarial examples for duplicate names, source moves, missing artifacts, parser changes, and conflicting AI claims |
+| 1. General Neo4j projection | Raw export replay, ambiguous scope, duplicate relationships, cross-scope stale deletion, or hidden partial failure | Shared language-agnostic CLI/MCP service; explicit scope/generation; stable keys/constraints; bounded idempotent batches; dry-run/progress/cancellation/incomplete result; selected-scope stale ownership | Disposable target/protocol tests for retry, stale records, cancellation, scope canaries, property preservation, and unchanged SQLite |
 | 2. Thin deterministic tracer | Existing regex IDs and generic kinds are copied into the new path | Trace one named AST node with exact range, parser/extractor version, repo/workspace identity, and deterministic evidence class through SQLite and CLI/MCP | Same input twice yields identical active IDs; duplicate-name fixture does not collapse occurrences |
 | 3. Deterministic COBOL graph extraction | Aggregate coverage hides cascades or collisions | Expand by construct family only after identity/provenance contract is stable; preserve raw and canonical names | Corpus differential checks source-positioned expected nodes/edges, clean reclassification, collision groups, and downstream sentinels |
 | 4. Stable IDs and incremental lifecycle | Add-only updates leave stale facts/findings | Set-based reconcile per owner/generation; parser/config/retrieval versions participate in invalidation | Incremental-vs-clean-rebuild equivalence across edit/delete/restore/parser-change/interrupted-retry sequence |
 | 5. Gap and missing-artifact model | Retrieval, preprocessing, and parse failures become one generic unresolved bucket | Classify availability before syntax interpretation; placeholders carry no invented target facts | Intentionally incomplete corpus proves each gap closes only through its correct remedy |
-| 6. Neo4j decision/projection | Manual `CREATE` export is mistaken for synchronization | Keep SQLite authoritative; choose snapshot unless measured queries justify outbox-based projection with constraints and stable IDs | Replay/failure-injection/reconciliation tests; enforce projection checkpoints and scope |
+| Cross-cutting projection boundary | Manual projection is widened into continuous synchronization or authority | Prohibit index-time dual-write/reverse writes; require a later ADR for change capture/checkpoints/lag | Static/code-path review plus Neo4j-absent ordinary-operation acceptance |
 | 7. AI context and structured review | Source exfiltration and confidence promotion | Policy gate and redaction before context/provider/logging; schema requires evidence class, citations, missing context, and versions | Canary scan across outbound traffic and all persistence; `confidence=1.0` AI remains untrusted |
 | 8. AI claims and human review | Claims mutate facts or lose disagreement history | First-class append-only claims/reviews with contradiction and supersession; deterministic tables are not AI-writable | AI-on/off deterministic snapshots match; conflicting models coexist; stale evidence deactivates dependent claims |
 | 9. End-to-end validation | Developer-only `go.work` makes results irreproducible | Pin and attest parser baseline independent of an ignored absolute local workspace path | Clean-machine and `GOWORK=off` gates verify selected parser/hash or fail closed |
@@ -269,8 +273,8 @@ The central failure mode is a graph that looks precise while mixing different id
 6. Every active claim cites active evidence from an allowed scope and declares missing context.
 7. Raw proprietary source cannot reach an unapproved provider, query log, rotated log, export, or temp artifact.
 8. A build cannot silently fall back from parser baseline `97ac9f1` because `go.work` is absent.
-9. SQLite remains the read/write authority unless a later accepted ADR defines and verifies different semantics.
-10. Neo4j replay, if present, is idempotent and scoped; projection lag is observable.
+9. SQLite remains the sole read/write authority; replacement is outside v1.0.
+10. The manual Neo4j projection is idempotent, explicitly scoped, rebuildable, and honest about incomplete work; continuous lag semantics are out of scope.
 
 ## Sources
 
@@ -302,5 +306,5 @@ The central failure mode is a graph that looks precise while mixing different id
 
 - The exact mainframe canonical-key rules depend on library concatenation/search order, subsystem qualifiers, preprocessing manifests, and retrieval metadata not yet represented in the native schema.
 - Confidence calibration is intentionally unresolved. The roadmap should not block deterministic extraction on it; calibration belongs in the AI evaluation phase.
-- Whether any required modernization query needs live Neo4j projection rather than snapshot export is unproven. Demand measured query/scale evidence before accepting dual-write complexity.
+- The manual Neo4j projection is approved independently of query benchmarks. Measured query/scale evidence is still required before accepting continuous synchronization, index-time integration, or replacement.
 - Provider-specific retention, training, regional processing, and enterprise approval cannot be inferred from provider names. Treat each deployment as unapproved until policy evidence is supplied.

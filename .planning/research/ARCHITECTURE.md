@@ -1,22 +1,24 @@
 # Architecture Patterns
 
-**Project:** Gortex Mainframe Engine -- v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
-**Domain:** Provenance-aware mainframe code knowledge graph
-**Researched:** 2026-09-15
-**Overall confidence:** HIGH for current Gortex architecture and the recommended first slice; MEDIUM for later claim-ledger details pending query and retention requirements
+**Project:** Gortex Mainframe Engine -- v1.0 Neo4j Projection and Mainframe Graph Foundation
+**Domain:** Scoped language-agnostic graph projection and later provenance-aware mainframe graph
+**Researched:** 2026-09-15; reconciled 2026-09-21
+**Overall confidence:** HIGH for current Gortex architecture and Phase 1 seams; MEDIUM for intentionally open projection transport/UX details and later claim-ledger details
 
 ## Executive Decision
 
-Extend the existing Gortex pipeline. Do not create a parallel COBOL graph, a second identity system, or a Neo4j synchronization service in v1.0.
+Extend the existing Gortex pipeline. Phase 1 is a general, manually invoked, explicitly scoped SQLite-to-Neo4j projection exposed through equivalent CLI and MCP operations. Do not create a parallel authority, second identity system, continuous synchronization service, reverse-write path, or index-time dual-write.
 
-SQLite remains the authoritative store for native graph facts and query behavior. The current Cypher exporter remains a one-way, rebuildable snapshot boundary. Neo4j is a downstream projection only if later measured modernization queries prove that native traversal is inadequate. There is currently no upload, change-data-capture, retry ledger, or remote consistency mechanism behind the Cypher output, so calling it a synchronized store would be false.
+SQLite remains the authoritative store for native graph facts and query behavior. The current Cypher exporter remains a one-way serialization boundary and evidence source. Its `CREATE` statements are not retry-safe projection semantics, so Phase 1 must add or wrap a bounded apply path with stable keys, target constraints, idempotent upserts, stale selected-scope reconciliation, dry-run, progress, cancellation, and incomplete-result reporting.
+
+The earlier conclusion that Neo4j should wait for measured native-query inadequacy is **superseded by the user's 2026-09-21 priority decision**. That benchmark gate now applies only to continuous synchronization or replacement, not to the approved manual projection.
 
 Deterministic extraction and AI enrichment must be two separate write paths:
 
 1. The deterministic path parses source, emits source-positioned observations, resolves references where evidence permits, reconciles changed files, and publishes the active graph through existing CLI/MCP/query surfaces.
 2. The enrichment path reads a bounded graph context and unresolved findings, invokes an already-configured `llm.Provider`, validates structured output, and writes claims without modifying deterministic nodes or edges.
 
-The first implementation phase must be narrower than the proposed domain schema: trace one already-supported named COBOL parser node, preferably the program definition/`PROGRAM-ID`, through `ExtractionResult`, repository prefixing, SQLite `AddBatch`, and existing native symbol/query surfaces. This proves the parser integration and entire persistence/query seam before introducing new kinds, gap records, AI calls, or Neo4j work.
+The first implementation phase must be language-agnostic and independent of parser readiness: project the graph already committed to SQLite. Ground it in `internal/exporter/cypher.go`, `internal/graph/store_sqlite/scoped_projection.go`, current CLI/MCP export entry points, native node/edge identity and scope fields, and SQLite generation/mutation behavior. The thin COBOL tracer remains the first grammar-dependent implementation phase after parser readiness.
 
 ## Current Architecture Evidence
 
@@ -34,9 +36,44 @@ The first implementation phase must be narrower than the proposed domain schema:
 | Placeholder reconciliation | Current extractors emit `unresolved::` endpoints; `reconcilePlaceholderSources` repoints source-owned placeholders after edge reindex, and cross-repo resolution has its own scoped resolver | Represent missing external artifacts using the existing unresolved convention first, then layer explicit findings over it. Do not mint fake resolved targets | HIGH |
 | Query behavior | `query.Engine.bfs` reads the graph store, enforces workspace/project scope, excludes unresolved endpoints from ordinary traversal, and reports dropped call targets as epistemic boundaries | Native query surfaces already expose known graph structure and honest unresolved boundaries. The tracer should exercise these surfaces directly | HIGH |
 | LLM extension | `provider.New` selects configured providers; `Service.RunAgent` builds graph tools with a scope and creates `agent.New`; MCP `handleAsk` passes repo/project/ref scope. `SetupLLM` omits the feature cleanly when disabled or misconfigured | AI review must reuse provider/service setup and scope, but should have a dedicated structured-review operation rather than smuggling claim writes through free-form `ask` | HIGH |
-| Neo4j boundary | `exporter.WriteCypher` snapshots graph nodes/edges to plain `CREATE` and `MATCH ... CREATE` statements; `export_graph` filters by repository and kind. It is a file/inline export, not a database client | Treat Cypher as disposable export. Current output is not idempotent unless the target is cleared first and is unsuitable as a synchronization protocol | HIGH |
+| Neo4j boundary | `exporter.WriteCypher` snapshots graph nodes/edges to plain `CREATE` and `MATCH ... CREATE`; current MCP `export_graph` exposes format/output/repository/kind/language filters and delegates Cypher to `WriteCypher` | Reuse serialization/property behavior and CLI/MCP surface conventions, but do not replay raw `CREATE` as Phase 1. Add a separate bounded projection service/operation with equivalent CLI/MCP semantics |
+| Scoped SQLite projection reads | `store_sqlite.NodesInScopeSeq` and `EdgesInScopeSeq` keyset-page current `viewGen` rows by requested repository/file frontier and kind | Use these existing language-neutral read seams or an equivalent snapshot abstraction; do not load the entire graph unbounded or infer scope from node language |
+| SQLite mutation/generation | SQLite mutation receipts identify changed IDs/names/files and scoped reads bind to the store view generation | Capture and report the authoritative generation/snapshot selected for projection; projection must never write mutation receipts or alter SQLite state | HIGH |
 
 ## Recommended Architecture
+
+### Phase 1 projection flow
+
+```text
+explicit CLI or MCP invocation
+          |
+          v
+fail-closed scope resolution
+ workspace + project + repository
+          |
+          v
+authoritative SQLite snapshot/view generation
+          |
+          v
+bounded scoped node/edge readers
+          |
+          v
+projection planner
+ stable keys + properties + constraints + stale ownership
+          |
+          +------ dry-run ------> redacted plan/result
+          |
+          v
+Neo4j apply boundary
+ bounded idempotent transactions + cancellation/retry
+          |
+          v
+progress + complete/incomplete result
+```
+
+SQLite does not receive a reverse edge in this diagram. Neo4j can be deleted and rebuilt. Exact command name, credential syntax, transport/driver, and default stale-record policy are phase-discussion decisions.
+
+### Deferred grammar-dependent and AI flow
 
 ```text
 retrieved/preprocessed estate
@@ -100,7 +137,11 @@ The key boundary is between **observations** and **claims**:
 | AI context builder | Deterministically gather minimal source and graph evidence for one finding under repo/project policy | Context selection, redaction manifest, unavailable-context list | Provider choice, claim persistence | Query engine, finding store, policy |
 | AI review service | Call an approved existing `llm.Provider` with a versioned schema; validate response before persistence | Prompt/schema versions and validation | Direct graph mutation | Existing `svc.Service`/provider, context builder, claim ledger |
 | Claim ledger | Retain proposed, confirmed, contradicted, and superseded claims with evidence/model/review lineage | Immutable claim revisions and review events | Deterministic facts | AI review service, optional graph projection |
-| Cypher exporter | Produce a scoped snapshot of the native graph for external analysis | Serialization only | Authority, sync state, retries | `graph.Reader`, CLI/MCP export tool |
+| Existing Cypher exporter | Preserve current language-neutral property serialization and file/inline interchange | Serialization only | Remote authority, retries, stale state | `graph.Reader`, CLI/MCP export tool |
+| Projection scope resolver | Resolve explicit workspace/project/repository selection and fail closed on absence or ambiguity | Selected authority scope and snapshot descriptor | Credential parsing, Neo4j writes | Workspace/project catalog, SQLite store |
+| Projection planner | Stream bounded scoped rows, derive stable projected keys/properties/constraints, and identify selected-scope stale ownership actions | Dry-run plan and expected counts | SQLite mutation, default stale policy | Scoped SQLite readers, apply boundary |
+| Neo4j apply boundary | Apply constraints and bounded parameterized idempotent batches; stop on cancellation/error and report completion state | Remote transactions, retry classification, progress | Indexing, reverse writes, authority | Projection planner, selected transport/client |
+| CLI/MCP projection adapters | Expose equivalent arguments, scope behavior, redaction, progress, cancellation, and result semantics | User/tool protocol mapping | Business logic duplication | Shared projection service |
 
 ## Canonical Schema Direction
 
@@ -195,9 +236,9 @@ The exact claim-ledger tables need a phase design after retention and query requ
 
 ## Storage and Synchronization Decision
 
-### Decision: SQLite authoritative, Cypher snapshot export only
+### Decision: SQLite authoritative, manual Neo4j projection first
 
-Use the current SQLite graph as the sole authoritative active graph for this milestone.
+Use the current SQLite graph as the sole authoritative active graph for this milestone. Add the approved explicit Phase 1 projection as a downstream operation.
 
 Reasons:
 
@@ -207,11 +248,11 @@ Reasons:
 - The current Cypher path serializes a snapshot using `CREATE`; it has no uniqueness constraint setup, `MERGE`, cursor/checkpoint, deletion feed, retry ledger, or transaction acknowledgement from Neo4j.
 - A synchronous dual-write would create split-brain failure modes inside the most trust-sensitive deterministic path.
 
-For v1.0, improve export fidelity only as needed to preserve exact columns, evidence class, claim status, and scope. A consumer may clear and rebuild a Neo4j database from a scoped snapshot. Do not call that synchronization.
+For Phase 1, evolve beyond clear-and-load `CREATE`: establish stable keys and constraints, stream bounded scope, apply idempotently, expose dry-run/progress/cancellation/results, and reconcile stale records only within selected ownership. This remains a manual snapshot projection, not synchronization. The planner must not invent the exact command name, credential syntax, driver choice, or default stale policy before discuss-phase.
 
-### Future decision gate for a synchronized projection
+### Future decision gate for continuous synchronization
 
-Consider incremental Neo4j projection only if all are demonstrated:
+Consider continuous or automatically refreshed Neo4j synchronization only if all are demonstrated:
 
 1. A named modernization query is materially impractical on native Gortex traversal.
 2. Dataset size and measured latency justify another operational system.
@@ -301,38 +342,45 @@ External graph stores receive a projection from SQLite. No edits or reviews flow
 
 ## Build Order
 
-1. **Thin deterministic parser-to-query tracer**
+1. **General manual Neo4j projection**
+   - Resolve explicit workspace/project/repository scope and snapshot generation from SQLite.
+   - Share one language-agnostic projection service between CLI and MCP adapters.
+   - Reuse current serializer and scoped-read behavior where correct, but replace raw `CREATE` application with stable keys, constraints, bounded idempotent transactions, and explicit completion state.
+   - Add dry-run, redacted progress/results, cancellation, retry/partial-failure safety, and selected-scope stale reconciliation.
+   - Keep exact naming, credentials, transport/driver, and stale default open for discuss-phase.
+
+2. **Thin deterministic parser-to-query tracer**
    - Pin and make reproducible the enhanced parser dependency.
    - Route one named program node through the registered COBOL extractor.
    - Reuse `KindFunction`, `EdgeDefines`, current IDs, prefixing, `AddBatch`, and native query surfaces.
    - This is the mandatory first implementation phase.
 
-2. **Canonical identity and provenance contract**
+3. **Canonical identity and provenance contract**
    - Specify normalization, declaration/occurrence/finding IDs, parser and extractor versions, exact ranges, evidence class, and scope.
    - Add round-trip and identical-run tests before expanding extraction.
 
-3. **Deterministic COBOL schema and mapper expansion**
+4. **Deterministic COBOL schema and mapper expansion**
    - Introduce the minimal domain node/edge kinds justified by required queries.
    - Add paragraphs, data items, copybooks, IDMS, CICS, and SQL in vertical slices, each visible through native queries.
 
-4. **Incremental and cross-repo resolution lifecycle**
+5. **Incremental and cross-repo resolution lifecycle**
    - Prove file replacement, deletion, rename behavior, reusable resolution, copybook library scope, duplicate names, and incoming cross-repo references.
    - Do not proceed while identical runs create duplicate active facts.
 
-5. **Explicit gap model**
+6. **Explicit gap model**
    - Persist parser and external findings separately, rank their impact, and close/supersede them deterministically.
    - Preserve existing unresolved edges and epistemic-boundary behavior.
 
-6. **AI contract and policy foundation**
+7. **AI contract and policy foundation**
    - Design bounded contexts, redaction, allowed-provider policy, closed output schema, evaluations, and deterministic validation.
    - Reuse provider setup and scope; AI remains optional/off by default.
 
-7. **Claim ledger and review projection**
+8. **Claim ledger and review projection**
    - Add immutable claims/reviews, evidence links, confirmation/contradiction/supersession, and default-excluded inferred views.
 
-8. **External projection evaluation**
-   - First extend snapshot fidelity and measure actual queries.
-   - Build synchronization only if the future decision gate passes.
+9. **Continuous synchronization evaluation, if later requested**
+   - Measure actual freshness/query needs after the manual projection ships.
+   - Build change capture/checkpoints/lag semantics only if the future decision gate passes in a separate ADR.
 
 ## Phase-Specific Risks
 

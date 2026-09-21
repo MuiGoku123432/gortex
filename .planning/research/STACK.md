@@ -1,16 +1,18 @@
 # Technology Stack
 
-**Project:** Gortex Mainframe Engine -- v1.0 Deterministic COBOL Graph Extraction and AI Enrichment Foundation
-**Researched:** 2026-09-15
-**Overall confidence:** HIGH for the native stack and storage decision; MEDIUM for a future synchronized Neo4j projection because no measured query workload yet requires it
+**Project:** Gortex Mainframe Engine -- v1.0 Neo4j Projection and Mainframe Graph Foundation
+**Researched:** 2026-09-15; reconciled 2026-09-21
+**Overall confidence:** HIGH for SQLite authority, the current export/scoped-read seams, and the Phase 1 projection boundary; MEDIUM for the Phase 1 transport details intentionally left to discussion
 
 ## Recommendation
 
-Keep the existing Go, Tree-sitter, and embedded SQLite architecture. Add domain schema and lifecycle behavior inside the current graph model before adding any infrastructure. The milestone does **not** need Neo4j, a second graph abstraction, a new LLM SDK, a vector database, or a workflow/orchestration service.
+Start v1.0 with a general, manually invoked, explicitly scoped SQLite-to-Neo4j projection exposed through equivalent CLI and MCP operations. Keep SQLite as the sole read/write authority and keep Neo4j outside indexing, daemon startup, native queries, continuous synchronization, reverse writes, and every ordinary availability path.
 
-Use the authoritative COBOL parser baseline from `tree-sitter-cobol-upgrade/main` merge `97ac9f1`. The current ignored local `go.work` is suitable for development, but it is not a reproducible release dependency. Before milestone acceptance, publish or otherwise pin the `forest-shim/cobol` module at that exact source revision through `go.mod` and `go.sum`.
+Build Phase 1 from current language-agnostic seams rather than COBOL concepts: `internal/exporter/cypher.go` already serializes graph nodes and edges; `internal/graph/store_sqlite/scoped_projection.go` already keyset-pages current-generation rows by repository/file frontier; current CLI/MCP export surfaces establish operator and tool entry points; native node/edge IDs and workspace/project/repository fields establish identity and scope; SQLite mutation receipts and generations establish the authoritative snapshot boundary. The current `CREATE` exporter is evidence and a compatibility surface, not the required retry-safe database projection implementation.
 
-SQLite remains authoritative. The existing Cypher exporter is a useful manual snapshot/export seam, but its current `CREATE`-only output is not an incremental synchronization protocol. Defer the Neo4j Go driver unless measured modernization queries prove that a live projection is worth its operational and consistency cost.
+The earlier recommendation to defer all Neo4j work until a native-query benchmark fails is **superseded by the user's 2026-09-21 priority decision**. Preserve its anti-dual-write and anti-replacement reasoning, but do not use it to block the bounded manual projection. Exact command name, credential syntax, driver choice, and default stale-record policy remain discuss-phase decisions.
+
+COBOL grammar-dependent work, including use of parser baseline `97ac9f1`, follows Phase 1 and remains deferred until parser/grammar readiness.
 
 ## Existing Stack to Retain
 
@@ -59,7 +61,7 @@ SQLite remains authoritative. The existing Cypher exporter is a useful manual sn
 | SQLite migrations/indexes for lifecycle queries | **Yes, likely** | Active/superseded/contradicted status and exact evidence links need efficient filtering without overloading unindexed JSON metadata. | Add normalized columns/tables only for fields used in identity, lifecycle, joins, or common filters. Keep descriptive details in metadata. Use the existing migration framework and transaction boundary. |
 | Deterministic claim-output schema and validator | **Yes** | AI output must not enter the graph unchecked. | Versioned Go structs plus JSON Schema validation, mapped to first-class claim records and evidence edges. |
 | Provider data-governance policy | **Yes** | Existing providers answer connectivity, not whether proprietary source is allowed to leave the machine or be logged. | Add explicit allow/deny policy by provider and model, redaction/context limits, retention settings, and auditable invocation metadata. Keep AI off by default. |
-| Neo4j Go driver | **No, defer** | No current requirement proves a synchronized projection is necessary. Adding it creates a remote service, credentials, retries, lag, deletion, and scope-consistency obligations. | Add `github.com/neo4j/neo4j-go-driver/v6` only after a decision gate and measured query benchmark selects synchronized projection. Current official docs list v6 as current. |
+| Neo4j transport/client | **Yes, capability required; implementation choice open** | Phase 1 must apply bounded, retry-safe, parameterized work to Neo4j, but planning must not lock a driver before discuss-phase resolves transport, credential, packaging, and test constraints. | Reuse the current file exporter as serialization evidence. Select an official driver, a protocol seam, or another justified transport during Phase 1 discussion; any new package requires explicit approval and package-legitimacy verification. |
 | Queue/event bus for projection | **No** | SQLite has one writer and existing durable mutation receipts. A new broker would be unjustified complexity for a local personal engine. | If projection is later approved, first use a durable SQLite outbox/change cursor consumed by a single worker. Do not add Kafka/NATS merely for replication. |
 | Vector database or embedding service | **No** | The milestone's claims are bounded by deterministic graph and source evidence; Gortex already has search/reranking infrastructure. | Reuse current retrieval and graph traversal. Revisit only with measured recall failures. |
 
@@ -67,9 +69,10 @@ SQLite remains authoritative. The existing Cypher exporter is a useful manual sn
 
 | Option | Authority | Incremental behavior | Provenance/identity fit | Multi-repo fit | Operational cost | v1.0 verdict |
 |---|---|---|---|---|---|---|
-| **Native SQLite only** | SQLite | Native per-file eviction, scoped reparse/re-resolution, warm restart reconciliation, and mutation receipts | Best. Existing node/edge fields and metadata already persist source and resolution evidence | Best. Workspace/project/repo boundaries and checkout generations are native | Lowest; embedded and offline | **Recommended baseline and default shipping mode** |
-| **Existing Cypher export** | SQLite | Snapshot only; rerunning current output duplicates data unless target is reset | Carries IDs, scope, locations, origin, confidence, labels, and metadata, but relationships have no explicit stable exported edge ID | Can export scoped snapshots, but the target does not enforce Gortex query boundaries by itself | Low and optional | **Keep as manual analysis/interchange path**; do not call it synchronization |
-| **Synchronized Neo4j projection** | SQLite | Feasible only with durable change/outbox records, stable IDs, idempotent upserts, tombstones, retries, lag reporting, and rebuild tooling | Good if projection preserves all evidence fields and never invents authority | Requires workspace/project/repo fields in every merge key or mandatory predicate and safe handling of checkout generations | Medium/high; adds driver, server, credentials, migrations, monitoring, and consistency tests | **Conditional future addition**, gated by measured query value |
+| **Native SQLite authority** | SQLite | Native per-file eviction, scoped reparse/re-resolution, warm restart reconciliation, mutation receipts, and generations | Best. Existing node/edge fields and metadata persist source and resolution evidence | Best. Workspace/project/repo boundaries and checkout generations are native | Lowest; embedded and offline | **Required authority and default operating mode** |
+| **Existing Cypher export** | SQLite | Snapshot serialization only; current `CREATE` output duplicates data when replayed into a non-empty target | Carries IDs, scope, locations, origin, confidence, labels, and metadata; it does not establish the Phase 1 relationship-key/constraint contract | Existing `repo` filtering is narrower than the required fail-closed workspace/project/repository scope contract | Low and optional | **Retain as evidence/interchange; harden or wrap, do not mistake it for the finished projection** |
+| **Manually invoked Neo4j projection** | SQLite | Explicit scoped snapshot apply with constraints, stable keys, bounded idempotent upserts, retry/partial-failure reporting, and explicit stale-record reconciliation | Must preserve authoritative IDs and material scope/provenance properties without inventing Neo4j authority | Must fail closed on missing/ambiguous scope and must not affect records outside selected ownership | Medium; explicit remote boundary only | **Phase 1 recommendation and immediate priority** |
+| **Continuous Neo4j synchronization** | SQLite | Requires change capture/outbox, checkpoints, lag, tombstones, operational ownership, and recovery beyond a manual snapshot push | Possible later, but not required for Phase 1 | Requires continuous scope and generation guarantees | High | **Deferred to a separate ADR and milestone decision** |
 | **Replace SQLite with Neo4j** | Neo4j | Requires reimplementing indexing transactions, startup recovery, scoped reconcile, watcher behavior, checkout generations, and native query tools | High migration risk and no demonstrated benefit for identity/provenance | Highest risk because current isolation semantics are embedded throughout native storage/query paths | Highest; loses embedded/offline simplicity | **Reject for v1.0** |
 
 ### Why the Existing Cypher Export Is Not a Live Projection
@@ -183,13 +186,9 @@ go test -race ./...
 go get github.com/santhosh-tekuri/jsonschema/v6@v6.0.3
 ```
 
-### Conditional only if synchronized Neo4j projection passes the decision gate
+### Phase 1 Neo4j transport dependency
 
-```bash
-go get github.com/neo4j/neo4j-go-driver/v6
-```
-
-Do not add the Neo4j driver merely to improve the existing file exporter. Export remains database-driver-free by design.
+No package is selected in research. Do not run `go get` until discuss-phase resolves the transport/driver choice and the planner records the justification, package-legitimacy audit, credential boundary, and disposable-integration-test strategy. The current exporter remains database-driver-free unless the chosen Phase 1 design deliberately changes that boundary.
 
 ## Decision Gates
 
@@ -203,20 +202,20 @@ Add a kind only if all are true:
 - It can be stamped with workspace/project/repository scope.
 - Incremental eviction and re-resolution behavior are defined.
 
-### Gate 2 -- Synchronized Neo4j Projection
+### Gate 2 -- Phase 1 Manual Projection Boundary
 
-Add Neo4j only if a benchmark corpus demonstrates at least one important modernization query that is materially impractical through native queries and if the project accepts:
+The manual projection is approved and does not require a failed native-query benchmark. Phase planning must keep these invariants fixed:
 
-- a separately operated Neo4j 5.26 LTS or supported current deployment,
-- driver credentials and TLS policy,
-- uniqueness constraints and projection migrations,
-- retry-safe idempotent writes,
-- tombstones and rebuild behavior,
-- projection lag monitoring,
-- workspace/project access controls,
-- and explicit non-authoritative status.
+- explicit manual CLI and MCP invocation with equivalent behavior
+- explicit fail-closed workspace/project/repository scope
+- SQLite-only authority and zero index-time or reverse-write coupling
+- stable application keys plus target constraints
+- bounded, retry-safe, idempotent application
+- dry-run, progress, cancellation, and incomplete-result disclosure
+- stale-record action confined to selected ownership/scope
+- Neo4j optional outside projection and projection tests
 
-Without that evidence, ship SQLite plus export.
+Discuss-phase must still decide the exact command/tool naming, credential/config syntax, transport or driver, and the default action when stale projected records are detected. Continuous synchronization remains behind the benchmark and separate-ADR gate.
 
 ### Gate 3 -- Hosted AI Provider
 
@@ -224,11 +223,11 @@ Allow raw source only after explicit approval records provider, model/deployment
 
 ## Roadmap Implications
 
-1. **Schema and identity reconciliation first:** decide native kinds, metadata, evidence classes, stable IDs, source ownership, and lifecycle before broad extraction.
-2. **Thin deterministic tracer second:** prove one parser node from baseline `97ac9f1` reaches native SQLite and CLI/MCP queries with exact source provenance.
-3. **Broaden deterministic extraction and gaps:** reuse existing kinds where honest; add explicit parser and missing-artifact findings.
-4. **Prove idempotency and incremental supersession:** identical reruns, changed files, parser version changes, deleted files, and cross-repo resolution must converge.
-5. **Evaluate storage boundary:** benchmark native queries and the existing export. Implement synchronized Neo4j only if the gate passes; otherwise this phase should close with an ADR and export validation, not code.
+1. **General projection first:** deliver the language-agnostic, manually invoked, scoped CLI/MCP projection from authoritative SQLite using current export, scoped-read, identity, and generation seams.
+2. **Keep Phase 1 independent of COBOL:** do not require parser baseline, mainframe kinds, claims, or grammar readiness to project the graph already stored in SQLite.
+3. **Resume the thin deterministic tracer after grammar readiness:** prove one parser node from baseline `97ac9f1` reaches native SQLite and CLI/MCP queries with exact source provenance.
+4. **Broaden deterministic extraction and gaps:** reuse existing kinds where honest; add explicit parser and missing-artifact findings.
+5. **Prove idempotency and incremental supersession:** identical reruns, changed files, parser version changes, deleted files, and cross-repo resolution must converge.
 6. **Add AI policy and validated claims:** reuse provider infrastructure after deterministic context and evidence contracts exist.
 
 ## Current Code Evidence
