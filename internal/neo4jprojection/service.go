@@ -136,7 +136,10 @@ func NormalizeRequest(request Request) (Request, error) {
 		}
 	}
 	request.Timeout = operationTimeout
-	request.Scope = graph.ProjectionScope{Repositories: append([]string(nil), request.Repositories...)}
+	request.Scope = graph.ProjectionScope{
+		Workspace: request.Workspace, Project: request.Project,
+		Repositories: append([]string(nil), request.Repositories...),
+	}
 	request.Owner = projectionOwnerKey(request.Namespace, request.Workspace, request.Project, request.Repositories)
 	if request.OperationID == "" {
 		request.OperationID = request.Owner

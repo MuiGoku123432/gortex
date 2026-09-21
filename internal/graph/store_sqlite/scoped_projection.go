@@ -20,6 +20,14 @@ type scopedProjectionSnapshot struct {
 }
 
 func (s *Store) OpenScopedProjectionSnapshot(ctx context.Context, scope graph.ProjectionScope) (graph.ScopedProjectionSnapshot, error) {
+	if len(scope.Repositories) == 0 {
+		return nil, fmt.Errorf("scoped projection: repository allow-set is required")
+	}
+	scope.Workspace = strings.TrimSpace(scope.Workspace)
+	scope.Project = strings.TrimSpace(scope.Project)
+	if scope.Workspace == "" || scope.Project == "" {
+		return nil, fmt.Errorf("scoped projection: workspace and project are required")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -48,7 +56,7 @@ func (s *Store) OpenScopedProjectionSnapshot(ctx context.Context, scope graph.Pr
 		tx: tx,
 		descriptor: graph.ProjectionSnapshotDescriptor{
 			SourceGeneration: s.viewGen,
-			Scope:            graph.ProjectionScope{Repositories: repos},
+			Scope:            graph.ProjectionScope{Workspace: scope.Workspace, Project: scope.Project, Repositories: repos},
 		},
 	}, nil
 }
@@ -70,13 +78,13 @@ func (s *scopedProjectionSnapshot) ReadNodePages(ctx context.Context, consume fu
 	query := `WITH requested(repo_prefix) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) ` +
 		`SELECT ` + qualifiedNodeColumns("n", lookupNodeCols) +
 		` FROM nodes AS n JOIN requested AS r ON r.repo_prefix = n.repo_prefix` +
-		` WHERE n.view_gen = ? AND n.id > ? ORDER BY n.id LIMIT ?`
+		` WHERE n.workspace_id = ? AND n.project_id = ? AND n.view_gen = ? AND n.id > ? ORDER BY n.id LIMIT ?`
 	lastID := ""
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration, lastID, scopedProjectionPage)
+		rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.Scope.Workspace, s.descriptor.Scope.Project, s.descriptor.SourceGeneration, lastID, scopedProjectionPage)
 		if err != nil {
 			return fmt.Errorf("scoped projection nodes: %w", err)
 		}
@@ -127,13 +135,13 @@ func (s *scopedProjectionSnapshot) ReadEdgePages(ctx context.Context, consume fu
 		`SELECT e.id, ` + lookupQualifiedEdgeCols +
 		` FROM edges AS e JOIN nodes AS n ON n.id = e.from_id AND n.view_gen = e.view_gen` +
 		` JOIN requested AS r ON r.repo_prefix = n.repo_prefix` +
-		` WHERE e.view_gen = ? AND e.id > ? AND e.id <= ? ORDER BY e.id LIMIT ?`
+		` WHERE n.workspace_id = ? AND n.project_id = ? AND e.view_gen = ? AND e.id > ? AND e.id <= ? ORDER BY e.id LIMIT ?`
 	lastID := int64(0)
 	for lastID < maxID {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration, lastID, maxID, scopedProjectionPage)
+		rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.Scope.Workspace, s.descriptor.Scope.Project, s.descriptor.SourceGeneration, lastID, maxID, scopedProjectionPage)
 		if err != nil {
 			return fmt.Errorf("scoped projection edges: %w", err)
 		}

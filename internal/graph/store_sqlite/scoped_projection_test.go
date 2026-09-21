@@ -19,7 +19,7 @@ import (
 func TestScopedProjectionEstatePagination(t *testing.T) {
 	store := openScopedProjectionTestStore(t)
 	seedEstateProjection(t, store, scopedProjectionPage+31)
-	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"estate/b", "estate/a", "estate/a"}})
+	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"estate/b", "estate/a", "estate/a"}})
 	require.NoError(t, err)
 	defer snapshot.Close()
 	require.Equal(t, []string{"estate/a", "estate/b"}, snapshot.Descriptor().Scope.Repositories)
@@ -63,12 +63,12 @@ func TestScopedProjectionTracer(t *testing.T) {
 	store, err := Open(path)
 	require.NoError(t, err)
 	store.AddBatch([]*graph.Node{
-		{ID: graphfixture.ScopedNodeID, RepoPrefix: "fixture/repo", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
-		{ID: graphfixture.ScopedTargetID, RepoPrefix: "fixture/repo", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("type"), Name: "Store"},
-		{ID: "neighbor/repo/main.go::Run", RepoPrefix: "neighbor/repo", FilePath: "neighbor/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
+		{ID: graphfixture.ScopedNodeID, RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
+		{ID: graphfixture.ScopedTargetID, RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("type"), Name: "Store"},
+		{ID: "neighbor/repo/main.go::Run", RepoPrefix: "neighbor/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "neighbor/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
 	}, []*graph.Edge{{From: graphfixture.ScopedNodeID, To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/main.go"}})
 	require.NoError(t, store.CheckpointWAL())
-	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"fixture/repo"}})
+	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"fixture/repo"}})
 	require.NoError(t, err)
 	err = warm.ReadNodePages(context.Background(), func([]*graph.Node) error { return nil })
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestScopedProjectionTracer(t *testing.T) {
 	_, err = store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{})
 	require.ErrorContains(t, err, "repository allow-set is required")
 
-	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"fixture/repo"}})
+	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"fixture/repo"}})
 	require.NoError(t, err)
 	require.Equal(t, int64(0), snapshot.Descriptor().SourceGeneration)
 	var nodes []*graph.Node

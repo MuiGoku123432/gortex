@@ -17,6 +17,8 @@ type ScopedEdgeRow struct {
 
 // ProjectionScope is the exact non-empty source boundary for a projection.
 type ProjectionScope struct {
+	Workspace    string
+	Project      string
 	Repositories []string
 }
 

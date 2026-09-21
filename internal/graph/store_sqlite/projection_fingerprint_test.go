@@ -19,7 +19,7 @@ func TestScopedProjectionFingerprintCoverage(t *testing.T) {
 	require.NoError(t, err)
 	seedEstateProjection(t, store, scopedProjectionPage+17)
 	require.NoError(t, store.CheckpointWAL())
-	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"estate/a", "estate/b"}})
+	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"estate/a", "estate/b"}})
 	require.NoError(t, err)
 	require.NoError(t, warm.ReadNodePages(context.Background(), func([]*graph.Node) error { return nil }))
 	require.NoError(t, warm.ReadEdgePages(context.Background(), func([]graph.ScopedEdgeRow) error { return nil }))
@@ -46,7 +46,7 @@ func TestScopedProjectionFingerprintCoverage(t *testing.T) {
 		{name: "cancelled", ctx: func() context.Context { ctx, cancel := context.WithCancel(context.Background()); cancel(); return ctx }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			snapshot, openErr := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"estate/a", "estate/b"}})
+			snapshot, openErr := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"estate/a", "estate/b"}})
 			require.NoError(t, openErr)
 			err := snapshot.ReadNodePages(tc.ctx(), func([]*graph.Node) error { return nil })
 			if tc.name == "cancelled" {
@@ -59,7 +59,7 @@ func TestScopedProjectionFingerprintCoverage(t *testing.T) {
 		})
 	}
 	require.NoError(t, store.CheckpointWAL())
-	settle, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"estate/a", "estate/b"}})
+	settle, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"estate/a", "estate/b"}})
 	require.NoError(t, err)
 	require.NoError(t, settle.ReadNodePages(context.Background(), func([]*graph.Node) error { return nil }))
 	require.NoError(t, settle.ReadEdgePages(context.Background(), func([]graph.ScopedEdgeRow) error { return nil }))
@@ -76,7 +76,7 @@ func TestScopedProjectionFingerprintCoverage(t *testing.T) {
 func TestScopedProjectionCancellation(t *testing.T) {
 	store := openScopedProjectionTestStore(t)
 	seedEstateProjection(t, store, scopedProjectionPage*2+11)
-	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Repositories: []string{"estate/a"}})
+	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"estate/a"}})
 	require.NoError(t, err)
 	defer snapshot.Close()
 
@@ -105,8 +105,8 @@ func seedEstateProjection(t *testing.T, store *Store, perRepo int) {
 			id := fmt.Sprintf("%s/file-%04d.go::Fn", repo, i)
 			target := fmt.Sprintf("%s/file-%04d.go::Type", repo, i)
 			nodes = append(nodes,
-				&graph.Node{ID: id, RepoPrefix: repo, FilePath: fmt.Sprintf("%s/file-%04d.go", repo, i), Kind: graph.KindFunction, Name: "Fn"},
-				&graph.Node{ID: target, RepoPrefix: repo, FilePath: fmt.Sprintf("%s/file-%04d.go", repo, i), Kind: graph.KindType, Name: "Type"},
+				&graph.Node{ID: id, RepoPrefix: repo, WorkspaceID: "ws", ProjectID: "project", FilePath: fmt.Sprintf("%s/file-%04d.go", repo, i), Kind: graph.KindFunction, Name: "Fn"},
+				&graph.Node{ID: target, RepoPrefix: repo, WorkspaceID: "ws", ProjectID: "project", FilePath: fmt.Sprintf("%s/file-%04d.go", repo, i), Kind: graph.KindType, Name: "Type"},
 			)
 			edges = append(edges,
 				&graph.Edge{From: id, To: target, Kind: graph.EdgeCalls, FilePath: fmt.Sprintf("%s/file-%04d.go", repo, i), Line: i + 1},

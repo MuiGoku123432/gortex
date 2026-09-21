@@ -52,8 +52,11 @@ func (s *Server) handleNeo4jPush(ctx context.Context, req mcp.CallToolRequest) (
 		if !sameNeo4jRepositories(request.Repositories, resolvedRepos) {
 			return mcp.NewToolResultError("neo4j push repository scope does not resolve exactly to the requested repositories"), nil
 		}
+		if request.Workspace != resolved.WorkspaceID || request.Project != resolved.ProjectID {
+			return mcp.NewToolResultError("neo4j push workspace/project scope does not match the active canonical scope"), nil
+		}
 		request.Repositories = resolvedRepos
-		request.Scope = graph.ProjectionScope{Repositories: resolvedRepos}
+		request.Scope = graph.ProjectionScope{Workspace: resolved.WorkspaceID, Project: resolved.ProjectID, Repositories: resolvedRepos}
 	}
 
 	push := s.neo4jPush
