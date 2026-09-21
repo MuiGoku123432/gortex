@@ -10,6 +10,8 @@ import (
 	"github.com/zzet/gortex/internal/graph"
 )
 
+var expectedRelationshipType = sanitizeRelationshipType(graph.EdgeReferences)
+
 type protocolTransport struct {
 	active              string
 	lockOperation       string
@@ -66,12 +68,12 @@ func protocolService(transport Transport) *Service {
 }
 
 func TestNeo4jConstraints(t *testing.T) {
-	queries := constraintQueries([]string{"GORTEX_CALLS", "GORTEX_REFERENCES"})
+	queries := constraintQueries([]string{"GORTEX_CALLS", expectedRelationshipType})
 	if len(queries) != 4 {
 		t.Fatalf("constraint query count = %d, want 4", len(queries))
 	}
 	joined := strings.Join(queries, "\n")
-	for _, required := range []string{"GortexNode", "GortexProjectionManifest", "GORTEX_CALLS", "GORTEX_REFERENCES", "IS UNIQUE"} {
+	for _, required := range []string{"GortexNode", "GortexProjectionManifest", "GORTEX_CALLS", expectedRelationshipType, "IS UNIQUE"} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("constraints omit %q: %s", required, joined)
 		}
@@ -108,7 +110,7 @@ func TestNeo4jRetryBounds(t *testing.T) {
 	if neo4jTransactionTimeout != 30*time.Second || neo4jRetryCeiling != 30*time.Second {
 		t.Fatalf("timeouts = transaction %s retry %s", neo4jTransactionTimeout, neo4jRetryCeiling)
 	}
-	for _, query := range []string{nodeMergeQuery("Function"), relationshipMergeQuery("GORTEX_CALLS")} {
+	for _, query := range []string{nodeMergeQuery("Function"), relationshipMergeQuery(expectedRelationshipType)} {
 		if !strings.Contains(query, "UNWIND $rows") || !strings.Contains(query, "MERGE") {
 			t.Fatalf("write is not bounded idempotent UNWIND/MERGE: %s", query)
 		}

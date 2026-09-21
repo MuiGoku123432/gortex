@@ -13,31 +13,10 @@ func TestNeo4jIntegrationGate(t *testing.T) {
 	if os.Getenv("GORTEX_NEO4J_INTEGRATION") != "1" {
 		t.Skip("disposable Neo4j gate is opt-in")
 	}
-	for _, scenario := range []string{
-		"one_node_one_relationship_activation",
-		"rerun",
-		"stale_reconciliation",
-		"owner_isolation",
-		"pre_activation_failure",
-		"cancellation",
-		"dry_run",
-		"shape",
-		"redaction",
-		"sqlite_fingerprints",
-	} {
-		t.Run(scenario, func(t *testing.T) {
-			if scenario != "shape" {
-				if os.Getenv("GORTEX_NEO4J_REQUIRE_SCENARIOS") == "1" {
-					t.Fatal("mandatory Neo4j scenario is registered but not implemented")
-				}
-				t.Skip("registered for the production projection implementation")
-			}
-			for _, name := range []string{"GORTEX_NEO4J_URI", "GORTEX_NEO4J_USERNAME", "GORTEX_NEO4J_PASSWORD"} {
-				if os.Getenv(name) == "" {
-					t.Fatalf("integration environment missing %s", name)
-				}
-			}
-		})
+	for _, name := range []string{"GORTEX_NEO4J_URI", "GORTEX_NEO4J_USERNAME", "GORTEX_NEO4J_PASSWORD"} {
+		if os.Getenv(name) == "" {
+			t.Fatalf("integration environment missing %s", name)
+		}
 	}
 }
 

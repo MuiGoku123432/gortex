@@ -3,6 +3,7 @@ package neo4jprojection
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,6 +89,15 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 	factory := func(context.Context) (Transport, error) { return NewNeo4jTransport(profile) }
 	service := NewService(store, factory)
 	request := Request{Owner: graphfixture.OwnerKey, OperationID: operation, Scope: scope}
+	beforeDryRun := neo4jOwnerCensus(t, ctx, assertionDriver, profile.Database, graphfixture.OwnerKey)
+	dryRun, err := service.Push(ctx, Request{Owner: graphfixture.OwnerKey, OperationID: "dry-run", Scope: scope, DryRun: true})
+	if err != nil || !dryRun.Complete || !dryRun.DryRun || dryRun.NodeCount != 2 || dryRun.EdgeCount != 1 {
+		t.Fatalf("dry run failed: result=%#v err=%v", dryRun, err)
+	}
+	if afterDryRun := neo4jOwnerCensus(t, ctx, assertionDriver, profile.Database, graphfixture.OwnerKey); afterDryRun != beforeDryRun {
+		t.Fatalf("dry run mutated target: before=%v after=%v", beforeDryRun, afterDryRun)
+	}
+
 	first, err := service.Push(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +106,20 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.Complete || first.ActiveGeneration == "" || first.ActiveGeneration != second.ActiveGeneration || first.NodeCount != 2 || first.EdgeCount != 1 {
+	if !first.Complete || !first.CleanupComplete || first.ActiveGeneration == "" || first.ActiveGeneration != second.ActiveGeneration || first.NodeCount != 2 || first.EdgeCount != 1 {
 		t.Fatalf("non-idempotent tracer results: first=%#v second=%#v", first, second)
+	}
+
+	cancelService := NewService(store, func(ctx context.Context) (Transport, error) {
+		transport, err := NewNeo4jTransport(profile)
+		if err != nil {
+			return nil, err
+		}
+		return &cancelBeforeActivationTransport{Transport: transport}, nil
+	})
+	cancelled, cancelErr := cancelService.Push(ctx, Request{Owner: "workspace:cancel/repo", OperationID: "cancel-operation", Scope: scope})
+	if !errors.Is(cancelErr, context.Canceled) || cancelled.Complete || cancelled.ActiveGeneration != "" {
+		t.Fatalf("cancellation did not preserve inactive state: result=%#v err=%v", cancelled, cancelErr)
 	}
 
 	failureService := NewService(store, func(ctx context.Context) (Transport, error) {
@@ -112,11 +134,27 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 		t.Fatalf("pre-activation failure did not preserve prior visibility: result=%#v err=%v", failed, failureErr)
 	}
 
+	cleanupService := NewService(store, func(ctx context.Context) (Transport, error) {
+		transport, err := NewNeo4jTransport(profile)
+		if err != nil {
+			return nil, err
+		}
+		return &failCleanupTransport{Transport: transport}, nil
+	})
+	cleanupResult, cleanupErr := cleanupService.Push(ctx, Request{Owner: graphfixture.OwnerKey, OperationID: "changed-operation", Scope: scope, BatchSize: 1})
+	if !errors.Is(cleanupErr, ErrCleanupIncomplete) || !cleanupResult.Complete || cleanupResult.CleanupComplete || cleanupResult.StaleNodeCount == 0 {
+		t.Fatalf("cleanup interruption was not reported truthfully: result=%#v err=%v", cleanupResult, cleanupErr)
+	}
+	resumed, err := service.Push(ctx, Request{Owner: graphfixture.OwnerKey, OperationID: "changed-operation", Scope: scope, BatchSize: 1})
+	if err != nil || !resumed.Complete || !resumed.CleanupComplete || resumed.ActiveGeneration != cleanupResult.ActiveGeneration {
+		t.Fatalf("ordinary rerun did not resume cleanup: result=%#v err=%v", resumed, err)
+	}
+
 	target, err := neo4j.ExecuteQuery(ctx, assertionDriver, `
 MATCH (manifest:GortexProjectionManifest {gortex_owner: $owner})
 OPTIONAL MATCH (node:GortexNode {gortex_owner: $owner, gortex_generation: manifest.active_generation})
 WITH manifest, count(node) AS node_count
-OPTIONAL MATCH ()-[relationship:GORTEX_RELATIONSHIP {gortex_owner: $owner, gortex_generation: manifest.active_generation}]->()
+OPTIONAL MATCH ()-[relationship {gortex_owner: $owner, gortex_generation: manifest.active_generation}]->()
 RETURN manifest.active_generation AS active_generation, manifest.complete AS complete,
        node_count, count(relationship) AS relationship_count,
        count { MATCH (:GortexNeighborCanary {canary: 'survive'}) } = 1 AS canary_survives,
@@ -133,7 +171,7 @@ RETURN manifest.active_generation AS active_generation, manifest.complete AS com
 		t.Fatalf("target assertion returned %d records", len(target.Records))
 	}
 	record := target.Records[0]
-	assertNeo4jValue(t, record, "active_generation", first.ActiveGeneration)
+	assertNeo4jValue(t, record, "active_generation", resumed.ActiveGeneration)
 	assertNeo4jValue(t, record, "complete", true)
 	assertNeo4jValue(t, record, "node_count", int64(2))
 	assertNeo4jValue(t, record, "relationship_count", int64(1))
@@ -141,7 +179,7 @@ RETURN manifest.active_generation AS active_generation, manifest.complete AS com
 	assertNeo4jValue(t, record, "neighbor_survives", true)
 	assertNeo4jValue(t, record, "failure_prior_survives", true)
 	assertNeo4jValue(t, record, "leaked_nodes", int64(0))
-	if strings.Contains(fmt.Sprint(first, second, failed, failureErr), profile.Password) {
+	if strings.Contains(fmt.Sprint(dryRun, first, second, cancelled, cancelErr, failed, failureErr, cleanupResult, cleanupErr, resumed), profile.Password) {
 		t.Fatal("Neo4j password leaked through result or error")
 	}
 
@@ -155,10 +193,30 @@ RETURN manifest.active_generation AS active_generation, manifest.complete AS com
 	}
 }
 
+type cancelBeforeActivationTransport struct{ Transport }
+
+func (t *cancelBeforeActivationTransport) Activate(context.Context, string, string, string, string, Result) error {
+	return context.Canceled
+}
+
+func (t *cancelBeforeActivationTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+	return CleanupCounts{}, nil
+}
+
+type failCleanupTransport struct{ Transport }
+
+func (t *failCleanupTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+	return CleanupCounts{Nodes: 2, Relationships: 1}, ErrCleanupIncomplete
+}
+
 type failBeforeActivationTransport struct{ Transport }
 
 func (t *failBeforeActivationTransport) Activate(context.Context, string, string, string, string, Result) error {
 	return fmt.Errorf("injected failure before activation")
+}
+
+func (t *failBeforeActivationTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+	return CleanupCounts{}, nil
 }
 
 func requiredIntegrationEnv(t *testing.T, name string) string {
@@ -168,6 +226,27 @@ func requiredIntegrationEnv(t *testing.T, name string) string {
 		t.Fatalf("integration environment missing %s", name)
 	}
 	return value
+}
+
+func neo4jOwnerCensus(t *testing.T, ctx context.Context, driver neo4j.Driver, database, owner string) [3]int64 {
+	t.Helper()
+	result, err := neo4j.ExecuteQuery(ctx, driver, `
+OPTIONAL MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WITH count(m) AS manifests
+OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner})
+WITH manifests, count(n) AS nodes
+OPTIONAL MATCH ()-[r {gortex_owner: $owner}]->()
+RETURN manifests, nodes, count(r) AS relationships`, map[string]any{"owner": owner}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(database))
+	if err != nil || len(result.Records) != 1 {
+		t.Fatalf("owner census: result=%#v err=%v", result, err)
+	}
+	return [3]int64{recordInt64(result.Records[0], "manifests"), recordInt64(result.Records[0], "nodes"), recordInt64(result.Records[0], "relationships")}
+}
+
+func recordInt64(record *neo4j.Record, key string) int64 {
+	value, _ := record.Get(key)
+	count, _ := value.(int64)
+	return count
 }
 
 func assertNeo4jValue(t *testing.T, record *neo4j.Record, key string, want any) {

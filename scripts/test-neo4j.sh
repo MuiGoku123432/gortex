@@ -2,7 +2,7 @@
 set -euo pipefail
 
 timeout_seconds=240
-run_test="TestNeo4jIntegrationGate"
+run_test="TestNeo4jProductionTracer"
 image="neo4j:5.26-community"
 
 usage() {
@@ -86,7 +86,7 @@ host_port=$("$docker_cmd" port "$container" 7687/tcp | sed 's/.*://')
 [ -n "$host_port" ] || { printf 'Neo4j Bolt port was not published\n' >&2; exit 4; }
 
 GORTEX_NEO4J_INTEGRATION=1 \
-GORTEX_NEO4J_REQUIRE_SCENARIOS="${GORTEX_NEO4J_REQUIRE_SCENARIOS:-0}" \
+GORTEX_NEO4J_REQUIRE_SCENARIOS="${GORTEX_NEO4J_REQUIRE_SCENARIOS:-1}" \
 GORTEX_NEO4J_URI="bolt://127.0.0.1:${host_port}" \
 GORTEX_NEO4J_USERNAME=neo4j \
 GORTEX_NEO4J_PASSWORD="$password" \
