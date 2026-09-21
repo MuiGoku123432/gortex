@@ -12,6 +12,7 @@ import (
 	neo4j "github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/config"
 	gortexconfig "github.com/zzet/gortex/internal/config"
+	"github.com/zzet/gortex/internal/graph"
 )
 
 const (
@@ -121,6 +122,7 @@ RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner,
 
 func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
 	nodesByLabel := make(map[string][]map[string]any)
+	knownNodes := make(map[string]struct{}, len(batch.Nodes))
 	for _, node := range batch.Nodes {
 		projected, _, err := projectNode(batch.Owner, batch.PendingGeneration, node)
 		if err != nil {
@@ -131,6 +133,36 @@ func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 			label += ":GortexUnresolved"
 		}
 		nodesByLabel[label] = append(nodesByLabel[label], map[string]any{"physical": projected.Properties["gortex_physical_key"], "properties": projected.Properties})
+		knownNodes[node.ID] = struct{}{}
+	}
+	for _, row := range batch.Edges {
+		for _, endpoint := range []*graph.Node{row.Source, row.Target} {
+			if endpoint == nil {
+				continue
+			}
+			if _, exists := knownNodes[endpoint.ID]; exists {
+				continue
+			}
+			projected, _, err := projectNode(batch.Owner, batch.PendingGeneration, endpoint)
+			if err != nil {
+				return err
+			}
+			label := projected.Labels[1]
+			if len(projected.Labels) == 3 {
+				label += ":GortexUnresolved"
+			}
+			nodesByLabel[label] = append(nodesByLabel[label], map[string]any{"physical": projected.Properties["gortex_physical_key"], "properties": projected.Properties})
+			knownNodes[endpoint.ID] = struct{}{}
+		}
+		if row.Target == nil {
+			unresolved := &graph.Node{ID: row.Edge.To, Kind: graph.NodeKind("unresolved"), Name: row.Edge.To, Meta: map[string]any{"synthetic": true}}
+			projected, _, err := projectNode(batch.Owner, batch.PendingGeneration, unresolved)
+			if err != nil {
+				return err
+			}
+			nodesByLabel[projected.Labels[1]+":GortexUnresolved"] = append(nodesByLabel[projected.Labels[1]+":GortexUnresolved"], map[string]any{"physical": projected.Properties["gortex_physical_key"], "properties": projected.Properties})
+			knownNodes[unresolved.ID] = struct{}{}
+		}
 	}
 	labels := make([]string, 0, len(nodesByLabel))
 	for label := range nodesByLabel {
