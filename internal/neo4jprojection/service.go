@@ -2,7 +2,6 @@ package neo4jprojection
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -125,6 +124,5 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 }
 
 func generationKey(owner, operation string, sourceGeneration int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", owner, operation, sourceGeneration)))
-	return fmt.Sprintf("g-%x", sum[:16])
+	return projectionGenerationKey(owner, operation, sourceGeneration)
 }
