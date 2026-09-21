@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 01
 current_phase_name: General Neo4j Projection Command
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-21T20:54:43.675Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-21T21:07:01.039Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 state_head: 3c44f1fac75c26bd579d1fd96270e74f36e7d699
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 01 (General Neo4j Projection Command) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 01 execution started
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [█░░░░░░░░░] 14%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 6 min | 2 tasks | 5 files |
+| Phase 01 P02 | 10 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,8 @@ Recent decisions affecting current work:
 - [Phases 7-9]: AI-facing work requires the AI-SPEC workflow before implementation planning; existing artifacts must be renumbered by the orchestrator.
 - [Phase 01]: Keep graphfixture independent of store_sqlite so downstream same-package tests can open the fixture without an import cycle.
 - [Phase 01]: Register future real-server scenarios now, and make the final mandatory gate fail while any remain skipped.
+- [Phase ?]: Keep resolved Neo4j credentials invocation-local and excluded from YAML serialization.
+- [Phase ?]: Add a separate immutable snapshot opener capability instead of widening ScopedProjectionSequencer.
 
 ### Pending Todos
 
@@ -99,6 +102,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T20:54:43.668Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-21T21:07:01.033Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
