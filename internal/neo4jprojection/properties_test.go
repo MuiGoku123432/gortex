@@ -1,7 +1,12 @@
 package neo4jprojection
 
 import (
+	"bytes"
+	"math"
+	"os"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/zzet/gortex/internal/graph"
 )
@@ -44,6 +49,92 @@ func TestProjectionIdentity(t *testing.T) {
 	changed.Origin = "lsp"
 	if projectionEdgeLogicalKey(owner, base) == projectionEdgeLogicalKey(owner, &changed) {
 		t.Fatal("edge provenance did not affect identity")
+	}
+}
+
+func TestProjectionProperties(t *testing.T) {
+	node := completeProjectionNode()
+	projected, warnings, err := projectNode("owner", "generation", node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"id", "kind", "name", "qual_name", "file_path", "start_line", "end_line", "start_column", "end_column", "language", "repo_prefix", "workspace_id", "project_id", "origin", "stub", "fetched_at"} {
+		if _, ok := projected.Properties[key]; !ok {
+			t.Errorf("missing typed node property %q", key)
+		}
+	}
+	if warnings.Unsupported != 2 || warnings.Secret != 1 {
+		t.Fatalf("warnings = %+v, want unsupported=2 secret=1", warnings)
+	}
+	if projected.Properties["gortex_meta_key_map"] == "" || projected.Properties["gortex_meta_encoding"] == "" {
+		t.Fatal("metadata key map or encoding markers were not recorded")
+	}
+}
+
+func TestProjectionPropertiesGolden(t *testing.T) {
+	node, nodeWarnings, err := projectNode("owner", "generation", completeProjectionNode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge, edgeWarnings, err := projectEdge("owner", "generation", &graph.Edge{
+		From: "repo/a.go::A", To: "unresolved::pkg::B", Kind: graph.EdgeCalls,
+		FilePath: "repo/a.go", Line: 12, Confidence: .75, ConfidenceLabel: "high",
+		Origin: "ast", Tier: "structural", CrossRepo: true, Context: "call",
+		ReturnUsage: "assigned", Via: "framework", Alias: "renamed", NameOnly: true,
+		Meta: map[string]any{"mixed": []any{"x", 2}, "safe": "value"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, err := canonicalJSON(map[string]any{"edge": edge, "edge_warnings": edgeWarnings, "node": node, "node_warnings": nodeWarnings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/properties.golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(append(actual, '\n')) != string(want) {
+		t.Fatalf("golden mismatch\nactual: %s\nwant: %s", actual, want)
+	}
+}
+
+func TestProjectionUnresolved(t *testing.T) {
+	projected, _, err := projectNode("owner", "generation", &graph.Node{ID: "unresolved::pkg::Thing", Kind: "unresolved", Name: "Thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(projected.Labels, "GortexUnresolved") {
+		t.Fatalf("unresolved labels = %v", projected.Labels)
+	}
+}
+
+func TestProjectionSecretFiltering(t *testing.T) {
+	projected, warnings, err := projectNode("owner", "generation", &graph.Node{ID: "n", Kind: graph.KindFunction, Meta: map[string]any{"API-Key": "secret-canary", "credential_value": "secret-canary", "safe": "public"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := canonicalJSON(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte("secret-canary")) || warnings.Secret != 2 {
+		t.Fatalf("secret filtering failed: warnings=%+v output=%s", warnings, encoded)
+	}
+}
+
+func completeProjectionNode() *graph.Node {
+	return &graph.Node{
+		ID: "repo/a.go::A", Kind: graph.KindFunction, Name: "A", QualName: "pkg.A",
+		FilePath: "repo/a.go", StartLine: 10, EndLine: 20, StartColumn: 2, EndColumn: 8,
+		Language: "go", RepoPrefix: "repo", WorkspaceID: "workspace", ProjectID: "project",
+		Origin: "remote:repo", Stub: true, FetchedAt: time.Date(2026, 9, 21, 12, 0, 0, 123, time.UTC),
+		Meta: map[string]any{
+			"safe": "value", "a-b": int64(1), "a b": int64(2),
+			"nested": map[string]any{"b": 2, "a": 1}, "mixed": []any{"x", 2},
+			"labels": []string{"one", "two"}, "api_token": "secret-canary",
+			"nan": math.NaN(), "unsupported": make(chan int),
+		},
 	}
 }
 
