@@ -79,7 +79,9 @@ func (s *Server) handleNeo4jPush(ctx context.Context, req mcp.CallToolRequest) (
 
 	result, pushErr := push(s.progressCtx(ctx, req), request)
 	if pushErr != nil {
-		result.Complete = false
+		if !errors.Is(pushErr, neo4jprojection.ErrCleanupIncomplete) {
+			result.Complete = false
+		}
 		result.ErrorCode, result.ErrorMessage = classifyNeo4jPushError(pushErr)
 		if result.CleanupAction == "" {
 			result.CleanupAction = "rerun the same projection command"
