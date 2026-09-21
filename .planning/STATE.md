@@ -4,11 +4,11 @@ milestone: v1.0
 current_phase: 1
 current_phase_name: General Neo4j Projection Command
 status: planning
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-21T17:54:05.491Z"
+stopped_at: Phase 1 Neo4j projection context gathered
+last_updated: "2026-09-21T17:54:43.635Z"
 last_activity: 2026-09-21
 last_activity_desc: Immediate priority changed to a general SQLite-to-Neo4j projection; 120/120 requirements mapped, with COBOL phases deferred for grammar readiness
-state_head: aab0141840b5ac45bd4ee5224067f7c285cd00c7
+state_head: d4891e67e6a9cb66fa8f720a24a197977ff1b240
 progress:
   total_phases: 9
   completed_phases: 0
@@ -92,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T17:54:05.483Z
-Stopped at: Phase 1 context gathered
+Last session: 2026-09-21T17:54:43.625Z
+Stopped at: Phase 1 Neo4j projection context gathered
 Resume file: .planning/phases/01-general-neo4j-projection-command/01-CONTEXT.md
