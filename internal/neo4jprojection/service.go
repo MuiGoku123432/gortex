@@ -138,7 +138,9 @@ func NormalizeRequest(request Request) (Request, error) {
 	request.Timeout = operationTimeout
 	request.Scope = graph.ProjectionScope{Repositories: append([]string(nil), request.Repositories...)}
 	request.Owner = projectionOwnerKey(request.Namespace, request.Workspace, request.Project, request.Repositories)
-	request.OperationID = request.Owner
+	if request.OperationID == "" {
+		request.OperationID = request.Owner
+	}
 	return request, nil
 }
 
@@ -148,6 +150,22 @@ const (
 )
 
 func (s *Service) Push(ctx context.Context, request Request) (result Result, retErr error) {
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if result.CleanupAction == "" {
+			result.CleanupAction = "rerun the same projection command"
+		}
+		result.Cancelled = result.Cancelled || errors.Is(retErr, context.Canceled) || errors.Is(retErr, context.DeadlineExceeded)
+		if result.Cancelled {
+			result.ErrorCode, result.ErrorMessage = "cancelled", "neo4j projection cancelled"
+		} else if errors.Is(retErr, ErrCleanupIncomplete) {
+			result.ErrorCode, result.ErrorMessage = "cleanup_incomplete", "projection activated; exact-owner cleanup is incomplete"
+		} else {
+			result.ErrorCode, result.ErrorMessage = "projection_failed", "neo4j projection failed"
+		}
+	}()
 	request.Owner = strings.TrimSpace(request.Owner)
 	request.OperationID = strings.TrimSpace(request.OperationID)
 	if request.Profile != "" || request.Namespace != "" || request.Workspace != "" || request.Project != "" || len(request.Repositories) > 0 {

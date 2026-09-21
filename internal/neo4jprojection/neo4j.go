@@ -22,19 +22,24 @@ const (
 )
 
 type neo4jTransport struct {
-	driver            neo4j.Driver
-	database          string
-	relationshipTypes map[string]struct{}
+	driver             neo4j.Driver
+	database           string
+	transactionTimeout time.Duration
+	relationshipTypes  map[string]struct{}
 }
 
 func NewNeo4jTransport(profile gortexconfig.ResolvedNeo4jProfile) (Transport, error) {
+	return NewNeo4jTransportWithTimeouts(profile, neo4jTransactionTimeout, neo4jRetryCeiling)
+}
+
+func NewNeo4jTransportWithTimeouts(profile gortexconfig.ResolvedNeo4jProfile, transactionTimeout, retryTimeout time.Duration) (Transport, error) {
 	driver, err := neo4j.NewDriver(profile.URI, neo4j.BasicAuth(profile.Username, profile.Password, ""), func(cfg *config.Config) {
-		cfg.MaxTransactionRetryTime = neo4jRetryCeiling
+		cfg.MaxTransactionRetryTime = retryTimeout
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create neo4j driver for profile %q", profile.Name)
 	}
-	return &neo4jTransport{driver: driver, database: profile.Database, relationshipTypes: make(map[string]struct{})}, nil
+	return &neo4jTransport{driver: driver, database: profile.Database, transactionTimeout: transactionTimeout, relationshipTypes: make(map[string]struct{})}, nil
 }
 
 func (t *neo4jTransport) Inspect(ctx context.Context, dryRun bool) error {
@@ -232,7 +237,7 @@ func (t *neo4jTransport) Close(ctx context.Context) error { return t.driver.Clos
 func (t *neo4jTransport) query(ctx context.Context, query string, params map[string]any) (*neo4j.EagerResult, error) {
 	return neo4j.ExecuteQuery(ctx, t.driver, query, params, neo4j.EagerResultTransformer,
 		neo4j.ExecuteQueryWithDatabase(t.database),
-		neo4j.ExecuteQueryWithTransactionConfig(neo4j.WithTxTimeout(neo4jTransactionTimeout)))
+		neo4j.ExecuteQueryWithTransactionConfig(neo4j.WithTxTimeout(t.transactionTimeout)))
 }
 
 func (t *neo4jTransport) execute(ctx context.Context, query string, params map[string]any) error {
