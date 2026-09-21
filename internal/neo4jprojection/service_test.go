@@ -5,8 +5,10 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/progress"
 )
 
 type tracerSnapshot struct{ closed bool }
@@ -14,12 +16,12 @@ type tracerSnapshot struct{ closed bool }
 func (s *tracerSnapshot) Descriptor() graph.ProjectionSnapshotDescriptor {
 	return graph.ProjectionSnapshotDescriptor{SourceGeneration: 7, Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}}
 }
-func (s *tracerSnapshot) ReadNodes(context.Context) ([]*graph.Node, error) {
-	return []*graph.Node{{ID: "fixture/repo/main.go::Run", Kind: graph.KindFunction, Name: "Run", RepoPrefix: "fixture/repo"}, {ID: "fixture/repo/main.go::Store", Kind: graph.KindType, Name: "Store", RepoPrefix: "fixture/repo"}}, nil
+func (s *tracerSnapshot) ReadNodePages(_ context.Context, consume func([]*graph.Node) error) error {
+	return consume([]*graph.Node{{ID: "fixture/repo/main.go::Run", Kind: graph.KindFunction, Name: "Run", RepoPrefix: "fixture/repo"}, {ID: "fixture/repo/main.go::Store", Kind: graph.KindType, Name: "Store", RepoPrefix: "fixture/repo"}})
 }
-func (s *tracerSnapshot) ReadEdges(context.Context) ([]graph.ScopedEdgeRow, error) {
+func (s *tracerSnapshot) ReadEdgePages(_ context.Context, consume func([]graph.ScopedEdgeRow) error) error {
 	source, target := &graph.Node{ID: "fixture/repo/main.go::Run"}, &graph.Node{ID: "fixture/repo/main.go::Store"}
-	return []graph.ScopedEdgeRow{{Edge: &graph.Edge{From: source.ID, To: target.ID, Kind: graph.EdgeReferences}, Source: source, Target: target}}, nil
+	return consume([]graph.ScopedEdgeRow{{Edge: &graph.Edge{From: source.ID, To: target.ID, Kind: graph.EdgeReferences}, Source: source, Target: target}})
 }
 func (s *tracerSnapshot) Close() error { s.closed = true; return nil }
 
@@ -60,6 +62,176 @@ func (t *tracerTransport) record(operation string) error {
 	return nil
 }
 
+type batchSnapshot struct {
+	nodes       []*graph.Node
+	edges       []graph.ScopedEdgeRow
+	pageSize    int
+	outstanding int
+	maxRead     int
+}
+
+func (s *batchSnapshot) Descriptor() graph.ProjectionSnapshotDescriptor {
+	return graph.ProjectionSnapshotDescriptor{SourceGeneration: 9, Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}}
+}
+func (s *batchSnapshot) ReadNodePages(ctx context.Context, consume func([]*graph.Node) error) error {
+	for start := 0; start < len(s.nodes); start += s.pageSize {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		end := min(start+s.pageSize, len(s.nodes))
+		s.outstanding = end - start
+		s.maxRead = max(s.maxRead, s.outstanding)
+		if err := consume(s.nodes[start:end]); err != nil {
+			return err
+		}
+		s.outstanding = 0
+	}
+	return nil
+}
+func (s *batchSnapshot) ReadEdgePages(ctx context.Context, consume func([]graph.ScopedEdgeRow) error) error {
+	for start := 0; start < len(s.edges); start += s.pageSize {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		end := min(start+s.pageSize, len(s.edges))
+		s.outstanding = end - start
+		s.maxRead = max(s.maxRead, s.outstanding)
+		if err := consume(s.edges[start:end]); err != nil {
+			return err
+		}
+		s.outstanding = 0
+	}
+	return nil
+}
+func (s *batchSnapshot) Close() error { return nil }
+
+type batchOpener struct{ snapshot *batchSnapshot }
+
+func (o batchOpener) OpenScopedProjectionSnapshot(context.Context, graph.ProjectionScope) (graph.ScopedProjectionSnapshot, error) {
+	return o.snapshot, nil
+}
+
+type batchTransport struct {
+	batches []ProjectionBatch
+	cancel  context.CancelFunc
+	dryRuns int
+}
+
+func (t *batchTransport) Inspect(context.Context) error { return nil }
+func (t *batchTransport) Acquire(context.Context, string, string) (string, error) {
+	return "prior", nil
+}
+func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t.batches = append(t.batches, batch)
+	if t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+	}
+	return nil
+}
+func (t *batchTransport) Activate(context.Context, string, string, string, string, Result) error {
+	return nil
+}
+func (t *batchTransport) Close(context.Context) error { return nil }
+
+type recordingReporter struct {
+	ticks []struct {
+		stage          string
+		current, total int
+	}
+}
+
+func (r *recordingReporter) Report(stage string, current, total int) {
+	r.ticks = append(r.ticks, struct {
+		stage          string
+		current, total int
+	}{stage, current, total})
+}
+
+func projectionRecords(count int) ([]*graph.Node, []graph.ScopedEdgeRow) {
+	nodes := make([]*graph.Node, count)
+	edges := make([]graph.ScopedEdgeRow, count)
+	for i := range count {
+		nodes[i] = &graph.Node{ID: string(rune(i + 1)), Kind: graph.KindFunction, RepoPrefix: "fixture/repo"}
+		edges[i] = graph.ScopedEdgeRow{Edge: &graph.Edge{From: nodes[i].ID, To: nodes[i].ID, Kind: graph.EdgeReferences}, Source: nodes[i], Target: nodes[i]}
+	}
+	return nodes, edges
+}
+
+func TestProjectionBatchAggregation(t *testing.T) {
+	nodes, edges := projectionRecords(1201)
+	t.Run("dry run counts without target mutation", func(t *testing.T) {
+		transport := &batchTransport{}
+		result, err := NewService(batchOpener{&batchSnapshot{nodes: nodes, edges: edges, pageSize: 127}}, func(context.Context) (Transport, error) { return transport, nil }).Push(context.Background(), Request{Owner: "owner", OperationID: "dry", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}, DryRun: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Complete || !result.DryRun || result.NodeCount != len(nodes) || result.EdgeCount != len(edges) || len(transport.batches) != 0 {
+			t.Fatalf("unexpected dry-run result: %#v batches=%d", result, len(transport.batches))
+		}
+	})
+	for _, batchSize := range []int{0, 73} {
+		snapshot := &batchSnapshot{nodes: nodes, edges: edges, pageSize: 127}
+		transport := &batchTransport{}
+		result, err := NewService(batchOpener{snapshot}, func(context.Context) (Transport, error) { return transport, nil }).Push(context.Background(), Request{Owner: "owner", OperationID: "op", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}, BatchSize: batchSize})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantMax := 500
+		if batchSize > 0 {
+			wantMax = batchSize
+		}
+		for _, batch := range transport.batches {
+			if len(batch.Nodes)+len(batch.Edges) > wantMax {
+				t.Fatalf("batch records = %d, max %d", len(batch.Nodes)+len(batch.Edges), wantMax)
+			}
+		}
+		if result.NodeCount != len(nodes) || result.EdgeCount != len(edges) || !result.Complete {
+			t.Fatalf("unexpected result: %#v", result)
+		}
+	}
+}
+
+func TestProjectionProgressCadence(t *testing.T) {
+	nodes, _ := projectionRecords(2100)
+	reporter := &recordingReporter{}
+	ctx := progress.WithReporter(context.Background(), reporter)
+	_, err := NewService(batchOpener{&batchSnapshot{nodes: nodes, pageSize: 211}}, func(context.Context) (Transport, error) { return &batchTransport{}, nil }).Push(ctx, Request{Owner: "owner", OperationID: "op", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := -1
+	seen1000, seen2000 := false, false
+	for _, tick := range reporter.ticks {
+		if tick.current < last {
+			t.Fatalf("non-monotonic progress: %v", reporter.ticks)
+		}
+		last = tick.current
+		seen1000 = seen1000 || tick.current == 1000
+		seen2000 = seen2000 || tick.current == 2000
+	}
+	if !seen1000 || !seen2000 {
+		t.Fatalf("missing exact record cadence: %v", reporter.ticks)
+	}
+}
+
+func TestProjectionBoundedReads(t *testing.T) {
+	nodes, edges := projectionRecords(701)
+	ctx, cancel := context.WithCancel(context.Background())
+	snapshot := &batchSnapshot{nodes: nodes, edges: edges, pageSize: 89}
+	transport := &batchTransport{cancel: cancel}
+	result, err := NewService(batchOpener{snapshot}, func(context.Context) (Transport, error) { return transport, nil }).Push(ctx, Request{Owner: "owner", OperationID: "op", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}, Timeout: time.Minute})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want cancellation", err)
+	}
+	if result.Complete || snapshot.maxRead > 89 || snapshot.outstanding != 0 {
+		t.Fatalf("unbounded/incomplete state: result=%#v snapshot=%#v", result, snapshot)
+	}
+}
+
 func TestNeo4jTracerContract(t *testing.T) {
 	t.Run("orders inspection locking staging activation and close", func(t *testing.T) {
 		snapshot := &tracerSnapshot{}
@@ -72,7 +244,7 @@ func TestNeo4jTracerContract(t *testing.T) {
 		if !result.Complete || result.ActiveGeneration == "" || result.ActiveGeneration == "generation-old" || result.NodeCount != 2 || result.EdgeCount != 1 {
 			t.Fatalf("unexpected result: %#v", result)
 		}
-		if want := []string{"inspect", "lock", "stage", "activate", "close"}; !reflect.DeepEqual(transport.operations, want) {
+		if want := []string{"inspect", "lock", "stage", "stage", "activate", "close"}; !reflect.DeepEqual(transport.operations, want) {
 			t.Fatalf("operations = %v, want %v", transport.operations, want)
 		}
 		if !snapshot.closed || !transport.closed {

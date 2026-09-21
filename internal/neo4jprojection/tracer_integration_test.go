@@ -73,10 +73,10 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := warm.ReadNodes(ctx); err != nil {
+	if err := warm.ReadNodePages(ctx, func([]*graph.Node) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := warm.ReadEdges(ctx); err != nil {
+	if err := warm.ReadEdgePages(ctx, func([]graph.ScopedEdgeRow) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := warm.Close(); err != nil {
@@ -205,12 +205,12 @@ func tracerSQLiteCanonical(t *testing.T, ctx context.Context, store *store_sqlit
 			t.Error(err)
 		}
 	}()
-	nodes, err := snapshot.ReadNodes(ctx)
-	if err != nil {
+	var nodes []*graph.Node
+	if err := snapshot.ReadNodePages(ctx, func(page []*graph.Node) error { nodes = append(nodes, page...); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	edges, err := snapshot.ReadEdges(ctx)
-	if err != nil {
+	var edges []graph.ScopedEdgeRow
+	if err := snapshot.ReadEdgePages(ctx, func(page []graph.ScopedEdgeRow) error { edges = append(edges, page...); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	rows := make([]string, 0, len(nodes)+len(edges))
