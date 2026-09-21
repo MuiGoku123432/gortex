@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -98,8 +99,75 @@ type GlobalConfig struct {
 	// must not be able to authorize extra in-process servers on the machine.
 	MCP GlobalMCPConfig `mapstructure:"mcp" yaml:"mcp,omitempty"`
 
+	// Neo4j contains machine-level connection profiles. Profiles store only
+	// non-secret settings and environment-variable references; credentials are
+	// resolved by ResolveNeo4jProfile only for an explicit invocation.
+	Neo4j map[string]Neo4jProfile `mapstructure:"neo4j" yaml:"neo4j,omitempty"`
+
 	// configPath stores the file path used for Save(). Set by LoadGlobal or SetConfigPath.
 	configPath string `yaml:"-"`
+}
+
+// Neo4jProfile is the serializable, secret-free profile stored in the global config.
+type Neo4jProfile struct {
+	URI         string `mapstructure:"uri" yaml:"uri"`
+	Database    string `mapstructure:"database" yaml:"database"`
+	UsernameEnv string `mapstructure:"username_env" yaml:"username_env"`
+	PasswordEnv string `mapstructure:"password_env" yaml:"password_env"`
+}
+
+// ResolvedNeo4jProfile is an invocation-local connection value. Credential
+// fields are deliberately excluded from YAML serialization.
+type ResolvedNeo4jProfile struct {
+	Name     string `yaml:"name"`
+	URI      string `yaml:"uri"`
+	Database string `yaml:"database"`
+	Username string `yaml:"-"`
+	Password string `yaml:"-"`
+}
+
+// ResolveNeo4jProfile validates and resolves one explicitly named profile.
+func (gc *GlobalConfig) ResolveNeo4jProfile(name string) (ResolvedNeo4jProfile, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile name is required")
+	}
+	profile, ok := gc.Neo4j[name]
+	if !ok {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q not found", name)
+	}
+	profile.URI = strings.TrimSpace(profile.URI)
+	profile.Database = strings.TrimSpace(profile.Database)
+	profile.UsernameEnv = strings.TrimSpace(profile.UsernameEnv)
+	profile.PasswordEnv = strings.TrimSpace(profile.PasswordEnv)
+	if profile.URI == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: uri is required", name)
+	}
+	parsed, err := url.Parse(profile.URI)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: uri is invalid", name)
+	}
+	if parsed.User != nil {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: uri must not contain userinfo", name)
+	}
+	if profile.Database == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: database is required", name)
+	}
+	if profile.UsernameEnv == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: username_env is required", name)
+	}
+	if profile.PasswordEnv == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: password_env is required", name)
+	}
+	username := os.Getenv(profile.UsernameEnv)
+	if username == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: environment variable %s is empty", name, profile.UsernameEnv)
+	}
+	password := os.Getenv(profile.PasswordEnv)
+	if password == "" {
+		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: environment variable %s is empty", name, profile.PasswordEnv)
+	}
+	return ResolvedNeo4jProfile{Name: name, URI: profile.URI, Database: profile.Database, Username: username, Password: password}, nil
 }
 
 // DaemonConfig is the `daemon:` block in ~/.gortex/config.yaml.
@@ -185,7 +253,7 @@ func (gc *GlobalConfig) MergeEmbeddingInto(local EmbeddingConfig) EmbeddingConfi
 // so UnknownGlobalKeys surfaces it for a startup warning.
 var knownGlobalTopLevelKeys = map[string]bool{
 	"projects": true, "repos": true, "active_project": true,
-	"exclude": true, "llm": true, "embedding": true, "mcp": true,
+	"exclude": true, "llm": true, "embedding": true, "mcp": true, "neo4j": true,
 }
 
 // UnknownGlobalKeys returns the top-level keys present in the global config file
