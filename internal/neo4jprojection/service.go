@@ -77,6 +77,7 @@ var ErrCleanupIncomplete = errors.New("neo4j projection cleanup incomplete")
 type Transport interface {
 	Inspect(context.Context, bool) error
 	Acquire(context.Context, string, string, string) (string, error)
+	Abort(context.Context, string, string, string) error
 	Stage(context.Context, ProjectionBatch) error
 	Activate(context.Context, string, string, string, string, Result) error
 	Reconcile(context.Context, string, string, int) (CleanupCounts, error)
@@ -246,6 +247,12 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 		return result, fmt.Errorf("acquire projection owner: %w", err)
 	}
 	result.ActiveGeneration = prior
+	activated := false
+	defer func() {
+		if retErr != nil && !activated {
+			retErr = errors.Join(retErr, transport.Abort(context.WithoutCancel(ctx), request.Owner, request.OperationID, result.PendingGeneration))
+		}
+	}()
 	result.Phase = "staging"
 	report(result.Phase, 0)
 	processed, lastReport := 0, time.Now()
@@ -311,6 +318,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	if err := transport.Activate(ctx, request.Owner, request.OperationID, result.PendingGeneration, prior, result); err != nil {
 		return result, fmt.Errorf("activate projection: %w", err)
 	}
+	activated = true
 	result.ActiveGeneration = result.PendingGeneration
 	result.Complete = true
 	result.Phase = "cleanup"

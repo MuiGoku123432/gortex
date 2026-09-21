@@ -32,6 +32,12 @@ func (t *protocolTransport) Acquire(_ context.Context, _ string, operation, gene
 	t.lockGeneration = generation
 	return t.active, nil
 }
+func (t *protocolTransport) Abort(_ context.Context, _ string, operation, generation string) error {
+	if t.lockOperation == operation && t.lockGeneration == generation {
+		t.lockOperation, t.lockGeneration = "", ""
+	}
+	return nil
+}
 func (t *protocolTransport) Stage(_ context.Context, batch ProjectionBatch) error {
 	if batch.OperationID != t.lockOperation || batch.PendingGeneration != t.lockGeneration {
 		return errors.New("stage does not own lock")

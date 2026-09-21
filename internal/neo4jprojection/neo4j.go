@@ -104,6 +104,21 @@ RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner,
 	return value, nil
 }
 
+func (t *neo4jTransport) Abort(ctx context.Context, owner, operation, generation string) error {
+	_, err := t.query(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.pending_generation = $generation
+SET m.operation_id = '', m.pending_generation = '', m.pending_complete = false
+WITH m
+OPTIONAL MATCH ()-[r {gortex_owner: $owner, gortex_generation: $generation}]->()
+DELETE r
+WITH m
+OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner, gortex_generation: $generation})
+DETACH DELETE n
+RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner, "operation": operation, "generation": generation})
+	return classifyNeo4jError(err)
+}
+
 func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
 	nodesByLabel := make(map[string][]map[string]any)
 	for _, node := range batch.Nodes {

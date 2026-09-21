@@ -45,6 +45,9 @@ func (t *tracerTransport) Acquire(context.Context, string, string, string) (stri
 	}
 	return t.active, nil
 }
+func (t *tracerTransport) Abort(context.Context, string, string, string) error {
+	return t.record("abort")
+}
 func (t *tracerTransport) Stage(context.Context, ProjectionBatch) error { return t.record("stage") }
 func (t *tracerTransport) Activate(_ context.Context, owner, operation, generation, prior string, result Result) error {
 	if err := t.record("activate"); err != nil {
@@ -124,6 +127,7 @@ func (t *batchTransport) Inspect(context.Context, bool) error { return nil }
 func (t *batchTransport) Acquire(context.Context, string, string, string) (string, error) {
 	return "prior", nil
 }
+func (t *batchTransport) Abort(context.Context, string, string, string) error { return nil }
 func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
 	if err := ctx.Err(); err != nil {
 		return err
