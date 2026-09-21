@@ -72,7 +72,7 @@ func newNeo4jPushCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout())
 				}
 			}
-			if !result.Complete || !result.CleanupComplete {
+			if !result.Complete || result.CleanupStatus == "incomplete" {
 				if result.ErrorCode != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(), "neo4j push: %s: %s\n", result.ErrorCode, result.ErrorMessage)
 				}
