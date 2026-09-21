@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 01
 current_phase_name: General Neo4j Projection Command
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-09-21T21:25:10.793Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-09-21T21:34:58.186Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 state_head: 3c44f1fac75c26bd579d1fd96270e74f36e7d699
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 01 (General Neo4j Projection Command) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 01 execution started
 
-Progress: [████░░░░░░] 43%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [████░░░░░░] 43%
 | Phase 01 P01 | 6 min | 2 tasks | 5 files |
 | Phase 01 P02 | 10 min | 2 tasks | 5 files |
 | Phase 01 P03 | 13 min | 2 tasks | 8 files |
+| Phase 01 P04 | 8 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Add a separate immutable snapshot opener capability instead of widening ScopedProjectionSequencer.
 - [Phase 01]: Keep the official Neo4j driver invocation-local behind a narrow transport lifecycle; ordinary Gortex startup remains Neo4j-free.
 - [Phase 01]: Stage generation-specific physical records and make only one exact-owner manifest pointer switch visible.
+- [Phase ?]: Hash length-delimited identity components so exact scope, provenance, occurrence, and generation boundaries cannot alias through concatenation.
+- [Phase ?]: Filter normalized secret-like metadata keys before reversible key encoding, and omit non-finite or unsupported values with deterministic warning counts.
 
 ### Pending Todos
 
@@ -105,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T21:25:10.787Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-09-21T21:34:58.181Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
