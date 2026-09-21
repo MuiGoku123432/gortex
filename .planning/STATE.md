@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 01
 current_phase_name: General Neo4j Projection Command
-status: executing
-stopped_at: Completed 01-06-PLAN.md
-last_updated: "2026-09-21T22:44:23.118Z"
+status: verifying
+stopped_at: Completed 01-07-PLAN.md
+last_updated: "2026-09-21T23:24:03.988Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 9
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
-  completed_plans: 6
-  percent: 0
+  completed_plans: 7
+  percent: 11
 state_head: 3c44f1fac75c26bd579d1fd96270e74f36e7d699
 ---
 
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 Phase: 01 (General Neo4j Projection Command) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-21 — Phase 01 execution started
 
-Progress: [█████████░] 86%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [█████████░] 86%
 | Phase 01 P04 | 8 min | 2 tasks | 6 files |
 | Phase 01 P05 | 17 min | 2 tasks | 8 files |
 | Phase 01 P06 | 38 min | 2 tasks | 7 files |
+| Phase 01 P07 | 37 min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Count and stage nodes before edges in batches capped at 500 records, with progress emitted only after successful transport calls.
 - [Phase 01]: Treat manifest activation as logical completion, then report physical reconciliation independently.
 - [Phase 01]: Use operation plus pending generation as the exact-owner idempotent lock identity.
+- [Phase 01]: Normalize CLI and MCP input through one neo4jprojection.Request contract before profile resolution, snapshot reads, or driver construction.
+- [Phase 01]: Classify neo4j_push as an external write while retaining dry-run without a second confirmation field.
 
 ### Pending Todos
 
@@ -114,6 +117,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T22:44:23.113Z
-Stopped at: Completed 01-06-PLAN.md
+Last session: 2026-09-21T23:24:03.982Z
+Stopped at: Completed 01-07-PLAN.md
 Resume file: None
