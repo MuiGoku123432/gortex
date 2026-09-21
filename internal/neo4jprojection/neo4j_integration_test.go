@@ -54,6 +54,7 @@ esac
 	writeExecutable(t, filepath.Join(bin, "fake-docker"), `#!/bin/sh
 case "$1" in
   run) printf '%s\n' fake-container-id ;;
+  port) printf '%s\n' '127.0.0.1:17687' ;;
 esac
 exit 0
 `)

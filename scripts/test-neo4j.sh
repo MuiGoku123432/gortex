@@ -63,7 +63,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 "$docker_cmd" network create "$network" >/dev/null
-container_id=$("$docker_cmd" run -d --name "$container" --network "$network" \
+container_id=$("$docker_cmd" run -d --name "$container" --network "$network" -p 127.0.0.1::7687 \
   -e "NEO4J_AUTH=neo4j/${password}" "$image")
 
 deadline=$((SECONDS + timeout_seconds))
@@ -82,9 +82,12 @@ if [ "$remaining" -le 0 ]; then
   exit 5
 fi
 
+host_port=$("$docker_cmd" port "$container" 7687/tcp | sed 's/.*://')
+[ -n "$host_port" ] || { printf 'Neo4j Bolt port was not published\n' >&2; exit 4; }
+
 GORTEX_NEO4J_INTEGRATION=1 \
 GORTEX_NEO4J_REQUIRE_SCENARIOS="${GORTEX_NEO4J_REQUIRE_SCENARIOS:-0}" \
-GORTEX_NEO4J_URI="bolt://${container}:7687" \
+GORTEX_NEO4J_URI="bolt://127.0.0.1:${host_port}" \
 GORTEX_NEO4J_USERNAME=neo4j \
 GORTEX_NEO4J_PASSWORD="$password" \
 GOWORK=off "$go_cmd" test "$package" -run "$selector" -count=1 &
