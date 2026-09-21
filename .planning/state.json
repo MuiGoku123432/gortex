@@ -1,12 +1,58 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": null,
-  "phases": [],
+  "milestone": "v1.0",
+  "phases": [
+    {
+      "number": "1",
+      "name": "General Neo4j Projection Command",
+      "status": "pending"
+    },
+    {
+      "number": "2",
+      "name": "Thin Deterministic Native Tracer and Minimum Contracts",
+      "status": "pending"
+    },
+    {
+      "number": "3",
+      "name": "Deterministic COBOL and Mainframe Breadth",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Stable Incremental and Cross-Repository Lifecycle",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Explicit Unresolved Evidence",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "Native Deterministic Acceptance and Pre-AI Release Gate",
+      "status": "pending"
+    },
+    {
+      "number": "7",
+      "name": "AI Contract, Policy, and Evaluation Foundation",
+      "status": "pending"
+    },
+    {
+      "number": "8",
+      "name": "Evidence-Linked Claims and Human Review",
+      "status": "pending"
+    },
+    {
+      "number": "9",
+      "name": "End-to-End AI Evaluation and Projection Safety",
+      "status": "pending"
+    }
+  ],
   "next": {
-    "command": "/gsd:discuss-phase",
-    "label": "Discuss the first phase",
-    "reason": "Project initialized — plan your first phase"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 01 of 9 · 0% · executing"
   },
-  "updated_at": "2026-09-15T18:17:35.971Z"
+  "updated_at": "2026-09-21T20:33:41.040Z"
 }
