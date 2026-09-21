@@ -27,6 +27,9 @@ func TestNeo4jIntegrationGate(t *testing.T) {
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			if scenario != "shape" {
+				if os.Getenv("GORTEX_NEO4J_REQUIRE_SCENARIOS") == "1" {
+					t.Fatal("mandatory Neo4j scenario is registered but not implemented")
+				}
 				t.Skip("registered for the production projection implementation")
 			}
 			for _, name := range []string{"GORTEX_NEO4J_URI", "GORTEX_NEO4J_USERNAME", "GORTEX_NEO4J_PASSWORD"} {
