@@ -23,7 +23,8 @@
 | context cancellation for connectivity, reads, writes, and close | INTEGRATE | |
 | typed Neo4j error classification mapped to secret-safe result codes | INTEGRATE | |
 | namespace lock and pending-generation manifest transactions | INTEGRATE | |
-| atomic active-generation switch and exact-owner stale cleanup | INTEGRATE | |
+| atomic owner-manifest active-generation switch | INTEGRATE | Logical visibility changes in one bounded transaction without deleting an unbounded former generation. |
+| bounded exact-owner former-generation physical reconciliation | INTEGRATE | Runs after activation in retry-safe batches and reports cleanup completeness separately from active snapshot completeness. |
 | driver, session, and result-consumer cleanup | INTEGRATE | |
 | routing-cluster discovery | INTEGRATE | Supported through the configured Neo4j URI and official driver rather than custom routing logic. |
 | bookmarks and causal chaining across independent commands | OPT-OUT | Each push is a self-contained, manually invoked snapshot replacement whose own transactions and final activation define consistency. |

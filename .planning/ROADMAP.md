@@ -32,14 +32,15 @@ This milestone now begins with a general, manually invoked projection that mater
   3. Repeating or resuming a projection uses bounded transactions and idempotent upserts without duplicates; stale records are reconciled only within the explicitly owned scope/generation, including after partial failure.
   4. A user can preview the projection without mutation, observe redacted progress and final scoped counts, cancel work, and receive actionable failure or incomplete-snapshot results.
   5. Disposable-Neo4j or protocol-seam acceptance proves success, retry, stale-record, cancellation/error, and scope isolation while SQLite remains byte-for-byte unmodified and every non-projection Gortex operation works without Neo4j.
-**Plans**: 5 plans
+**Plans**: 6 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Production MCP tracer and Wave 0 protocol/profile safety harness
-- [ ] 01-02-PLAN.md -- Stable identities, typed graph shape, and safe property envelope
-- [ ] 01-03-PLAN.md -- Immutable cancellable SQLite snapshot and bounded batching
-- [ ] 01-04-PLAN.md -- Official Neo4j driver, generation activation, and disposable acceptance
-- [ ] 01-05-PLAN.md -- Equivalent CLI/MCP adapters, progress, parity, and final regression gate
+- [ ] 01-01-PLAN.md -- Wave 0 protocol, SQLite, and mandatory disposable-Neo4j harness
+- [ ] 01-02-PLAN.md -- Real production SQLite-to-Neo4j tracer with manifest activation
+- [ ] 01-03-PLAN.md -- Stable identities, typed graph shape, and safe property envelope
+- [ ] 01-04-PLAN.md -- Immutable cancellable SQLite snapshot and bounded batching
+- [ ] 01-05-PLAN.md -- Full official-driver constraints, activation, bounded reconciliation, and acceptance
+- [ ] 01-06-PLAN.md -- Equivalent CLI/MCP adapters, progress, parity, and final regression gate
 
 ### Phase 2: Thin Deterministic Native Tracer and Minimum Contracts
 **Goal**: A user can retrieve one trustworthy named COBOL program observation through existing native Gortex surfaces after it traverses the real production indexing and SQLite path.

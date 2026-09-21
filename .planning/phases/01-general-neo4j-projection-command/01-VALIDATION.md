@@ -1,8 +1,8 @@
 ---
 phase: 1
 slug: general-neo4j-projection-command
-status: draft
-nyquist_compliant: false
+status: planned
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-09-21
 ---
@@ -32,19 +32,21 @@ created: 2026-09-21
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 01-W0-01 | TBD | 0 | NEO-01..17, STORE-01..05 | T-01-SC | Deterministic protocol fake and immutable SQLite fixture | unit/contract | `GOWORK=off go test ./internal/neo4jprojection -run 'Protocol|Projection'` | No - W0 | pending |
-| 01-CLI-MCP | TBD | TBD | NEO-01, NEO-02, NEO-03, NEO-09, NEO-10, NEO-11, NEO-17 | T-01-01 | Fail-closed scope/profile parsing and redacted equivalent result | contract | `GOWORK=off go test ./internal/mcp ./cmd/gortex -run 'Neo4j|Projection'` | No - W0 | pending |
-| 01-MAP | TBD | TBD | NEO-04, NEO-05, NEO-06, NEO-13 | T-01-02 | Stable collision-aware identities and secret-safe properties | unit/golden | `GOWORK=off go test ./internal/neo4jprojection -run 'Identity|Properties|Constraint'` | No - W0 | pending |
-| 01-GEN | TBD | TBD | NEO-07, NEO-08, NEO-12, NEO-14 | T-01-03 | Idempotent bounded generation activation and owner-scoped cleanup | protocol/integration | `GOWORK=off go test ./internal/neo4jprojection -run 'Generation|Retry|Stale|Cancel'` | No - W0 | pending |
-| 01-ACC | TBD | TBD | NEO-15, NEO-16, NEO-17, STORE-01..05 | T-01-04 | SQLite unchanged and Neo4j optional outside explicit push | integration/regression | `GOWORK=off go test -race ./...` plus explicit disposable-Neo4j test command defined by the plan | No - W0 | pending |
+| 01-01-T1 | 01-01 | 0 | NEO-02..15, STORE-01..05 | T-01 Wave 0 | Protocol recorder and immutable SQLite fixture | unit/contract | `GOWORK=off go test ./internal/graph/store_sqlite ./internal/neo4jprojection -run 'TestProjectionFixture|TestProjectionProtocolHarness' -count=1` | Planned | pending execution |
+| 01-01-T2 | 01-01 | 0 | NEO-16, NEO-17 | T-01 Wave 0 | Mandatory pinned disposable-server harness | gate self-test | `bash -n scripts/test-neo4j.sh && GOWORK=off go test ./internal/neo4jprojection -run 'TestNeo4jIntegrationGate' -count=1` | Planned | pending execution |
+| 01-02-T1 | 01-02 | 1 | NEO-02..08, NEO-11, NEO-12, NEO-14, NEO-15, NEO-17 | T-01 tracer | Real scoped SQLite through official driver and manifest switch | contract | `GOWORK=off go test ./internal/config ./internal/graph/store_sqlite ./internal/neo4jprojection -run 'TestNeo4jTracerContract|TestScopedProjectionTracer' -count=1` | Consumer of 01-01 | pending execution |
+| 01-02-T2 | 01-02 | 1 | NEO-16 | T-01 tracer | Real disposable one-node/one-relationship activation | integration | `scripts/test-neo4j.sh --timeout-seconds 180 --run 'TestNeo4jProductionTracer'` | Consumer of 01-01 | pending execution |
+| 01-03-T1/T2 | 01-03 | 3 | NEO-04..06, NEO-13 | T-01 mapping | Stable identities and secret-safe properties | unit/golden | `GOWORK=off go test ./internal/neo4jprojection -run 'Identity|Properties|Golden|Unresolved|Secret' -count=1` | Consumer of 01-01 | pending execution |
+| 01-04-T1/T2 | 01-04 | 3 | NEO-02, NEO-08, NEO-09, NEO-11, NEO-13, NEO-15, STORE-01, STORE-02, STORE-05 | T-01 snapshot | Immutable source and bounded service batches | unit/contract | `GOWORK=off go test ./internal/graph/store_sqlite ./internal/neo4jprojection -run 'Projection|Snapshot' -count=1` | Consumer of 01-01 | pending execution |
+| 01-05-T1/T2 | 01-05 | 4 | NEO-06..08, NEO-11, NEO-12, NEO-14..17 | T-01 transport | Bounded activation/reconciliation and full real-server behavior | protocol/integration | `scripts/test-neo4j.sh --timeout-seconds 240` | Consumer of 01-01 | pending execution |
+| 01-06-T1/T2 | 01-06 | 5 | NEO-01..03, NEO-09..12, NEO-17, STORE-03..05 | T-01 adapters | CLI/MCP parity and no-Neo4j regression | contract/regression | `GOWORK=off go test ./internal/mcp ./cmd/gortex -run 'Neo4j|Projection' -count=1 && GOWORK=off go test -race ./...` | Consumer of 01-01 | pending execution |
 
 ## Wave 0 Requirements
 
-- [ ] Protocol fake with transaction recording, bounded-batch assertions, injected failures, cancellation, and commit uncertainty.
-- [ ] SQLite scoped fixture and database/WAL/SHM fingerprint helper.
-- [ ] Identity/property golden fixtures covering collisions, unresolved targets, nested metadata, unsupported values, and secret canaries.
-- [ ] CLI/MCP parity harness comparing normalized requests and final structured results.
-- [ ] Disposable Neo4j 5.26 integration script or CI service behind an explicit integration gate.
+- [ ] Plan 01-01 Task 1 creates the protocol recorder and SQLite DB/WAL/SHM fixture before Plans 01-02 through 01-05 consume them.
+- [ ] Plan 01-01 Task 2 creates the disposable Neo4j 5.26 gate before Plans 01-02 and 01-05 execute it.
+- [ ] Plan 01-03 creates identity/property golden fixtures before the full driver consumes complete mappings.
+- [ ] Plan 01-06 completes CLI/MCP parity after the shared production service is stable.
 
 ## Manual-Only Verifications
 
@@ -52,11 +54,11 @@ All phase behaviors have automated verification. A locally stopped Docker daemon
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies.
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify.
-- [ ] Wave 0 covers all MISSING references.
-- [ ] No watch-mode flags.
-- [ ] Feedback latency under 30 seconds for focused checks.
-- [ ] `nyquist_compliant: true` set after validation audit.
+- [x] All tasks have `<automated>` verify and consumers depend on Wave 0.
+- [x] Sampling continuity: every task has an automated verify.
+- [x] Wave 0 covers all prerequisite fixtures and the disposable gate.
+- [x] No watch-mode flags.
+- [x] Focused checks target under 30 seconds; disposable phase gates have explicit 180s/240s bounds.
+- [x] `nyquist_compliant: true` set after plan/task/wave audit.
 
-**Approval:** pending
+**Approval:** planned and Nyquist-audited; `wave_0_complete` remains false until Plan 01-01 executes.

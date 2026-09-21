@@ -382,15 +382,15 @@ Generate equivalent named relationship constraints for each sanitized selected r
 | A4 | Reversible property encoding and sensitive-key deny list | Property pattern | Data loss, collision, or secret disclosure if incomplete |
 | A5 | SQLite sidecar hash procedure fully proves no authoritative mutation | Pitfalls/Validation | Platform journaling behavior may require canonical DB comparison too |
 
-## Open Questions
+## RESOLVED Open Questions
 
-1. **What defaults should the public contract use?**
+1. **RESOLVED: What defaults should the public contract use?**
    - What we know: CONTEXT delegates batch, timeout, and cadence values.
    - Recommendation: lock `batch_size=500`, operation timeout `30m`, transaction timeout `30s`, driver retry ceiling `30s`, and progress at phase boundaries plus every 1,000 records or 1 second. [ASSUMED]
-2. **Delete or retain inactive generations?**
+2. **RESOLVED: Delete or retain inactive generations?**
    - What we know: D-05 permits inactive or removed records and D-07 requires prior active retention until success.
-   - Recommendation: activation transaction switches visibility and deletes the former generation for the exact owner; failed pending generations remain inactive and are deleted by the next same-owner rerun before restaging. [ASSUMED]
-3. **How should unsupported metadata be preserved?**
+   - Recommendation: activation atomically switches the exact-owner manifest pointer without deleting an unbounded generation; former-generation and failed-pending physical records are reconciled afterward with bounded exact-owner transactions, and ordinary rerun resumes incomplete cleanup. [ASSUMED]
+3. **RESOLVED: How should unsupported metadata be preserved?**
    - What we know: D-11 requires all safely representable data and deterministic collision handling.
    - Recommendation: native scalars/lists plus canonical JSON fallback and explicit encoding/key-map properties; count omissions and fail if an identity/scope/provenance field cannot be represented. [ASSUMED]
 
