@@ -57,87 +57,130 @@ func (s *scopedProjectionSnapshot) Descriptor() graph.ProjectionSnapshotDescript
 	return s.descriptor
 }
 
-func (s *scopedProjectionSnapshot) ReadNodes(ctx context.Context) ([]*graph.Node, error) {
+func (s *scopedProjectionSnapshot) ReadNodePages(ctx context.Context, consume func([]*graph.Node) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return nil, fmt.Errorf("scoped projection snapshot is closed")
+		return fmt.Errorf("scoped projection snapshot is closed")
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if consume == nil {
+		return fmt.Errorf("scoped projection node page consumer is required")
 	}
 	reposJSON, _ := projectionJSON(s.descriptor.Scope.Repositories)
 	query := `WITH requested(repo_prefix) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) ` +
 		`SELECT ` + qualifiedNodeColumns("n", lookupNodeCols) +
 		` FROM nodes AS n JOIN requested AS r ON r.repo_prefix = n.repo_prefix` +
-		` WHERE n.view_gen = ? ORDER BY n.id`
-	rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration)
-	if err != nil {
-		return nil, fmt.Errorf("scoped projection nodes: %w", err)
-	}
-	defer rows.Close()
-	var nodes []*graph.Node
-	for rows.Next() {
-		node, scanErr := scanNodeCursor(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("scoped projection nodes: %w", scanErr)
+		` WHERE n.view_gen = ? AND n.id > ? ORDER BY n.id LIMIT ?`
+	lastID := ""
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		nodes = append(nodes, node)
+		rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration, lastID, scopedProjectionPage)
+		if err != nil {
+			return fmt.Errorf("scoped projection nodes: %w", err)
+		}
+		page := make([]*graph.Node, 0, scopedProjectionPage)
+		for rows.Next() {
+			node, scanErr := scanNodeCursor(rows)
+			if scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("scoped projection nodes: %w", scanErr)
+			}
+			page = append(page, node)
+			lastID = node.ID
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("scoped projection nodes: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("scoped projection nodes: %w", err)
+		}
+		if len(page) == 0 {
+			return nil
+		}
+		if err := consume(page); err != nil {
+			return err
+		}
+		if len(page) < scopedProjectionPage {
+			return nil
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("scoped projection nodes: %w", err)
-	}
-	return nodes, nil
 }
 
-func (s *scopedProjectionSnapshot) ReadEdges(ctx context.Context) ([]graph.ScopedEdgeRow, error) {
+func (s *scopedProjectionSnapshot) ReadEdgePages(ctx context.Context, consume func([]graph.ScopedEdgeRow) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return nil, fmt.Errorf("scoped projection snapshot is closed")
+		return fmt.Errorf("scoped projection snapshot is closed")
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if consume == nil {
+		return fmt.Errorf("scoped projection edge page consumer is required")
 	}
 	reposJSON, _ := projectionJSON(s.descriptor.Scope.Repositories)
+	var maxID int64
+	if err := s.tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM edges WHERE view_gen = ?`, s.descriptor.SourceGeneration).Scan(&maxID); err != nil {
+		return fmt.Errorf("scoped projection edge boundary: %w", err)
+	}
 	query := `WITH requested(repo_prefix) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) ` +
 		`SELECT e.id, ` + lookupQualifiedEdgeCols +
 		` FROM edges AS e JOIN nodes AS n ON n.id = e.from_id AND n.view_gen = e.view_gen` +
 		` JOIN requested AS r ON r.repo_prefix = n.repo_prefix` +
-		` WHERE e.view_gen = ? ORDER BY e.id`
-	rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration)
-	if err != nil {
-		return nil, fmt.Errorf("scoped projection edges: %w", err)
-	}
-	var edges []*graph.Edge
-	for rows.Next() {
-		var edgeID int64
-		edge, scanErr := (&Store{}).scanEdgeCursor(edgeIDScanner{scanner: rows, id: &edgeID})
-		if scanErr != nil {
+		` WHERE e.view_gen = ? AND e.id > ? AND e.id <= ? ORDER BY e.id LIMIT ?`
+	lastID := int64(0)
+	for lastID < maxID {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rows, err := s.tx.QueryContext(ctx, query, reposJSON, s.descriptor.SourceGeneration, lastID, maxID, scopedProjectionPage)
+		if err != nil {
+			return fmt.Errorf("scoped projection edges: %w", err)
+		}
+		edges := make([]*graph.Edge, 0, scopedProjectionPage)
+		for rows.Next() {
+			var edgeID int64
+			edge, scanErr := (&Store{}).scanEdgeCursor(edgeIDScanner{scanner: rows, id: &edgeID})
+			if scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("scoped projection edges: %w", scanErr)
+			}
+			lastID = edgeID
+			edges = append(edges, edge)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("scoped projection edges: %w", scanErr)
+			return fmt.Errorf("scoped projection edges: %w", err)
 		}
-		edges = append(edges, edge)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("scoped projection edges: %w", err)
-	}
-	endpointIDs := make([]string, 0, len(edges)*2)
-	for _, edge := range edges {
-		endpointIDs = append(endpointIDs, edge.From)
-		if edge.To != "" && !graph.IsUnresolvedTarget(edge.To) {
-			endpointIDs = append(endpointIDs, edge.To)
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("scoped projection edges: %w", err)
+		}
+		if len(edges) == 0 {
+			return nil
+		}
+		endpointIDs := make([]string, 0, len(edges)*2)
+		for _, edge := range edges {
+			endpointIDs = append(endpointIDs, edge.From)
+			if edge.To != "" && !graph.IsUnresolvedTarget(edge.To) {
+				endpointIDs = append(endpointIDs, edge.To)
+			}
+		}
+		endpoints, err := s.readEndpointNodes(ctx, endpointIDs)
+		if err != nil {
+			return err
+		}
+		page := make([]graph.ScopedEdgeRow, 0, len(edges))
+		for _, edge := range edges {
+			page = append(page, graph.ScopedEdgeRow{Edge: edge, Source: endpoints[edge.From], Target: endpoints[edge.To]})
+		}
+		if err := consume(page); err != nil {
+			return err
+		}
+		if len(edges) < scopedProjectionPage {
+			return nil
 		}
 	}
-	endpoints, err := s.readEndpointNodes(ctx, endpointIDs)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]graph.ScopedEdgeRow, 0, len(edges))
-	for _, edge := range edges {
-		result = append(result, graph.ScopedEdgeRow{Edge: edge, Source: endpoints[edge.From], Target: endpoints[edge.To]})
-	}
-	return result, nil
+	return nil
 }
 
 func (s *scopedProjectionSnapshot) readEndpointNodes(ctx context.Context, ids []string) (map[string]*graph.Node, error) {

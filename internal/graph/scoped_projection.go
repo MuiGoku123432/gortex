@@ -30,8 +30,8 @@ type ProjectionSnapshotDescriptor struct {
 // edge reads. Implementations must surface errors and honor cancellation.
 type ScopedProjectionSnapshot interface {
 	Descriptor() ProjectionSnapshotDescriptor
-	ReadNodes(context.Context) ([]*Node, error)
-	ReadEdges(context.Context) ([]ScopedEdgeRow, error)
+	ReadNodePages(context.Context, func([]*Node) error) error
+	ReadEdgePages(context.Context, func([]ScopedEdgeRow) error) error
 	Close() error
 }
 

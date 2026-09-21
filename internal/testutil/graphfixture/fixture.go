@@ -108,10 +108,20 @@ func Canonical(path string) (string, error) {
 		return "", err
 	}
 	defer db.Close()
+	var ownerColumn int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('nodes') WHERE name = 'owner_key'`).Scan(&ownerColumn); err != nil {
+		return "", err
+	}
 	queries := []string{
-		`SELECT 'node',owner_key,id,kind,name,file_path,meta FROM nodes`,
-		`SELECT 'edge',owner_key,from_id,to_id,kind,file_path,printf('%d',line)||':'||origin||':'||meta FROM edges`,
-		`SELECT 'manifest',owner_key,operation_id,pending_generation,active_generation,printf('%d',cleanup_complete) FROM projection_manifest`,
+		`SELECT printf('node\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s',owner_key,id,kind,name,file_path,hex(meta)) FROM nodes`,
+		`SELECT printf('edge\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%d\x1f%s\x1f%s',owner_key,from_id,to_id,kind,file_path,line,origin,hex(meta)) FROM edges`,
+		`SELECT printf('manifest\x1f%s\x1f%s\x1f%s\x1f%s\x1f%d',owner_key,operation_id,pending_generation,active_generation,cleanup_complete) FROM projection_manifest`,
+	}
+	if ownerColumn == 0 {
+		queries = []string{
+			`SELECT printf('node\x1f%s\x1f%d\x1f%s\x1f%s\x1f%s\x1f%s\x1f%d\x1f%d\x1f%d\x1f%d\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s',id,view_gen,kind,name,qual_name,file_path,start_line,end_line,start_column,end_column,language,repo_prefix,workspace_id,project_id,hex(meta)) FROM nodes`,
+			`SELECT printf('edge\x1f%d\x1f%s\x1f%s\x1f%s\x1f%s\x1f%d\x1f%g\x1f%s\x1f%s\x1f%s\x1f%d\x1f%d\x1f%s',id,from_id,to_id,kind,file_path,line,confidence,confidence_label,origin,tier,cross_repo,view_gen,hex(meta)) FROM edges`,
+		}
 	}
 	var records []string
 	for _, query := range queries {
@@ -120,16 +130,12 @@ func Canonical(path string) (string, error) {
 			return "", err
 		}
 		for rows.Next() {
-			var fields [7]string
-			values := []any{&fields[0], &fields[1], &fields[2], &fields[3], &fields[4], &fields[5], &fields[6]}
-			if strings.HasPrefix(query, `SELECT 'manifest'`) {
-				values = values[:6]
-			}
-			if err := rows.Scan(values...); err != nil {
+			var record string
+			if err := rows.Scan(&record); err != nil {
 				rows.Close()
 				return "", err
 			}
-			records = append(records, strings.Join(fields[:len(values)], "\x1f"))
+			records = append(records, record)
 		}
 		if err := rows.Close(); err != nil {
 			return "", err
