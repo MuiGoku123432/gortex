@@ -27,6 +27,8 @@ The exact split inside `internal/neo4jprojection` is planner discretion, but the
 | `internal/config/global_test.go` or neighboring config test | test | CRUD | `GlobalConfig` load/save seams | role-match |
 | `internal/mcp/tools_neo4j_test.go` | test | request-response | MCP handler/registration conventions | role-match |
 | `cmd/gortex/neo4j_test.go` | test | request-response | provider/export command adapter conventions | role-match |
+| `internal/testutil/graphfixture/fixture.go` | importable test support | SQLite fixture + fingerprint | `internal/graph/storetest/storetest.go` | exact package-shape analog; narrower fixture API |
+| `internal/testutil/graphfixture/fixture_test.go` | test | fixture self-test | neighboring package tests | role-match |
 | `internal/neo4jprojection/neo4j_integration_test.go` | integration test | batch + request-response | none in repository | no analog |
 | `go.mod`, `go.sum` | config | dependency resolution | existing module files | exact |
 
@@ -438,7 +440,7 @@ Production transport rules:
 
 **Config tests:** use `t.Setenv` because `DefaultGlobalConfigPath` resolves environment fresh on every call (`internal/config/global.go:227-237`). Verify named lookup, missing profile, missing env reference/value, URI userinfo rejection, and that secret canaries never appear in errors or marshaled results.
 
-**Snapshot/store tests:** use the real SQLite test fixture. Assert one snapshot generation for nodes and edges, deterministic ordering, bounded pages, explicit all-edge-kind semantics, prompt cancellation, and unchanged main DB/WAL/SHM fingerprints plus canonical node/edge equality.
+**Snapshot/store tests:** use `internal/testutil/graphfixture`, following the existing importable non-`_test.go` test-support package shape established by `internal/graph/storetest/storetest.go`. Keep its exported API limited to fixture descriptors, raw SQLite seed/setup, canonical node/edge snapshots, and DB/WAL/SHM fingerprint comparison. It must not import `store_sqlite`; store and projection tests open the returned database path through their own production packages, avoiding a package cycle. Only `_test.go` consumers may import it, and Wave 0 verifies that ordinary production package imports contain no `internal/testutil/graphfixture` dependency. Assert one snapshot generation for nodes and edges, deterministic ordering, bounded pages, explicit all-edge-kind semantics, prompt cancellation, and unchanged main DB/WAL/SHM fingerprints plus canonical node/edge equality.
 
 **CLI/MCP parity tests:** normalize the request created by each adapter and compare final structured JSON. The test must prove both surfaces call the same service contract and that `dry_run=false` needs no second confirmation.
 

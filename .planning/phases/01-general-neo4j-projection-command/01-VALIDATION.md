@@ -32,7 +32,7 @@ created: 2026-09-21
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 01-01-T1 | 01-01 | 0 | NEO-02..15, STORE-01..05 | T-01 Wave 0 | Protocol recorder and immutable SQLite fixture | unit/contract | `GOWORK=off go test ./internal/graph/store_sqlite ./internal/neo4jprojection -run 'TestProjectionFixture|TestProjectionProtocolHarness' -count=1` | Planned | pending execution |
+| 01-01-T1 | 01-01 | 0 | NEO-02..15, STORE-01..05 | T-01 Wave 0 | Protocol recorder plus importable test-only SQLite fixture/fingerprint package with no production importers | unit/contract | `GOWORK=off go test ./internal/testutil/graphfixture ./internal/neo4jprojection -run 'TestProjectionFixture|TestProjectionProtocolHarness' -count=1 && ! GOWORK=off go list -f '{{.ImportPath}} {{join .Imports " "}}' ./... | grep -q 'internal/testutil/graphfixture'` | Planned | pending execution |
 | 01-01-T2 | 01-01 | 0 | NEO-16, NEO-17 | T-01 Wave 0 | Mandatory pinned disposable-server harness | gate self-test | `bash -n scripts/test-neo4j.sh && GOWORK=off go test ./internal/neo4jprojection -run 'TestNeo4jIntegrationGate' -count=1` | Planned | pending execution |
 | 01-02-T1 | 01-02 | 1 | NEO-02..08, NEO-11, NEO-12, NEO-14, NEO-15, NEO-17 | T-01 tracer | Real scoped SQLite through official driver and manifest switch | contract | `GOWORK=off go test ./internal/config ./internal/graph/store_sqlite ./internal/neo4jprojection -run 'TestNeo4jTracerContract|TestScopedProjectionTracer' -count=1` | Consumer of 01-01 | pending execution |
 | 01-02-T2 | 01-02 | 1 | NEO-16 | T-01 tracer | Real disposable one-node/one-relationship activation | integration | `scripts/test-neo4j.sh --timeout-seconds 180 --run 'TestNeo4jProductionTracer'` | Consumer of 01-01 | pending execution |
@@ -44,7 +44,8 @@ created: 2026-09-21
 
 ## Wave 0 Requirements
 
-- [ ] Plan 01-01 Task 1 creates the protocol recorder and SQLite DB/WAL/SHM fixture before Plans 01-02 through 01-05 consume them.
+- [ ] Plan 01-01 Task 1 creates the package-local protocol recorder and importable `internal/testutil/graphfixture` DB/WAL/SHM fixture APIs before Plans 01-02, 01-04, and 01-05 consume them from `_test.go` files.
+- [ ] Wave 0's `go list` production-import scan proves no ordinary package imports `internal/testutil/graphfixture`; package-specific tests open its returned database path through their own production package.
 - [ ] Plan 01-01 Task 2 creates the disposable Neo4j 5.26 gate before Plans 01-02 and 01-05 execute it.
 - [ ] Plan 01-03 creates identity/property golden fixtures before the full driver consumes complete mappings.
 - [ ] Plan 01-06 completes CLI/MCP parity after the shared production service is stable.
