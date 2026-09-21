@@ -3,6 +3,7 @@ package neo4jprojection
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -74,45 +75,66 @@ RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner,
 }
 
 func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
-	nodes := make([]map[string]any, 0, len(batch.Nodes))
+	nodesByLabel := make(map[string][]map[string]any)
 	for _, node := range batch.Nodes {
-		if node == nil {
-			return fmt.Errorf("projection node is nil")
+		projected, _, err := projectNode(batch.Owner, batch.PendingGeneration, node)
+		if err != nil {
+			return err
 		}
-		nodes = append(nodes, map[string]any{
-			"physical": physicalKey(batch.Owner, batch.PendingGeneration, "node", node.ID),
-			"logical":  node.ID, "kind": string(node.Kind), "name": node.Name,
-			"file_path": node.FilePath, "repo": node.RepoPrefix,
+		label := projected.Labels[1]
+		if len(projected.Labels) == 3 {
+			label += ":GortexUnresolved"
+		}
+		nodesByLabel[label] = append(nodesByLabel[label], map[string]any{
+			"physical":   projected.Properties["gortex_physical_key"],
+			"properties": projected.Properties,
 		})
 	}
-	if err := t.execute(ctx, `
+	labels := make([]string, 0, len(nodesByLabel))
+	for label := range nodesByLabel {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		query := fmt.Sprintf(`
 UNWIND $rows AS row
-MERGE (n:GortexNode {gortex_physical_key: row.physical})
-SET n.gortex_owner = $owner, n.gortex_generation = $generation,
-    n.gortex_logical_key = row.logical, n.kind = row.kind, n.name = row.name,
-    n.file_path = row.file_path, n.repo_prefix = row.repo`, map[string]any{"owner": batch.Owner, "generation": batch.PendingGeneration, "rows": nodes}); err != nil {
-		return err
+MERGE (n:GortexNode:%s {gortex_physical_key: row.physical})
+SET n += row.properties`, label)
+		if err := t.execute(ctx, query, map[string]any{"rows": nodesByLabel[label]}); err != nil {
+			return err
+		}
 	}
 
-	edges := make([]map[string]any, 0, len(batch.Edges))
+	edgesByType := make(map[string][]map[string]any)
 	for _, row := range batch.Edges {
-		if row.Edge == nil {
-			return fmt.Errorf("projection edge is nil")
+		projected, _, err := projectEdge(batch.Owner, batch.PendingGeneration, row.Edge)
+		if err != nil {
+			return err
 		}
-		edges = append(edges, map[string]any{
-			"source":   physicalKey(batch.Owner, batch.PendingGeneration, "node", row.Edge.From),
-			"target":   physicalKey(batch.Owner, batch.PendingGeneration, "node", row.Edge.To),
-			"physical": physicalKey(batch.Owner, batch.PendingGeneration, "edge", fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d", row.Edge.From, row.Edge.To, row.Edge.Kind, row.Edge.FilePath, row.Edge.Line)),
-			"logical":  fmt.Sprintf("%s:%s:%s", row.Edge.From, row.Edge.Kind, row.Edge.To), "kind": string(row.Edge.Kind),
+		edgesByType[projected.Type] = append(edgesByType[projected.Type], map[string]any{
+			"source":     projectionPhysicalKey(projectionNodeLogicalKey(batch.Owner, row.Edge.From), batch.PendingGeneration),
+			"target":     projectionPhysicalKey(projectionNodeLogicalKey(batch.Owner, row.Edge.To), batch.PendingGeneration),
+			"physical":   projected.Properties["gortex_physical_key"],
+			"properties": projected.Properties,
 		})
 	}
-	return t.execute(ctx, `
+	types := make([]string, 0, len(edgesByType))
+	for relationshipType := range edgesByType {
+		types = append(types, relationshipType)
+	}
+	sort.Strings(types)
+	for _, relationshipType := range types {
+		query := fmt.Sprintf(`
 UNWIND $rows AS row
 MATCH (source:GortexNode {gortex_physical_key: row.source})
 MATCH (target:GortexNode {gortex_physical_key: row.target})
-MERGE (source)-[r:GORTEX_RELATIONSHIP {gortex_physical_key: row.physical}]->(target)
-SET r.gortex_owner = $owner, r.gortex_generation = $generation,
-    r.gortex_logical_key = row.logical, r.kind = row.kind`, map[string]any{"owner": batch.Owner, "generation": batch.PendingGeneration, "rows": edges})
+MERGE (source)-[r:%s {gortex_physical_key: row.physical}]->(target)
+SET r += row.properties`, relationshipType)
+		if err := t.execute(ctx, query, map[string]any{"rows": edgesByType[relationshipType]}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *neo4jTransport) Activate(ctx context.Context, owner, operation, generation, prior string, result Result) error {
