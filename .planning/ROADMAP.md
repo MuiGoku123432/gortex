@@ -36,7 +36,7 @@ This milestone now begins with a general, manually invoked projection that mater
   4. A user can preview the projection without mutation, observe redacted progress and final scoped counts, cancel work, and receive actionable failure or incomplete-snapshot results.
   5. Disposable-Neo4j or protocol-seam acceptance proves success, retry, stale-record, cancellation/error, and scope isolation while SQLite remains byte-for-byte unmodified and every non-projection Gortex operation works without Neo4j.
 
-**Plans**: 2/7 plans executed
+**Plans**: 3/7 plans executed
 
 Plans:
 **Wave 1**
@@ -46,7 +46,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-03-PLAN.md -- Real official-driver SQLite-to-Neo4j tracer with manifest activation
+- [x] 01-03-PLAN.md -- Real official-driver SQLite-to-Neo4j tracer with manifest activation
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -190,7 +190,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. General Neo4j Projection Command | 2/7 | In Progress|  |
+| 1. General Neo4j Projection Command | 3/7 | In Progress|  |
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 0/TBD | Deferred: parser/grammar readiness | - |
 | 3. Deterministic COBOL and Mainframe Breadth | 0/TBD | Deferred: parser/grammar readiness | - |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 0/TBD | Deferred: Phase 3 | - |
