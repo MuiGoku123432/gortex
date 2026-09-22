@@ -67,6 +67,7 @@ choices, and the risk is yours once made.
 | Configure a hosted or subprocess **LLM provider** | Prompts derived from your source leave the machine | No provider is configured by default |
 | Enable **federation / proxy** | Graph queries go to the daemons you configure | Off unless configured; read-only by default |
 | Index a repository you do not trust | Its content reaches the agent's context, widening the prompt-injection surface | This is the threat the confinement boundaries exist for |
+| Configure a Neo4j projection profile | The named database principal can create constraints and read/write/delete Gortex-owned projection manifests, nodes, and relationships in that database | Use a dedicated database and principal. Grant only `ACCESS`, `MATCH`, `CREATE`, `MERGE`, `SET PROPERTY`, `DELETE`, and schema constraint privileges required by `gortex neo4j push`; do not grant DBMS administration, user/role management, or unrestricted privileges |
 
 ## What Gortex does not protect you from
 
@@ -175,6 +176,34 @@ from](#what-gortex-does-not-protect-you-from) for what this boundary is not.
   locally under `~/.gortex` (and per-repo `.gortex/`). Notes and memories may
   contain excerpts of your source. Nothing is transmitted off the machine except
   through the opt-in network features above.
+
+### Neo4j projection least privilege
+
+- Use a dedicated Neo4j database and a dedicated projection principal for every
+  named profile. The profile must select that database explicitly.
+- The principal needs database access, match, create/merge, property update,
+  delete, and constraint-management privileges in that database. Gortex does
+  not need DBMS administration, database creation/deletion, user or role
+  management, alias management, unrestricted procedure execution, or access to
+  any other database.
+- Gortex predicates projection mutation and cleanup by exact owner and
+  generation, but Neo4j Community Edition cannot enforce property-based
+  authorization. Database isolation is therefore the security boundary between
+  Gortex projections and unrelated Neo4j data.
+- Validate the grants with the target Neo4j edition's `SHOW USER ... PRIVILEGES`
+  output before configuring production credentials. Refuse any operational
+  workaround that broadens the principal merely to simplify setup.
+
+## Accepted risks
+
+Low-severity risks may be documented here only when their affected boundary,
+rationale, compensating controls, owner, and review date are explicit. Accepted
+risk is not a severity override: high or critical findings remain release
+blockers and must not be moved into this section.
+
+| Risk | Severity | Rationale and controls | Owner | Review |
+|---|---|---|---|---|
+| A local process running as the same OS account can use the daemon socket | Low | The socket is `0600` in a `0700` directory; defending against a process already running as the operator is outside the local threat model | Operator | Reassess if multi-user daemon hosting is introduced |
 
 ### Build / supply chain
 
