@@ -95,8 +95,8 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 	request := Request{Owner: graphfixture.OwnerKey, OperationID: operation, Scope: scope}
 	beforeDryRun := neo4jOwnerCensus(t, ctx, assertionDriver, profile.Database, graphfixture.OwnerKey)
 	dryRun, err := service.Push(ctx, Request{Owner: graphfixture.OwnerKey, OperationID: "dry-run", Scope: scope, DryRun: true})
-	if err != nil || !dryRun.Complete || !dryRun.DryRun || dryRun.NodeCount != 2 || dryRun.EdgeCount != 2 {
-		t.Fatalf("dry run failed: result=%#v err=%v", dryRun, err)
+	if err != nil || !dryRun.Complete || !dryRun.DryRun || dryRun.NodeCount != 3 || dryRun.EdgeCount != 2 {
+		t.Fatalf("dry run materialized counts disagree with apply: result=%#v err=%v", dryRun, err)
 	}
 	if afterDryRun := neo4jOwnerCensus(t, ctx, assertionDriver, profile.Database, graphfixture.OwnerKey); afterDryRun != beforeDryRun {
 		t.Fatalf("dry run mutated target: before=%v after=%v", beforeDryRun, afterDryRun)
@@ -110,8 +110,8 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.Complete || !first.CleanupComplete || first.ActiveGeneration == "" || first.ActiveGeneration != second.ActiveGeneration || first.NodeCount != 3 || first.EdgeCount != 2 {
-		t.Fatalf("non-idempotent tracer results: first=%#v second=%#v", first, second)
+	if !first.Complete || !first.CleanupComplete || first.ActiveGeneration == "" || second.ActiveGeneration == "" || first.ActiveGeneration == second.ActiveGeneration || first.NodeCount != 3 || first.EdgeCount != 2 || second.NodeCount != first.NodeCount || second.EdgeCount != first.EdgeCount {
+		t.Fatalf("attempt-isolated rerun produced false counts or reused physical generation: first=%#v second=%#v", first, second)
 	}
 
 	cancelService := NewService(store, func(ctx context.Context) (Transport, error) {
@@ -185,8 +185,8 @@ SET m.active_generation = $prior, m.pending_generation = 'live-generation',
 		t.Fatalf("cleanup interruption was not reported truthfully: result=%#v err=%v", cleanupResult, cleanupErr)
 	}
 	resumed, err := service.Push(ctx, Request{Owner: graphfixture.OwnerKey, OperationID: "changed-operation", Scope: scope, BatchSize: 1})
-	if err != nil || !resumed.Complete || !resumed.CleanupComplete || resumed.ActiveGeneration != cleanupResult.ActiveGeneration {
-		t.Fatalf("ordinary rerun did not resume cleanup: result=%#v err=%v", resumed, err)
+	if err != nil || !resumed.Complete || !resumed.CleanupComplete || resumed.ActiveGeneration == cleanupResult.ActiveGeneration || resumed.NodeCount != cleanupResult.NodeCount || resumed.EdgeCount != cleanupResult.EdgeCount {
+		t.Fatalf("ordinary rerun did not replace the attempt generation and finish cleanup: result=%#v err=%v", resumed, err)
 	}
 
 	target, err := neo4j.ExecuteQuery(ctx, assertionDriver, `
