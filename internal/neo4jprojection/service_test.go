@@ -200,6 +200,24 @@ func projectionRecords(count int) ([]*graph.Node, []graph.ScopedEdgeRow) {
 	return nodes, edges
 }
 
+func TestProjectionDryRunCountsMaterializedPlaceholders(t *testing.T) {
+	source := &graph.Node{ID: "fixture/repo/main.go::Run", Kind: graph.KindFunction}
+	edge := &graph.Edge{From: source.ID, To: "fixture/repo/missing.go::Missing", Kind: graph.EdgeCalls}
+	snapshot := &batchSnapshot{
+		nodes:    []*graph.Node{source},
+		edges:    []graph.ScopedEdgeRow{{Edge: edge, Source: source, Target: nil}},
+		pageSize: 1,
+	}
+	transport := &batchTransport{}
+	result, err := NewService(batchOpener{snapshot}, func(context.Context) (Transport, error) { return transport, nil }).Push(context.Background(), Request{Owner: "owner", OperationID: "dry", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Complete || result.NodeCount != 2 || result.EdgeCount != 1 || len(transport.batches) != 0 {
+		t.Fatalf("dry-run materialized counts are false: result=%#v batches=%d", result, len(transport.batches))
+	}
+}
+
 func TestProjectionBatchAggregation(t *testing.T) {
 	nodes, edges := projectionRecords(1201)
 	t.Run("dry run counts without target mutation", func(t *testing.T) {

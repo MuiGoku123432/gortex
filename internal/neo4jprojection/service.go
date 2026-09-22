@@ -223,6 +223,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	descriptor := snapshot.Descriptor()
 	result.SourceGeneration = descriptor.SourceGeneration
 	stableGeneration := generationKey(request.Owner, request.OperationID, descriptor.SourceGeneration)
+	result.PendingGeneration = stableGeneration
 
 	transport, err := s.transport(ctx)
 	if err != nil {
@@ -239,14 +240,53 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	if request.DryRun {
 		result.Phase = "reading_snapshot"
 		report(result.Phase, 0)
-		err = snapshot.ReadNodePages(ctx, func(nodes []*graph.Node) error { result.NodeCount += len(nodes); return nil })
+		nodeKeys := make(map[string]struct{})
+		edgeKeys := make(map[string]struct{})
+		countNode := func(node *graph.Node) error {
+			projected, _, err := projectNode(request.Owner, result.PendingGeneration, node)
+			if err != nil {
+				return err
+			}
+			nodeKeys[projected.Properties["gortex_physical_key"].(string)] = struct{}{}
+			return nil
+		}
+		err = snapshot.ReadNodePages(ctx, func(nodes []*graph.Node) error {
+			for _, node := range nodes {
+				if err := countNode(node); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		if err == nil {
-			err = snapshot.ReadEdgePages(ctx, func(edges []graph.ScopedEdgeRow) error { result.EdgeCount += len(edges); return nil })
+			err = snapshot.ReadEdgePages(ctx, func(edges []graph.ScopedEdgeRow) error {
+				for _, row := range edges {
+					for _, endpoint := range []*graph.Node{row.Source, row.Target} {
+						if endpoint != nil {
+							if err := countNode(endpoint); err != nil {
+								return err
+							}
+						}
+					}
+					if row.Target == nil {
+						if err := countNode(&graph.Node{ID: row.Edge.To, Kind: graph.NodeKind("unresolved"), Name: row.Edge.To, Meta: map[string]any{"synthetic": true}}); err != nil {
+							return err
+						}
+					}
+					projected, _, err := projectEdge(request.Owner, result.PendingGeneration, row.Edge)
+					if err != nil {
+						return err
+					}
+					edgeKeys[projected.Properties["gortex_physical_key"].(string)] = struct{}{}
+				}
+				return nil
+			})
 		}
 		if err != nil {
 			result.Cancelled = errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 			return result, fmt.Errorf("read projection snapshot: %w", err)
 		}
+		result.NodeCount, result.EdgeCount = len(nodeKeys), len(edgeKeys)
 		result.Phase, result.Complete = "complete", true
 		report(result.Phase, result.NodeCount+result.EdgeCount)
 		return result, nil
