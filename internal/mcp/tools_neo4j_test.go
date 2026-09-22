@@ -29,7 +29,7 @@ func TestNeo4jParity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cliRequest, mcpRequest)
 
-	result := neo4jprojection.Result{Profile: "prod", Namespace: "view", Complete: true, CleanupComplete: true, Phase: "complete", NodeCount: 2, EdgeCount: 1}
+	result := neo4jprojection.Result{Profile: "prod", Namespace: "view", Complete: true, CleanupComplete: true, Phase: "complete", NodeCount: 2, EdgeCount: 1, SecretOmissions: 3, UnsupportedOmissions: 4}
 	cliJSON, err := json.Marshal(result)
 	require.NoError(t, err)
 	var got neo4jprojection.Request
@@ -46,6 +46,10 @@ func TestNeo4jParity(t *testing.T) {
 	require.Equal(t, cliRequest, got)
 	text := response.Content[0].(mcplib.TextContent).Text
 	require.JSONEq(t, string(cliJSON), text)
+	var publicResult neo4jprojection.Result
+	require.NoError(t, json.Unmarshal([]byte(text), &publicResult))
+	require.Equal(t, 3, publicResult.SecretOmissions)
+	require.Equal(t, 4, publicResult.UnsupportedOmissions)
 }
 
 func TestNeo4jScope(t *testing.T) {

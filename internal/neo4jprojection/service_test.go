@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,8 @@ type tracerTransport struct {
 	active     string
 	failAt     string
 	closed     bool
+	closeBlock bool
+	closeErr   error
 }
 
 func (t *tracerTransport) Inspect(context.Context, bool) error { return t.record("inspect") }
@@ -69,7 +72,17 @@ func (t *tracerTransport) Activate(_ context.Context, owner, operation, generati
 func (t *tracerTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{}, t.record("cleanup")
 }
-func (t *tracerTransport) Close(context.Context) error { t.closed = true; return t.record("close") }
+func (t *tracerTransport) Close(ctx context.Context) error {
+	t.closed = true
+	if t.closeBlock {
+		<-ctx.Done()
+		return errors.Join(ctx.Err(), t.closeErr)
+	}
+	if err := t.record("close"); err != nil {
+		return err
+	}
+	return t.closeErr
+}
 func (t *tracerTransport) record(operation string) error {
 	t.operations = append(t.operations, operation)
 	if t.failAt == operation {
@@ -344,6 +357,23 @@ func TestProjectionBoundedReads(t *testing.T) {
 	}
 	if result.Complete || snapshot.maxRead > 89 || snapshot.outstanding != 0 {
 		t.Fatalf("unbounded/incomplete state: result=%#v snapshot=%#v", result, snapshot)
+	}
+}
+
+func TestProjectionCloseIsBoundedAndPreservesOperationError(t *testing.T) {
+	operationErr := errors.New("operation failed")
+	closeErr := errors.New("close failed")
+	transport := &tracerTransport{active: "generation-old", failAt: "inspect", closeBlock: true, closeErr: closeErr}
+	start := time.Now()
+	_, err := NewService(tracerOpener{&tracerSnapshot{}}, func(context.Context) (Transport, error) {
+		return transport, nil
+	}).Push(context.Background(), Request{Owner: "owner", OperationID: "operation", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}})
+	elapsed := time.Since(start)
+	if elapsed < closeTimeout || elapsed > closeTimeout+2*time.Second {
+		t.Fatalf("close duration = %s, want bounded near %s", elapsed, closeTimeout)
+	}
+	if err == nil || !strings.Contains(err.Error(), operationErr.Error()) && !strings.Contains(err.Error(), "transport failure") || !errors.Is(err, closeErr) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("joined operation/close error = %v", err)
 	}
 }
 

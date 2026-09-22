@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -189,6 +190,51 @@ SET m.active_generation = $prior, m.pending_generation = 'live-generation',
 		t.Fatalf("ordinary rerun did not replace the attempt generation and finish cleanup: result=%#v err=%v", resumed, err)
 	}
 
+	beforeIdenticalDryRun := neo4jOwnerCensus(t, ctx, assertionDriver, profile.Database, graphfixture.OwnerKey)
+	identicalDryRun, err := service.Push(ctx, Request{Owner: graphfixture.OwnerKey, OperationID: "identical-dry-run", Scope: scope, DryRun: true})
+	if err != nil || identicalDryRun.StaleNodeCount != resumed.NodeCount || identicalDryRun.StaleEdgeCount != resumed.EdgeCount || identicalDryRun.LogicalRemovedNodes != 0 || identicalDryRun.LogicalRemovedEdges != 0 || !slices.Contains(identicalDryRun.PlannedActions, "delete_stale_records") {
+		t.Fatalf("identical dry-run did not report physical former-generation cleanup: result=%#v err=%v", identicalDryRun, err)
+	}
+	if afterIdenticalDryRun := neo4jOwnerCensus(t, ctx, assertionDriver, profile.Database, graphfixture.OwnerKey); afterIdenticalDryRun != beforeIdenticalDryRun {
+		t.Fatal("identical dry-run mutated the target")
+	}
+
+	for _, testCase := range []struct {
+		name                string
+		expireBeforeRelease bool
+	}{
+		{name: "before_first_delete"},
+		{name: "before_final_release", expireBeforeRelease: true},
+	} {
+		t.Run("cleanup_lease_expiry_"+testCase.name, func(t *testing.T) {
+			owner := "workspace:expiry/" + testCase.name
+			leaseService := NewService(store, func(context.Context) (Transport, error) {
+				transport, err := NewNeo4jTransport(profile)
+				if err != nil {
+					return nil, err
+				}
+				return &expiringCleanupTransport{Transport: transport, driver: assertionDriver, database: profile.Database, expireBeforeRelease: testCase.expireBeforeRelease}, nil
+			})
+			leaseResult, leaseErr := leaseService.Push(ctx, Request{Owner: owner, OperationID: "expiry-operation", Scope: scope, BatchSize: 1})
+			if !errors.Is(leaseErr, ErrCleanupIncomplete) || !leaseResult.Complete || leaseResult.CleanupComplete || leaseResult.CleanupStatus != "incomplete" || leaseResult.CleanupAction == "" {
+				t.Fatalf("cleanup lease loss was not truthful: result=%#v err=%v", leaseResult, leaseErr)
+			}
+			manifest, queryErr := neo4j.ExecuteQuery(ctx, assertionDriver, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+RETURN m.active_generation AS active, m.cleanup_complete AS cleanup_complete,
+       m.operation_state AS operation_state`, map[string]any{"owner": owner}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(profile.Database))
+			if queryErr != nil || len(manifest.Records) != 1 {
+				t.Fatalf("manifest after lease loss: result=%#v err=%v", manifest, queryErr)
+			}
+			assertNeo4jValue(t, manifest.Records[0], "active", leaseResult.ActiveGeneration)
+			assertNeo4jValue(t, manifest.Records[0], "cleanup_complete", false)
+			state, _ := manifest.Records[0].Get("operation_state")
+			if state != "idle" && state != "failed" && state != "abandoned" {
+				t.Fatalf("manifest is not takeover-safe: state=%#v", state)
+			}
+		})
+	}
+
 	target, err := neo4j.ExecuteQuery(ctx, assertionDriver, `
 MATCH (manifest:GortexProjectionManifest {gortex_owner: $owner})
 OPTIONAL MATCH (node:GortexNode {gortex_owner: $owner, gortex_generation: manifest.active_generation})
@@ -253,6 +299,43 @@ type failCleanupTransport struct{ Transport }
 
 func (t *failCleanupTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{Nodes: 2, Relationships: 1}, ErrCleanupIncomplete
+}
+
+type expiringCleanupTransport struct {
+	Transport
+	driver              neo4j.Driver
+	database            string
+	expireBeforeRelease bool
+}
+
+func (t *expiringCleanupTransport) Reconcile(ctx context.Context, owner, operation, active, attempt string, batchSize int) (CleanupCounts, error) {
+	production := t.Transport.(*neo4jTransport)
+	expired := false
+	expire := func() {
+		if expired {
+			return
+		}
+		expired = true
+		_, err := neo4j.ExecuteQuery(ctx, t.driver, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.active_generation = $active AND m.attempt_id = $attempt
+SET m.lease_until = datetime() - duration('PT1S')`, map[string]any{
+			"owner": owner, "operation": operation, "active": active, "attempt": attempt,
+		}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(t.database))
+		if err != nil {
+			panic(err)
+		}
+	}
+	if t.expireBeforeRelease {
+		production.beforeCleanupRelease = expire
+	} else {
+		production.beforeCleanupMutation = func(phase string) {
+			if phase == "relationship" {
+				expire()
+			}
+		}
+	}
+	return production.Reconcile(ctx, owner, operation, active, attempt, batchSize)
 }
 
 type failBeforeActivationTransport struct{ Transport }

@@ -59,10 +59,10 @@ func TestNeo4jPushJSON(t *testing.T) {
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"--profile", "prod", "--namespace", "view", "--workspace", "ws", "--project", "p", "--repo", "a", "--json"})
 	withNeo4jPushTool(t, func(_ context.Context, _ string, _ string, _ map[string]any) ([]byte, error) {
-		return []byte(`{"profile":"prod","namespace":"view","phase":"complete","complete":true,"cleanup_complete":true,"node_count":2,"edge_count":1}`), nil
+		return []byte(`{"profile":"prod","namespace":"view","phase":"complete","complete":true,"cleanup_complete":true,"node_count":2,"edge_count":1,"secret_omissions":3,"unsupported_omissions":4}`), nil
 	})
 	require.NoError(t, cmd.Execute())
-	require.JSONEq(t, `{"profile":"prod","namespace":"view","phase":"complete","complete":true,"cleanup_complete":true,"node_count":2,"edge_count":1}`, stdout.String())
+	require.JSONEq(t, `{"profile":"prod","namespace":"view","phase":"complete","complete":true,"cleanup_complete":true,"node_count":2,"edge_count":1,"secret_omissions":3,"unsupported_omissions":4}`, stdout.String())
 	require.Empty(t, stderr.String())
 	require.NotContains(t, stdout.String(), "secret-canary")
 }

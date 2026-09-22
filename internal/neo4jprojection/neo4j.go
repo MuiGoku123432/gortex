@@ -23,11 +23,14 @@ const (
 )
 
 type neo4jTransport struct {
-	driver             neo4j.Driver
-	database           string
-	transactionTimeout time.Duration
-	leaseDuration      time.Duration
-	relationshipTypes  map[string]struct{}
+	driver                neo4j.Driver
+	database              string
+	transactionTimeout    time.Duration
+	leaseDuration         time.Duration
+	relationshipTypes     map[string]struct{}
+	beforeStageMutation   func(string)
+	beforeCleanupMutation func(string)
+	beforeCleanupRelease  func()
 }
 
 func NewNeo4jTransport(profile gortexconfig.ResolvedNeo4jProfile) (Transport, error) {
@@ -274,6 +277,9 @@ func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 	}
 	sort.Strings(labels)
 	for _, label := range labels {
+		if t.beforeStageMutation != nil {
+			t.beforeStageMutation("node")
+		}
 		params := t.stageParams(batch)
 		params["rows"] = nodesByLabel[label]
 		result, err := t.query(ctx, nodeMergeQuery(label), params)
@@ -314,6 +320,9 @@ func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 				}
 			}
 			t.relationshipTypes[relationshipType] = struct{}{}
+		}
+		if t.beforeStageMutation != nil {
+			t.beforeStageMutation("relationship")
 		}
 		params := t.stageParams(batch)
 		params["rows"] = edgesByType[relationshipType]
@@ -401,6 +410,9 @@ func (t *neo4jTransport) Reconcile(ctx context.Context, owner, operation, active
 		}
 	}
 	for {
+		if t.beforeCleanupMutation != nil {
+			t.beforeCleanupMutation("relationship")
+		}
 		result, err := t.query(ctx, `
 MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
 WHERE m.operation_id = $operation AND m.active_generation = $active
@@ -427,6 +439,9 @@ RETURN true AS fenced, deleted`, params())
 		}
 	}
 	for {
+		if t.beforeCleanupMutation != nil {
+			t.beforeCleanupMutation("node")
+		}
 		result, err := t.query(ctx, `
 MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
 WHERE m.operation_id = $operation AND m.active_generation = $active
@@ -451,6 +466,9 @@ RETURN true AS fenced, deleted`, params())
 		if deleted == 0 {
 			break
 		}
+	}
+	if t.beforeCleanupRelease != nil {
+		t.beforeCleanupRelease()
 	}
 	result, err := t.query(ctx, `
 MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
