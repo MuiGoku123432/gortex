@@ -72,10 +72,11 @@ func (s *Server) handleNeo4jPush(ctx context.Context, req mcp.CallToolRequest) (
 		if !ok {
 			return mcp.NewToolResultError("neo4j push: graph does not support immutable scoped snapshots"), nil
 		}
+		transactionTimeout, _ := time.ParseDuration(request.TransactionTimeout)
+		retryTimeout, _ := time.ParseDuration(request.RetryTimeout)
 		service := neo4jprojection.NewService(opener, func(context.Context) (neo4jprojection.Transport, error) {
 			return neo4jprojection.NewNeo4jTransportWithTimeouts(profile,
-				parseNeo4jDuration(request.TransactionTimeout, 30*time.Second),
-				parseNeo4jDuration(request.RetryTimeout, 30*time.Second))
+				transactionTimeout, retryTimeout)
 		})
 		push = service.Push
 	}
@@ -132,14 +133,6 @@ func stringListArg(args map[string]any, key string) ([]string, error) {
 
 func sameNeo4jRepositories(a, b []string) bool {
 	return strings.Join(a, "\x00") == strings.Join(b, "\x00")
-}
-
-func parseNeo4jDuration(value string, fallback time.Duration) time.Duration {
-	d, err := time.ParseDuration(value)
-	if err != nil || d <= 0 {
-		return fallback
-	}
-	return d
 }
 
 func classifyNeo4jPushError(err error) (string, string) {

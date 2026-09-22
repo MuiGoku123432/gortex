@@ -44,6 +44,12 @@ func TestNeo4jPushFlags(t *testing.T) {
 	cmd = newNeo4jPushCommand()
 	cmd.SetArgs([]string{"unexpected"})
 	require.Error(t, cmd.Execute())
+
+	for _, flag := range []string{"--operation-timeout", "--transaction-timeout", "--retry-timeout"} {
+		cmd = newNeo4jPushCommand()
+		cmd.SetArgs([]string{"--profile", "prod", "--namespace", "view", "--workspace", "ws", "--project", "p", "--repo", "a", flag, "31m"})
+		require.Error(t, cmd.Execute(), flag)
+	}
 }
 
 func TestNeo4jPushJSON(t *testing.T) {

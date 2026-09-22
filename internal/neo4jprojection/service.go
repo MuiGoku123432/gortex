@@ -138,13 +138,13 @@ func NormalizeRequest(request Request) (Request, error) {
 		request.RetryTimeout = (30 * time.Second).String()
 	}
 	operationTimeout, err := time.ParseDuration(request.OperationTimeout)
-	if err != nil || operationTimeout <= 0 {
-		return Request{}, fmt.Errorf("operation timeout must be a positive duration")
+	if err != nil || operationTimeout <= 0 || operationTimeout > defaultTimeout {
+		return Request{}, fmt.Errorf("operation timeout must be between 1ns and %s", defaultTimeout)
 	}
 	for label, value := range map[string]string{"transaction": request.TransactionTimeout, "retry": request.RetryTimeout} {
 		d, parseErr := time.ParseDuration(value)
-		if parseErr != nil || d <= 0 {
-			return Request{}, fmt.Errorf("%s timeout must be a positive duration", label)
+		if parseErr != nil || d <= 0 || d > neo4jTransactionTimeout {
+			return Request{}, fmt.Errorf("%s timeout must be between 1ns and %s", label, neo4jTransactionTimeout)
 		}
 	}
 	request.Timeout = operationTimeout

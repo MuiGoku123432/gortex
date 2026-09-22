@@ -55,6 +55,12 @@ func TestNeo4jScope(t *testing.T) {
 	require.Error(t, err)
 	_, err = stringListArg(map[string]any{"repository": []any{"a", 2}}, "repository")
 	require.Error(t, err)
+	for _, field := range []string{"operation_timeout", "transaction_timeout", "retry_timeout"} {
+		args := neo4jArgs()
+		args[field] = "999999999999999999999h"
+		_, err = normalizeNeo4jPushRequest(args)
+		require.Error(t, err, field)
+	}
 }
 
 func TestNeo4jMutation(t *testing.T) {

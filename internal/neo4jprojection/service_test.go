@@ -218,6 +218,24 @@ func TestProjectionDryRunCountsMaterializedPlaceholders(t *testing.T) {
 	}
 }
 
+func TestNormalizeRequestDurationBounds(t *testing.T) {
+	base := Request{Profile: "prod", Namespace: "view", Workspace: "ws", Project: "p", Repositories: []string{"repo"}}
+	for name, mutate := range map[string]func(*Request){
+		"operation":   func(r *Request) { r.OperationTimeout = "30m1s" },
+		"transaction": func(r *Request) { r.TransactionTimeout = "31s" },
+		"retry":       func(r *Request) { r.RetryTimeout = "31s" },
+		"overflow":    func(r *Request) { r.OperationTimeout = "999999999999999999999h" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := base
+			mutate(&request)
+			if _, err := NormalizeRequest(request); err == nil {
+				t.Fatal("oversized or invalid duration was accepted")
+			}
+		})
+	}
+}
+
 func TestProjectionBatchAggregation(t *testing.T) {
 	nodes, edges := projectionRecords(1201)
 	t.Run("dry run counts without target mutation", func(t *testing.T) {
