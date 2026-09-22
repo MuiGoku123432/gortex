@@ -141,9 +141,11 @@ func (o batchOpener) OpenScopedProjectionSnapshot(context.Context, graph.Project
 }
 
 type batchTransport struct {
-	batches []ProjectionBatch
-	cancel  context.CancelFunc
-	dryRuns int
+	batches    []ProjectionBatch
+	cancel     context.CancelFunc
+	dryRuns    int
+	markCounts *MaterializedCounts
+	activated  bool
 }
 
 func (t *batchTransport) Inspect(context.Context, bool) error { return nil }
@@ -172,6 +174,12 @@ func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 	return nil
 }
 func (t *batchTransport) MarkComplete(_ context.Context, _, _, _, _ string, intended MaterializedCounts) (MaterializedCounts, error) {
+	if t.markCounts != nil {
+		if *t.markCounts != intended {
+			return *t.markCounts, errors.New("intended census mismatch")
+		}
+		return *t.markCounts, nil
+	}
 	counts := MaterializedCounts{}
 	seen := map[string]bool{}
 	edges := map[string]bool{}
@@ -195,6 +203,7 @@ func (t *batchTransport) MarkComplete(_ context.Context, _, _, _, _ string, inte
 	return counts, nil
 }
 func (t *batchTransport) Activate(context.Context, string, string, string, string, string, Result) error {
+	t.activated = true
 	return nil
 }
 func (t *batchTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
@@ -236,6 +245,27 @@ func TestProjectionDryRunReportsMapperOmissions(t *testing.T) {
 	}
 	if result.SecretOmissions != 1 || result.UnsupportedOmissions != 1 {
 		t.Fatalf("omissions not aggregated: %#v", result)
+	}
+}
+
+func TestProjectionMissingPendingRecordBlocksActivation(t *testing.T) {
+	for _, missing := range []string{"node", "relationship"} {
+		t.Run(missing, func(t *testing.T) {
+			transport := &batchTransport{}
+			transportCounts := MaterializedCounts{Nodes: 2, Relationships: 1}
+			if missing == "node" {
+				transportCounts.Nodes--
+			} else {
+				transportCounts.Relationships--
+			}
+			transport.markCounts = &transportCounts
+			result, err := NewService(tracerOpener{&tracerSnapshot{}}, func(context.Context) (Transport, error) {
+				return transport, nil
+			}).Push(context.Background(), Request{Owner: "owner", OperationID: "operation", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}})
+			if err == nil || result.Complete || result.ActiveGeneration != "prior" || transport.activated {
+				t.Fatalf("missing pending %s activated: result=%#v err=%v", missing, result, err)
+			}
+		})
 	}
 }
 
