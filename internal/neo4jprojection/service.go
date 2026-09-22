@@ -84,7 +84,9 @@ var ErrCleanupIncomplete = errors.New("neo4j projection cleanup incomplete")
 // operation allowed to change the exact owner's visible generation pointer.
 type Transport interface {
 	Inspect(context.Context, bool) error
+	LeaseDuration() time.Duration
 	Acquire(context.Context, string, string, string, string, time.Time) (string, error)
+	Renew(context.Context, string, string, string, string, time.Time) error
 	Abort(context.Context, string, string, string, string, int) error
 	Stage(context.Context, ProjectionBatch) error
 	MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error)
@@ -220,7 +222,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 
 	descriptor := snapshot.Descriptor()
 	result.SourceGeneration = descriptor.SourceGeneration
-	result.PendingGeneration = generationKey(request.Owner, request.OperationID, descriptor.SourceGeneration)
+	stableGeneration := generationKey(request.Owner, request.OperationID, descriptor.SourceGeneration)
 
 	transport, err := s.transport(ctx)
 	if err != nil {
@@ -254,9 +256,14 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 		return result, fmt.Errorf("create projection attempt: %w", err)
 	}
 	attemptID := hex.EncodeToString(attemptBytes)
+	result.PendingGeneration = stableGeneration + ":" + attemptID
 	result.Phase = "locking"
 	report(result.Phase, 0)
-	prior, err := transport.Acquire(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(30*time.Second))
+	leaseDuration := transport.LeaseDuration()
+	if leaseDuration <= 0 {
+		leaseDuration = 2 * time.Minute
+	}
+	prior, err := transport.Acquire(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(leaseDuration))
 	if err != nil {
 		return result, fmt.Errorf("acquire projection owner: %w", err)
 	}
@@ -284,6 +291,9 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 			remaining := request.BatchSize - takeNodes
 			takeEdges := min(len(edges), remaining)
 			batch.Edges, edges = edges[:takeEdges], edges[takeEdges:]
+			if err := transport.Renew(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(leaseDuration)); err != nil {
+				return err
+			}
 			if err := transport.Stage(ctx, batch); err != nil {
 				result.Cancelled = errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 				return err
@@ -335,6 +345,9 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	}
 	result.Phase = "marking_complete"
 	report(result.Phase, processed)
+	if err := transport.Renew(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(leaseDuration)); err != nil {
+		return result, fmt.Errorf("renew projection lease before completion: %w", err)
+	}
 	materialized, err := transport.MarkComplete(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID)
 	if err != nil {
 		return result, fmt.Errorf("mark projection complete: %w", err)
@@ -343,6 +356,9 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	result.EdgeCount = materialized.Relationships
 	result.Phase = "activating"
 	report(result.Phase, processed)
+	if err := transport.Renew(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(leaseDuration)); err != nil {
+		return result, fmt.Errorf("renew projection lease before activation: %w", err)
+	}
 	if err := transport.Activate(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, prior, result); err != nil {
 		return result, fmt.Errorf("activate projection: %w", err)
 	}

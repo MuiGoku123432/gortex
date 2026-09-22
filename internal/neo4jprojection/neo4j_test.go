@@ -28,6 +28,14 @@ type protocolTransport struct {
 }
 
 func (t *protocolTransport) Inspect(context.Context, bool) error { return nil }
+func (t *protocolTransport) LeaseDuration() time.Duration        { return 20 * time.Millisecond }
+func (t *protocolTransport) Renew(_ context.Context, _ string, operation, generation, attempt string, leaseUntil time.Time) error {
+	if operation != t.lockOperation || generation != t.lockGeneration || attempt != t.lockAttempt || t.failed || time.Now().After(t.leaseUntil) {
+		return errors.New("attempt lease lost")
+	}
+	t.leaseUntil = leaseUntil
+	return nil
+}
 func (t *protocolTransport) Acquire(_ context.Context, _ string, operation, generation, attempt string, leaseUntil time.Time) (string, error) {
 	if t.lockOperation != "" && !t.failed && time.Now().Before(t.leaseUntil) && t.lockAttempt != attempt {
 		return "", errors.New("owner locked")
@@ -46,11 +54,39 @@ func (t *protocolTransport) Abort(_ context.Context, _ string, operation, genera
 	return nil
 }
 func (t *protocolTransport) Stage(_ context.Context, batch ProjectionBatch) error {
-	if batch.OperationID != t.lockOperation || batch.PendingGeneration != t.lockGeneration {
+	if batch.OperationID != t.lockOperation || batch.PendingGeneration != t.lockGeneration || batch.AttemptID != t.lockAttempt || time.Now().After(t.leaseUntil) {
 		return errors.New("stage does not own lock")
 	}
 	t.staged = append(t.staged, batch)
 	return nil
+}
+
+func TestNeo4jSlowStageRenewsLeaseAndSupersededWriterFailsClosed(t *testing.T) {
+	transport := &protocolTransport{active: "generation-old"}
+	_, err := transport.Acquire(context.Background(), "owner", "operation", "generation", "attempt-one", time.Now().Add(20*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		time.Sleep(10 * time.Millisecond)
+		if err := transport.Renew(context.Background(), "owner", "operation", "generation", "attempt-one", time.Now().Add(20*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := transport.Acquire(context.Background(), "owner", "replacement", "generation", "attempt-two", time.Now().Add(time.Minute)); err == nil {
+			t.Fatal("takeover overlapped a renewed writer")
+		}
+	}
+	time.Sleep(25 * time.Millisecond)
+	if _, err := transport.Acquire(context.Background(), "owner", "replacement", "generation", "attempt-two", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := transport.Stage(context.Background(), ProjectionBatch{Owner: "owner", OperationID: "operation", PendingGeneration: "generation", AttemptID: "attempt-one"}); err == nil {
+		t.Fatal("superseded writer continued staging")
+	}
+	transport.Abort(context.Background(), "owner", "operation", "generation", "attempt-one", 1)
+	if transport.lockAttempt != "attempt-two" {
+		t.Fatal("old abort cleared replacement ownership")
+	}
 }
 func (t *protocolTransport) MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error) {
 	counts := MaterializedCounts{}

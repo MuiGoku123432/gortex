@@ -39,6 +39,10 @@ type tracerTransport struct {
 }
 
 func (t *tracerTransport) Inspect(context.Context, bool) error { return t.record("inspect") }
+func (t *tracerTransport) LeaseDuration() time.Duration        { return time.Minute }
+func (t *tracerTransport) Renew(context.Context, string, string, string, string, time.Time) error {
+	return t.record("renew")
+}
 func (t *tracerTransport) Acquire(context.Context, string, string, string, string, time.Time) (string, error) {
 	if err := t.record("lock"); err != nil {
 		return "", err
@@ -127,6 +131,10 @@ type batchTransport struct {
 }
 
 func (t *batchTransport) Inspect(context.Context, bool) error { return nil }
+func (t *batchTransport) LeaseDuration() time.Duration        { return time.Minute }
+func (t *batchTransport) Renew(context.Context, string, string, string, string, time.Time) error {
+	return nil
+}
 func (t *batchTransport) Acquire(context.Context, string, string, string, string, time.Time) (string, error) {
 	return "prior", nil
 }
@@ -275,7 +283,7 @@ func TestNeo4jTracerContract(t *testing.T) {
 		if !result.Complete || result.ActiveGeneration == "" || result.ActiveGeneration == "generation-old" || result.NodeCount != 2 || result.EdgeCount != 1 {
 			t.Fatalf("unexpected result: %#v", result)
 		}
-		if want := []string{"inspect", "lock", "stage", "stage", "mark_complete", "activate", "cleanup", "close"}; !reflect.DeepEqual(transport.operations, want) {
+		if want := []string{"inspect", "lock", "renew", "stage", "renew", "stage", "renew", "mark_complete", "renew", "activate", "cleanup", "close"}; !reflect.DeepEqual(transport.operations, want) {
 			t.Fatalf("operations = %v, want %v", transport.operations, want)
 		}
 		if !snapshot.closed || !transport.closed {
