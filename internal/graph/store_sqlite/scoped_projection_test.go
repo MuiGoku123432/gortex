@@ -65,8 +65,17 @@ func TestScopedProjectionTracer(t *testing.T) {
 	store.AddBatch([]*graph.Node{
 		{ID: graphfixture.ScopedNodeID, RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
 		{ID: graphfixture.ScopedTargetID, RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("type"), Name: "Store"},
+		{ID: "fixture/repo/other-workspace.go::Run", RepoPrefix: "fixture/repo", WorkspaceID: "other-ws", ProjectID: "project", FilePath: "fixture/repo/other-workspace.go", Kind: graph.NodeKind("function"), Name: "WrongWorkspace"},
+		{ID: "fixture/repo/other-project.go::Run", RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "other-project", FilePath: "fixture/repo/other-project.go", Kind: graph.NodeKind("function"), Name: "WrongProject"},
 		{ID: "neighbor/repo/main.go::Run", RepoPrefix: "neighbor/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "neighbor/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
-	}, []*graph.Edge{{From: graphfixture.ScopedNodeID, To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/main.go"}})
+	}, []*graph.Edge{
+		{From: graphfixture.ScopedNodeID, To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/main.go"},
+		{From: graphfixture.ScopedNodeID, To: "neighbor/repo/main.go::Run", Kind: graph.EdgeKind("calls"), FilePath: "fixture/repo/main.go"},
+		{From: graphfixture.ScopedNodeID, To: "fixture/repo/other-workspace.go::Run", Kind: graph.EdgeKind("calls"), FilePath: "fixture/repo/main.go"},
+		{From: graphfixture.ScopedNodeID, To: "fixture/repo/other-project.go::Run", Kind: graph.EdgeKind("calls"), FilePath: "fixture/repo/main.go"},
+		{From: "fixture/repo/other-workspace.go::Run", To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/other-workspace.go"},
+		{From: "fixture/repo/other-project.go::Run", To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/other-project.go"},
+	})
 	require.NoError(t, store.CheckpointWAL())
 	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"fixture/repo"}})
 	require.NoError(t, err)
@@ -87,10 +96,24 @@ func TestScopedProjectionTracer(t *testing.T) {
 	require.Equal(t, []string{graphfixture.ScopedNodeID, graphfixture.ScopedTargetID}, []string{nodes[0].ID, nodes[1].ID})
 	var edges []graph.ScopedEdgeRow
 	require.NoError(t, snapshot.ReadEdgePages(context.Background(), func(page []graph.ScopedEdgeRow) error { edges = append(edges, page...); return nil }))
-	require.Len(t, edges, 1)
-	require.Equal(t, graph.EdgeKind("references"), edges[0].Edge.Kind)
-	require.Equal(t, graphfixture.ScopedNodeID, edges[0].Source.ID)
-	require.Equal(t, graphfixture.ScopedTargetID, edges[0].Target.ID)
+	require.Len(t, edges, 4)
+	for _, row := range edges {
+		require.Equal(t, graphfixture.ScopedNodeID, row.Source.ID)
+		require.NotNil(t, row.Target)
+		if row.Edge.To == graphfixture.ScopedTargetID {
+			require.Equal(t, "Store", row.Target.Name)
+			continue
+		}
+		require.Equal(t, graph.NodeKind("unresolved"), row.Target.Kind)
+		require.Equal(t, row.Edge.To, row.Target.ID)
+		require.Empty(t, row.Target.Name)
+		require.Empty(t, row.Target.FilePath)
+		require.Empty(t, row.Target.Meta)
+		require.Empty(t, row.Target.RepoPrefix)
+		require.Empty(t, row.Target.WorkspaceID)
+		require.Empty(t, row.Target.ProjectID)
+		require.Empty(t, row.Target.Origin)
+	}
 
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()

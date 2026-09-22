@@ -193,12 +193,17 @@ func (s *scopedProjectionSnapshot) ReadEdgePages(ctx context.Context, consume fu
 
 func (s *scopedProjectionSnapshot) readEndpointNodes(ctx context.Context, ids []string) (map[string]*graph.Node, error) {
 	result := make(map[string]*graph.Node)
+	reposJSON, _ := projectionJSON(s.descriptor.Scope.Repositories)
 	for start := 0; start < len(ids); start += scopedProjectionPage {
 		end := min(start+scopedProjectionPage, len(ids))
-		idsJSON, _ := projectionJSON(ids[start:end])
-		query := `WITH requested(id) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) SELECT ` +
-			qualifiedNodeColumns("n", lookupNodeCols) + ` FROM nodes AS n JOIN requested AS r ON r.id = n.id WHERE n.view_gen = ?`
-		rows, err := s.tx.QueryContext(ctx, query, idsJSON, s.descriptor.SourceGeneration)
+		pageIDs := ids[start:end]
+		idsJSON, _ := projectionJSON(pageIDs)
+		query := `WITH requested(id) AS (SELECT CAST(value AS TEXT) FROM json_each(?)), ` +
+			`requested_repos(repo_prefix) AS (SELECT CAST(value AS TEXT) FROM json_each(?)) SELECT ` +
+			qualifiedNodeColumns("n", lookupNodeCols) + ` FROM nodes AS n JOIN requested AS r ON r.id = n.id ` +
+			`JOIN requested_repos AS rr ON rr.repo_prefix = n.repo_prefix ` +
+			`WHERE n.workspace_id = ? AND n.project_id = ? AND n.view_gen = ?`
+		rows, err := s.tx.QueryContext(ctx, query, idsJSON, reposJSON, s.descriptor.Scope.Workspace, s.descriptor.Scope.Project, s.descriptor.SourceGeneration)
 		if err != nil {
 			return nil, fmt.Errorf("scoped projection endpoints: %w", err)
 		}
@@ -212,6 +217,11 @@ func (s *scopedProjectionSnapshot) readEndpointNodes(ctx context.Context, ids []
 		}
 		if err := rows.Close(); err != nil {
 			return nil, fmt.Errorf("scoped projection endpoints: %w", err)
+		}
+		for _, id := range pageIDs {
+			if id != "" && result[id] == nil {
+				result[id] = &graph.Node{ID: id, Kind: graph.NodeKind("unresolved")}
+			}
 		}
 	}
 	return result, nil
