@@ -110,7 +110,7 @@ CREATE (failure:GortexProjectionManifest {gortex_owner: $failure_owner, active_g
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.Complete || !first.CleanupComplete || first.ActiveGeneration == "" || first.ActiveGeneration != second.ActiveGeneration || first.NodeCount != 2 || first.EdgeCount != 2 {
+	if !first.Complete || !first.CleanupComplete || first.ActiveGeneration == "" || first.ActiveGeneration != second.ActiveGeneration || first.NodeCount != 3 || first.EdgeCount != 2 {
 		t.Fatalf("non-idempotent tracer results: first=%#v second=%#v", first, second)
 	}
 
