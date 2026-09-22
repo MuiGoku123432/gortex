@@ -12,23 +12,23 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### General Neo4j Projection
 
-- [ ] **NEO-01**: A user MUST be able to explicitly invoke a language-agnostic projection through both a CLI command and an MCP tool with equivalent scope and behavior.
-- [ ] **NEO-02**: The projection MUST read a selected snapshot from authoritative SQLite under explicit workspace, project, and repository scope and MUST fail closed when required scope is absent or ambiguous.
-- [ ] **NEO-03**: Neo4j connection and credential configuration MUST be explicit, and credentials or secret-bearing connection details MUST NOT appear in command output, logs, plans, progress, or result summaries.
-- [ ] **NEO-04**: Projected nodes MUST use stable projection keys derived from authoritative Gortex identity rather than language-specific or Neo4j-generated identity.
-- [ ] **NEO-05**: Projected relationships MUST use stable projection keys that preserve endpoint identity, relationship kind, and occurrence/provenance distinctions needed to avoid collapsing material evidence.
-- [ ] **NEO-06**: The projection MUST establish or verify the Neo4j constraints required to enforce its stable node and relationship identity contract before applying records.
-- [ ] **NEO-07**: Projection writes MUST use idempotent `MERGE`/upsert semantics so retrying identical work does not create duplicate nodes or relationships.
-- [ ] **NEO-08**: Projection work MUST use bounded batches and transactions rather than loading an unbounded selected graph in one transaction.
-- [ ] **NEO-09**: A dry-run or plan mode MUST report intended scope and materialization actions without mutating Neo4j or SQLite.
-- [ ] **NEO-10**: An invoked projection MUST expose progress and a final result summary with scoped counts and failures while redacting secrets.
-- [ ] **NEO-11**: Cancellation or a Neo4j error MUST stop further work promptly, leave SQLite unchanged, and return an actionable non-success result.
-- [ ] **NEO-12**: Partial failure and retry MUST be safe: completed batches may be replayed without duplication, and the result MUST identify incomplete work without claiming a complete snapshot.
-- [ ] **NEO-13**: Projected records MUST preserve selected repository/workspace/project scope plus relevant provenance, evidence, origin, confidence, lifecycle, and source-location properties present in SQLite.
-- [ ] **NEO-14**: Stale records for the selected scope MUST be identifiable and reconcilable through explicit snapshot ownership/generation or equivalent replace-scope semantics without affecting records outside that scope.
-- [ ] **NEO-15**: Projection MUST never mutate SQLite, accept reverse writes from Neo4j, or participate in synchronous index-time dual-write.
-- [ ] **NEO-16**: Automated acceptance MUST exercise success, retry, stale-record, cancellation/error, and scope-isolation behavior against a disposable Neo4j instance or a protocol seam with equivalent observable guarantees.
-- [ ] **NEO-17**: Neo4j availability MUST be required only when the explicit projection command/tool or its integration tests run; indexing, native queries, daemon startup, and all other Gortex operations MUST remain functional without Neo4j.
+- [x] **NEO-01**: A user MUST be able to explicitly invoke a language-agnostic projection through both a CLI command and an MCP tool with equivalent scope and behavior.
+- [x] **NEO-02**: The projection MUST read a selected snapshot from authoritative SQLite under explicit workspace, project, and repository scope and MUST fail closed when required scope is absent or ambiguous.
+- [x] **NEO-03**: Neo4j connection and credential configuration MUST be explicit, and credentials or secret-bearing connection details MUST NOT appear in command output, logs, plans, progress, or result summaries.
+- [x] **NEO-04**: Projected nodes MUST use stable projection keys derived from authoritative Gortex identity rather than language-specific or Neo4j-generated identity.
+- [x] **NEO-05**: Projected relationships MUST use stable projection keys that preserve endpoint identity, relationship kind, and occurrence/provenance distinctions needed to avoid collapsing material evidence.
+- [x] **NEO-06**: The projection MUST establish or verify the Neo4j constraints required to enforce its stable node and relationship identity contract before applying records.
+- [x] **NEO-07**: Projection writes MUST use idempotent `MERGE`/upsert semantics so retrying identical work does not create duplicate nodes or relationships.
+- [x] **NEO-08**: Projection work MUST use bounded batches and transactions rather than loading an unbounded selected graph in one transaction.
+- [x] **NEO-09**: A dry-run or plan mode MUST report intended scope and materialization actions without mutating Neo4j or SQLite.
+- [x] **NEO-10**: An invoked projection MUST expose progress and a final result summary with scoped counts and failures while redacting secrets.
+- [x] **NEO-11**: Cancellation or a Neo4j error MUST stop further work promptly, leave SQLite unchanged, and return an actionable non-success result.
+- [x] **NEO-12**: Partial failure and retry MUST be safe: completed batches may be replayed without duplication, and the result MUST identify incomplete work without claiming a complete snapshot.
+- [x] **NEO-13**: Projected records MUST preserve selected repository/workspace/project scope plus relevant provenance, evidence, origin, confidence, lifecycle, and source-location properties present in SQLite.
+- [x] **NEO-14**: Stale records for the selected scope MUST be identifiable and reconcilable through explicit snapshot ownership/generation or equivalent replace-scope semantics without affecting records outside that scope.
+- [x] **NEO-15**: Projection MUST never mutate SQLite, accept reverse writes from Neo4j, or participate in synchronous index-time dual-write.
+- [x] **NEO-16**: Automated acceptance MUST exercise success, retry, stale-record, cancellation/error, and scope-isolation behavior against a disposable Neo4j instance or a protocol seam with equivalent observable guarantees.
+- [x] **NEO-17**: Neo4j availability MUST be required only when the explicit projection command/tool or its integration tests run; indexing, native queries, daemon startup, and all other Gortex operations MUST remain functional without Neo4j.
 
 ### Parser Baseline
 
@@ -110,11 +110,11 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Storage Authority and Cypher Boundary
 
-- [ ] **STORE-01**: SQLite MUST remain the sole authoritative read/write store for active graph facts, findings, claims, and review state in v1.0.
-- [ ] **STORE-02**: Deterministic indexing MUST perform one authoritative SQLite commit and MUST NOT dual-write to Neo4j.
-- [ ] **STORE-03**: Neo4j materialization MUST remain a one-way, manually invoked, rebuildable projection derived from SQLite.
-- [ ] **STORE-04**: The explicit projection MUST NOT turn continuous synchronization, index-time dual-write, or Neo4j replacement into a v1.0 requirement.
-- [ ] **STORE-05**: Neo4j availability MUST NOT be required outside explicit projection invocation and projection-specific tests, and no reverse-write path from Neo4j may exist.
+- [x] **STORE-01**: SQLite MUST remain the sole authoritative read/write store for active graph facts, findings, claims, and review state in v1.0.
+- [x] **STORE-02**: Deterministic indexing MUST perform one authoritative SQLite commit and MUST NOT dual-write to Neo4j.
+- [x] **STORE-03**: Neo4j materialization MUST remain a one-way, manually invoked, rebuildable projection derived from SQLite.
+- [x] **STORE-04**: The explicit projection MUST NOT turn continuous synchronization, index-time dual-write, or Neo4j replacement into a v1.0 requirement.
+- [x] **STORE-05**: Neo4j availability MUST NOT be required outside explicit projection invocation and projection-specific tests, and no reverse-write path from Neo4j may exist.
 
 ### Optional AI Context and Provider Policy
 
@@ -202,23 +202,23 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 | Requirement | Roadmap Phase | Status |
 |-------------|---------------|--------|
-| NEO-01 | Phase 1 | Pending |
-| NEO-02 | Phase 1 | Pending |
-| NEO-03 | Phase 1 | Pending |
-| NEO-04 | Phase 1 | Pending |
-| NEO-05 | Phase 1 | Pending |
-| NEO-06 | Phase 1 | Pending |
-| NEO-07 | Phase 1 | Pending |
-| NEO-08 | Phase 1 | Pending |
-| NEO-09 | Phase 1 | Pending |
-| NEO-10 | Phase 1 | Pending |
-| NEO-11 | Phase 1 | Pending |
-| NEO-12 | Phase 1 | Pending |
-| NEO-13 | Phase 1 | Pending |
-| NEO-14 | Phase 1 | Pending |
-| NEO-15 | Phase 1 | Pending |
-| NEO-16 | Phase 1 | Pending |
-| NEO-17 | Phase 1 | Pending |
+| NEO-01 | Phase 1 | Complete |
+| NEO-02 | Phase 1 | Complete |
+| NEO-03 | Phase 1 | Complete |
+| NEO-04 | Phase 1 | Complete |
+| NEO-05 | Phase 1 | Complete |
+| NEO-06 | Phase 1 | Complete |
+| NEO-07 | Phase 1 | Complete |
+| NEO-08 | Phase 1 | Complete |
+| NEO-09 | Phase 1 | Complete |
+| NEO-10 | Phase 1 | Complete |
+| NEO-11 | Phase 1 | Complete |
+| NEO-12 | Phase 1 | Complete |
+| NEO-13 | Phase 1 | Complete |
+| NEO-14 | Phase 1 | Complete |
+| NEO-15 | Phase 1 | Complete |
+| NEO-16 | Phase 1 | Complete |
+| NEO-17 | Phase 1 | Complete |
 | BASE-01 | Phase 2 | Pending |
 | BASE-02 | Phase 2 | Pending |
 | BASE-03 | Phase 2 | Pending |
@@ -276,11 +276,11 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | QUERY-09 | Phase 6 | Pending |
 | QUERY-10 | Phase 6 | Pending |
 | QUERY-11 | Phase 8 | Pending |
-| STORE-01 | Phase 1 | Pending |
-| STORE-02 | Phase 1 | Pending |
-| STORE-03 | Phase 1 | Pending |
-| STORE-04 | Phase 1 | Pending |
-| STORE-05 | Phase 1 | Pending |
+| STORE-01 | Phase 1 | Complete |
+| STORE-02 | Phase 1 | Complete |
+| STORE-03 | Phase 1 | Complete |
+| STORE-04 | Phase 1 | Complete |
+| STORE-05 | Phase 1 | Complete |
 | AI-01 | Phase 7 | Pending |
 | AI-02 | Phase 7 | Pending |
 | AI-03 | Phase 7 | Pending |

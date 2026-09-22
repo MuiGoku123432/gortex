@@ -11,7 +11,7 @@ This milestone now begins with a general, manually invoked projection that mater
 - Integer phases are planned milestone work.
 - Decimal phases are reserved for urgent insertions.
 
-- [ ] **Phase 1: General Neo4j Projection Command** - Materialize a selected SQLite graph snapshot into Neo4j through equivalent explicit CLI and MCP operations.
+- [x] **Phase 1: General Neo4j Projection Command** - Materialize a selected SQLite graph snapshot into Neo4j through equivalent explicit CLI and MCP operations. (completed 2026-09-22)
 - [ ] **Phase 2: Thin Deterministic Native Tracer and Minimum Contracts** - Deliver one trustworthy native COBOL trace after parser/grammar readiness.
 - [ ] **Phase 3: Deterministic COBOL and Mainframe Breadth** - Expand native extraction across COBOL structure, control flow, data, calls, copybooks, IDMS, CICS, and SQL.
 - [ ] **Phase 4: Stable Incremental and Cross-Repository Lifecycle** - Make identity, reconciliation, and scoped resolution stable across reruns, changes, and repositories.
@@ -190,7 +190,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. General Neo4j Projection Command | 7/7 | In Progress|  |
+| 1. General Neo4j Projection Command | 7/7 | Complete    | 2026-09-22 |
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 0/TBD | Deferred: parser/grammar readiness | - |
 | 3. Deterministic COBOL and Mainframe Breadth | 0/TBD | Deferred: parser/grammar readiness | - |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 0/TBD | Deferred: Phase 3 | - |
