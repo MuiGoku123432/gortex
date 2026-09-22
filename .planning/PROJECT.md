@@ -33,6 +33,9 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 - ✓ Analyzer framework (dead code, hotspots, cycles, coverage, routes/models/components, k8s, dbt, cross-repo) — existing
 - ✓ Session notes + durable workspace memory layers — existing
 - ✓ Token-economy wire formats (GCX1, TOON) and body compression — existing
+- ✓ **General Neo4j projection command** — Phase 1 validated 2026-09-22: `gortex neo4j push` and MCP `neo4j_push` materialize an explicit workspace/project/repository SQLite snapshot through one shared request/result contract
+- ✓ **Scoped, retry-safe projection lifecycle** — stable keys, Neo4j constraints, bounded batches, exact-attempt fencing, atomic activation, bounded stale reconciliation, dry-run target planning, progress, cancellation, and truthful incomplete results
+- ✓ **SQLite authority and optional Neo4j** — DB/WAL/SHM plus canonical immutability verified; no index-time dual write, reverse write, background synchronization, or ordinary startup dependency
 
 ### Shipped in this fork
 
@@ -60,9 +63,6 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 
 <!-- Big-picture staged vision. Detailed per-stage scoping is deliberately deferred to milestone/phase planning. -->
 
-- [ ] Deliver the immediate priority: a general, language-agnostic command available through CLI and MCP that projects a selected workspace/project/repository SQLite snapshot into Neo4j
-- [ ] Make projection credentials explicit but non-disclosing, preserve graph scope/provenance/evidence properties, and support constraints, stable keys, bounded batches, retries, stale-record reconciliation, dry-run, progress, cancellation, and partial-failure recovery
-- [ ] Keep Neo4j completely outside indexing and all ordinary Gortex availability paths; SQLite remains the sole read/write authority
 - [ ] Resume COBOL graph extraction only after the required parser/grammar integration is ready
 - [ ] Map the completed parser contract onto gortex's existing node, edge, provenance, identity, and SQLite persistence models
 - [ ] Deliver the first vertical slice as a thin deterministic tracer from one existing COBOL parser node through the native graph and CLI/MCP query surfaces
@@ -117,8 +117,8 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 | Hybrid parser: tree-sitter for copybooks, island regex for programs | Superseded by the completed enhanced parser baseline, which now preserves the required DATA DIVISION, IDMS, CICS, and SQL structures under gortex acceptance tests | Superseded 2026-09-15 |
 | Parser baseline for graph milestone | Pin planning and acceptance evidence to `tree-sitter-cobol-upgrade/main` merge `97ac9f1`; parser changes are not part of this milestone unless a graph-blocking regression is proven | ✓ Decided 2026-09-15 |
 | Native graph before AI enrichment | Deterministic extraction, stable identity, and explicit unresolved gaps must exist before claims can be generated or consumed | ✓ Decided 2026-09-15 |
-| General Neo4j projection is the immediate priority | Users need an explicit CLI/MCP path to materialize selected SQLite graph snapshots now; this capability is language-agnostic and does not depend on COBOL grammar readiness | ✓ Decided 2026-09-21 |
-| SQLite remains sole authority while Neo4j is a downstream projection | A manual, rebuildable projection provides Neo4j utility without split-brain indexing, reverse writes, or making ordinary Gortex operations depend on Neo4j | ✓ Decided 2026-09-21 |
+| General Neo4j projection is the immediate priority | Users need an explicit CLI/MCP path to materialize selected SQLite graph snapshots now; this capability is language-agnostic and does not depend on COBOL grammar readiness | ✓ Implemented and verified in Phase 1, 2026-09-22 |
+| SQLite remains sole authority while Neo4j is a downstream projection | A manual, rebuildable projection provides Neo4j utility without split-brain indexing, reverse writes, or making ordinary Gortex operations depend on Neo4j | ✓ Implemented and verified in Phase 1, 2026-09-22 |
 | Defer COBOL graph phases until parser/grammar readiness | Planning history and baseline `97ac9f1` are preserved, but implementation should not start while required grammars are unavailable | ✓ Decided 2026-09-21 |
 | Run this fork's daemon on an isolated `~/.gortex-fork` store | Keeps the official Homebrew install tracking every other repo while the fork is three minor versions ahead. Verified: fork-only commands leave `~/.gortex` byte-identical | ✓ Verified 2026-08-27 |
 | Drop `COPY REPLACING` and `COPY x OF y` from scope | Measured **zero** occurrences in the estate; building for them would be speculative generality | ✓ Decided 2026-08-27 |
@@ -141,7 +141,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-21 -- v1.0 reprioritized to the general Neo4j projection command; COBOL graph phases remain planned but deferred until parser/grammar readiness.*
+*Last updated: 2026-09-22 -- Phase 1 general Neo4j projection verified complete; COBOL graph phases remain deferred until parser/grammar readiness.*
 
 *Companion docs: `FORK-NOTES.md` (how to run this fork, fix order, upstream
 workflow) and `PythonApps/cobol-kg/HANDOFF.md` (session entry point, corpus,
