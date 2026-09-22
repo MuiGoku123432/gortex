@@ -67,7 +67,7 @@ choices, and the risk is yours once made.
 | Configure a hosted or subprocess **LLM provider** | Prompts derived from your source leave the machine | No provider is configured by default |
 | Enable **federation / proxy** | Graph queries go to the daemons you configure | Off unless configured; read-only by default |
 | Index a repository you do not trust | Its content reaches the agent's context, widening the prompt-injection surface | This is the threat the confinement boundaries exist for |
-| Configure a Neo4j projection profile | The named database principal can create constraints and read/write/delete Gortex-owned projection manifests, nodes, and relationships in that database | Use a dedicated database and principal. Grant only `ACCESS`, `MATCH`, `CREATE`, `MERGE`, `SET PROPERTY`, `DELETE`, and schema constraint privileges required by `gortex neo4j push`; do not grant DBMS administration, user/role management, or unrestricted privileges |
+| Configure a Neo4j projection profile | The named database principal can create constraints and read/write/delete Gortex-owned projection manifests, nodes, and relationships in that database | Use a dedicated database and principal. Apply the Neo4j 5.26 grant set below; `MERGE` is a query clause, not a grantable privilege. Do not grant DBMS administration, user/role management, or unrestricted privileges |
 
 ## What Gortex does not protect you from
 
@@ -181,8 +181,9 @@ from](#what-gortex-does-not-protect-you-from) for what this boundary is not.
 
 - Use a dedicated Neo4j database and a dedicated projection principal for every
   named profile. The profile must select that database explicitly.
-- The principal needs database access, match, create/merge, property update,
-  delete, and constraint-management privileges in that database. Gortex does
+- The principal needs database access, traversal/match, node and relationship
+  creation, property update, deletion, token creation, and constraint
+  management in that database. Gortex does
   not need DBMS administration, database creation/deletion, user or role
   management, alias management, unrestricted procedure execution, or access to
   any other database.
@@ -194,6 +195,29 @@ from](#what-gortex-does-not-protect-you-from) for what this boundary is not.
   output before configuring production credentials. Refuse any operational
   workaround that broadens the principal merely to simplify setup.
 
+For Neo4j Enterprise 5.26, replace `gortex_projection` and `gortex` below with
+the dedicated role and database names. Run these as a security administrator:
+
+```cypher
+GRANT ACCESS ON DATABASE gortex TO gortex_projection;
+GRANT MATCH {*} ON GRAPH gortex NODES *, RELATIONSHIPS * TO gortex_projection;
+GRANT CREATE ON GRAPH gortex NODES *, RELATIONSHIPS * TO gortex_projection;
+GRANT SET PROPERTY {*} ON GRAPH gortex NODES *, RELATIONSHIPS * TO gortex_projection;
+GRANT DELETE ON GRAPH gortex NODES *, RELATIONSHIPS * TO gortex_projection;
+GRANT CREATE NEW LABEL ON DATABASE gortex TO gortex_projection;
+GRANT CREATE NEW TYPE ON DATABASE gortex TO gortex_projection;
+GRANT CREATE NEW PROPERTY NAME ON DATABASE gortex TO gortex_projection;
+GRANT CONSTRAINT MANAGEMENT ON DATABASE gortex TO gortex_projection;
+```
+
+Neo4j Community Edition does not provide role-based graph privilege grants.
+Use a dedicated Community database/process and OS/network controls instead; do
+not represent Community credentials as property-scoped least privilege.
+
+Remote projection profiles must use CA-validated `neo4j+s` or `bolt+s` URIs.
+Unencrypted and `+ssc` schemes are accepted only for explicit loopback hosts,
+primarily the disposable local test lane.
+
 ## Accepted risks
 
 Low-severity risks may be documented here only when their affected boundary,
@@ -204,6 +228,9 @@ blockers and must not be moved into this section.
 | Risk | Severity | Rationale and controls | Owner | Review |
 |---|---|---|---|---|
 | A local process running as the same OS account can use the daemon socket | Low | The socket is `0600` in a `0700` directory; defending against a process already running as the operator is outside the local threat model | Operator | Reassess if multi-user daemon hosting is introduced |
+| Disposable Neo4j test principal has broad authority inside its isolated database | Low | The database contains no production data, binds only to loopback, uses generated credentials, and the harness destroys the container and network after each run | Phase 01 maintainer | Reassess if the disposable lane is allowed to target a persistent or remote server |
+| Pure metadata mapping performs no independent authorization | Low | The mapper has no I/O or target authority; exact scope and owner authorization are enforced by the service/transport, and system owner fields cannot be overwritten by metadata | Projection subsystem owner | Reassess if mapping gains I/O, callbacks, or caller-selectable system fields |
+| CLI and MCP presentation adapters add no independent authorization | Low | Both adapters normalize one shared request and invoke the same fail-closed service; parity tests prohibit bypass fields and direct credentials | CLI/MCP owner | Reassess if either adapter gains a separate projection path or authority-bearing option |
 
 ### Build / supply chain
 
