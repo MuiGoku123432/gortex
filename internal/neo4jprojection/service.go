@@ -46,6 +46,8 @@ type Result struct {
 	EdgeCount            int      `json:"edge_count"`
 	StaleNodeCount       int      `json:"stale_node_count"`
 	StaleEdgeCount       int      `json:"stale_edge_count"`
+	LogicalRemovedNodes  int      `json:"logical_removed_node_count"`
+	LogicalRemovedEdges  int      `json:"logical_removed_edge_count"`
 	Phase                string   `json:"phase"`
 	Complete             bool     `json:"complete"`
 	CleanupComplete      bool     `json:"cleanup_complete"`
@@ -84,10 +86,12 @@ type IntendedPlan struct {
 }
 
 type TargetPlan struct {
-	ActiveGeneration   string
-	StaleNodes         int
-	StaleRelationships int
-	MissingConstraints []string
+	ActiveGeneration    string
+	StaleNodes          int
+	StaleRelationships  int
+	LogicalRemovedNodes int
+	LogicalRemovedEdges int
+	MissingConstraints  []string
 }
 
 type MaterializedCounts struct {
@@ -357,6 +361,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 		}
 		result.ActiveGeneration = plan.ActiveGeneration
 		result.StaleNodeCount, result.StaleEdgeCount = plan.StaleNodes, plan.StaleRelationships
+		result.LogicalRemovedNodes, result.LogicalRemovedEdges = plan.LogicalRemovedNodes, plan.LogicalRemovedEdges
 		result.MissingConstraints = plan.MissingConstraints
 		if len(plan.MissingConstraints) > 0 {
 			result.PlannedActions = append(result.PlannedActions, "create_missing_constraints")

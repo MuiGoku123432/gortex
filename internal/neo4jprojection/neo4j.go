@@ -81,11 +81,14 @@ func (t *neo4jTransport) Plan(ctx context.Context, owner string, intended Intend
 OPTIONAL MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
 WITH coalesce(m.active_generation, '') AS active_generation
 OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner})
-WHERE NOT n.gortex_logical_key IN $node_keys
-WITH active_generation, count(n) AS stale_nodes
+WITH active_generation,
+     count(n) AS physical_nodes,
+     count(CASE WHEN NOT n.gortex_logical_key IN $node_keys THEN 1 END) AS logical_removed_nodes
 OPTIONAL MATCH ()-[r {gortex_owner: $owner}]->()
-WHERE NOT r.gortex_logical_key IN $edge_keys
-RETURN active_generation, stale_nodes, count(r) AS stale_relationships`, map[string]any{"owner": owner, "node_keys": intended.NodeLogicalKeys, "edge_keys": intended.EdgeLogicalKeys})
+RETURN active_generation, physical_nodes,
+       count(r) AS physical_relationships,
+       logical_removed_nodes,
+       count(CASE WHEN NOT r.gortex_logical_key IN $edge_keys THEN 1 END) AS logical_removed_relationships`, map[string]any{"owner": owner, "node_keys": intended.NodeLogicalKeys, "edge_keys": intended.EdgeLogicalKeys})
 	if err != nil {
 		return TargetPlan{}, classifyNeo4jError(err)
 	}
@@ -117,7 +120,14 @@ RETURN active_generation, stale_nodes, count(r) AS stale_relationships`, map[str
 			missing = append(missing, name)
 		}
 	}
-	return TargetPlan{ActiveGeneration: activeGeneration, StaleNodes: int(recordCount(result, "stale_nodes")), StaleRelationships: int(recordCount(result, "stale_relationships")), MissingConstraints: missing}, nil
+	return TargetPlan{
+		ActiveGeneration:    activeGeneration,
+		StaleNodes:          int(recordCount(result, "physical_nodes")),
+		StaleRelationships:  int(recordCount(result, "physical_relationships")),
+		LogicalRemovedNodes: int(recordCount(result, "logical_removed_nodes")),
+		LogicalRemovedEdges: int(recordCount(result, "logical_removed_relationships")),
+		MissingConstraints:  missing,
+	}, nil
 }
 
 func constraintQueries(relationshipTypes []string) []string {
@@ -384,28 +394,106 @@ RETURN m.active_generation AS active_generation`, map[string]any{
 }
 
 func (t *neo4jTransport) Reconcile(ctx context.Context, owner, operation, active, attempt string, batchSize int) (CleanupCounts, error) {
+	params := func() map[string]any {
+		return map[string]any{
+			"owner": owner, "operation": operation, "active": active, "attempt": attempt,
+			"lease_until": time.Now().Add(t.leaseDuration).UTC().Format(time.RFC3339Nano), "batch_size": batchSize,
+		}
+	}
 	for {
-		result, err := t.query(ctx, `MATCH (m:GortexProjectionManifest {gortex_owner: $owner}) WHERE m.operation_id = $operation AND m.active_generation = $active AND m.attempt_id = $attempt AND m.operation_state = 'cleanup' AND m.lease_until >= datetime() SET m.lease_until = datetime($lease_until) WITH m MATCH ()-[r {gortex_owner: $owner}]->() WHERE r.gortex_generation <> $active WITH m, r LIMIT $batch_size DELETE r RETURN count(r) AS deleted`, map[string]any{"owner": owner, "operation": operation, "active": active, "attempt": attempt, "lease_until": time.Now().Add(t.leaseDuration).UTC().Format(time.RFC3339Nano), "batch_size": batchSize})
+		result, err := t.query(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.active_generation = $active
+  AND m.attempt_id = $attempt AND m.operation_state = 'cleanup'
+  AND m.lease_until >= datetime()
+SET m.lease_until = datetime($lease_until)
+CALL (m) {
+  OPTIONAL MATCH ()-[r {gortex_owner: $owner}]->()
+  WHERE r.gortex_generation <> $active
+  WITH r LIMIT $batch_size
+  DELETE r
+  RETURN count(r) AS deleted
+}
+RETURN true AS fenced, deleted`, params())
 		if err != nil {
 			return t.cleanupCensus(ctx, owner, active, classifyNeo4jError(err))
 		}
-		if recordCount(result, "deleted") == 0 {
+		deleted, fenceErr := cleanupDeleteResult(result, owner)
+		if fenceErr != nil {
+			return t.cleanupCensus(ctx, owner, active, fenceErr)
+		}
+		if deleted == 0 {
 			break
 		}
 	}
 	for {
-		result, err := t.query(ctx, `MATCH (m:GortexProjectionManifest {gortex_owner: $owner}) WHERE m.operation_id = $operation AND m.active_generation = $active AND m.attempt_id = $attempt AND m.operation_state = 'cleanup' AND m.lease_until >= datetime() SET m.lease_until = datetime($lease_until) WITH m MATCH (n:GortexNode {gortex_owner: $owner}) WHERE n.gortex_generation <> $active AND NOT (n)--() WITH m, n LIMIT $batch_size DELETE n RETURN count(n) AS deleted`, map[string]any{"owner": owner, "operation": operation, "active": active, "attempt": attempt, "lease_until": time.Now().Add(t.leaseDuration).UTC().Format(time.RFC3339Nano), "batch_size": batchSize})
+		result, err := t.query(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.active_generation = $active
+  AND m.attempt_id = $attempt AND m.operation_state = 'cleanup'
+  AND m.lease_until >= datetime()
+SET m.lease_until = datetime($lease_until)
+CALL (m) {
+  OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner})
+  WHERE n.gortex_generation <> $active AND NOT (n)--()
+  WITH n LIMIT $batch_size
+  DELETE n
+  RETURN count(n) AS deleted
+}
+RETURN true AS fenced, deleted`, params())
 		if err != nil {
 			return t.cleanupCensus(ctx, owner, active, classifyNeo4jError(err))
 		}
-		if recordCount(result, "deleted") == 0 {
+		deleted, fenceErr := cleanupDeleteResult(result, owner)
+		if fenceErr != nil {
+			return t.cleanupCensus(ctx, owner, active, fenceErr)
+		}
+		if deleted == 0 {
 			break
 		}
 	}
-	if err := t.execute(ctx, `MATCH (m:GortexProjectionManifest {gortex_owner: $owner, active_generation: $active}) WHERE m.operation_id = $operation AND m.attempt_id = $attempt AND m.operation_state = 'cleanup' SET m.cleanup_complete = true, m.pending_generation = '', m.operation_id = '', m.attempt_id = '', m.operation_state = 'idle'`, map[string]any{"owner": owner, "operation": operation, "active": active, "attempt": attempt}); err != nil {
+	result, err := t.query(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.active_generation = $active
+  AND m.attempt_id = $attempt AND m.operation_state = 'cleanup'
+  AND m.lease_until >= datetime()
+OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner})
+WHERE n.gortex_generation <> $active
+WITH m, count(n) AS nodes
+OPTIONAL MATCH ()-[r {gortex_owner: $owner}]->()
+WHERE r.gortex_generation <> $active
+WITH m, nodes, count(r) AS relationships
+FOREACH (_ IN CASE WHEN nodes = 0 AND relationships = 0 THEN [1] ELSE [] END |
+  SET m.cleanup_complete = true, m.pending_generation = '', m.operation_id = '',
+      m.attempt_id = '', m.operation_state = 'idle'
+)
+RETURN nodes, relationships, nodes = 0 AND relationships = 0 AS released`, map[string]any{
+		"owner": owner, "operation": operation, "active": active, "attempt": attempt,
+	})
+	if err != nil {
 		return t.cleanupCensus(ctx, owner, active, classifyNeo4jError(err))
 	}
+	if len(result.Records) != 1 {
+		return t.cleanupCensus(ctx, owner, active, fmt.Errorf("projection owner %q lost its cleanup lease", owner))
+	}
+	releasedValue, _ := result.Records[0].Get("released")
+	if released, _ := releasedValue.(bool); !released {
+		return CleanupCounts{
+			Nodes: int(recordCount(result, "nodes")), Relationships: int(recordCount(result, "relationships")),
+		}, ErrCleanupIncomplete
+	}
 	return CleanupCounts{}, nil
+}
+
+func cleanupDeleteResult(result *neo4j.EagerResult, owner string) (int64, error) {
+	if result == nil || len(result.Records) != 1 {
+		return 0, fmt.Errorf("projection owner %q lost its cleanup lease", owner)
+	}
+	fencedValue, _ := result.Records[0].Get("fenced")
+	if fenced, _ := fencedValue.(bool); !fenced {
+		return 0, fmt.Errorf("projection owner %q lost its cleanup lease", owner)
+	}
+	return recordCount(result, "deleted"), nil
 }
 
 func (t *neo4jTransport) cleanupCensus(ctx context.Context, owner, active string, cause error) (CleanupCounts, error) {

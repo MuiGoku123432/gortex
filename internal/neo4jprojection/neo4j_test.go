@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	neo4j "github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/zzet/gortex/internal/graph"
 )
 
@@ -194,6 +195,34 @@ func TestNeo4jAbandonedAttemptRecovery(t *testing.T) {
 	transport.leaseUntil = time.Now().Add(time.Minute)
 	if _, err := transport.Acquire(context.Background(), "owner", "other", "other-generation", "other-attempt", time.Now().Add(time.Minute)); err == nil {
 		t.Fatal("live concurrent attempt was taken over")
+	}
+}
+
+func TestNeo4jCleanupDeleteDistinguishesFenceLossFromZeroRows(t *testing.T) {
+	zero := &neo4j.EagerResult{Records: []*neo4j.Record{{Values: []any{true, int64(0)}, Keys: []string{"fenced", "deleted"}}}}
+	if deleted, err := cleanupDeleteResult(zero, "owner"); err != nil || deleted != 0 {
+		t.Fatalf("fenced zero delete = %d, %v", deleted, err)
+	}
+	if _, err := cleanupDeleteResult(&neo4j.EagerResult{}, "owner"); err == nil {
+		t.Fatal("empty result was accepted as a fenced zero delete")
+	}
+}
+
+func TestNeo4jCleanupQueriesFenceReleaseAndAssertNoStaleRecords(t *testing.T) {
+	source, err := os.ReadFile("neo4j.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{
+		"RETURN true AS fenced, deleted",
+		"AND m.lease_until >= datetime()",
+		"nodes = 0 AND relationships = 0 AS released",
+		"SET m.cleanup_complete = true",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("cleanup protocol missing %q", required)
+		}
 	}
 }
 
