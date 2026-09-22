@@ -217,6 +217,7 @@ func TestNeo4jCleanupQueriesFenceReleaseAndAssertNoStaleRecords(t *testing.T) {
 	for _, required := range []string{
 		"RETURN true AS fenced, deleted",
 		"AND m.lease_until >= datetime()",
+		"SET m.lease_until = datetime($lease_until)\nWITH m\nCALL (m)",
 		"nodes = 0 AND relationships = 0 AS released",
 		"SET m.cleanup_complete = true",
 	} {

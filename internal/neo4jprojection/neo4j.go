@@ -419,6 +419,7 @@ WHERE m.operation_id = $operation AND m.active_generation = $active
   AND m.attempt_id = $attempt AND m.operation_state = 'cleanup'
   AND m.lease_until >= datetime()
 SET m.lease_until = datetime($lease_until)
+WITH m
 CALL (m) {
   OPTIONAL MATCH ()-[r {gortex_owner: $owner}]->()
   WHERE r.gortex_generation <> $active
@@ -448,6 +449,7 @@ WHERE m.operation_id = $operation AND m.active_generation = $active
   AND m.attempt_id = $attempt AND m.operation_state = 'cleanup'
   AND m.lease_until >= datetime()
 SET m.lease_until = datetime($lease_until)
+WITH m
 CALL (m) {
   OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner})
   WHERE n.gortex_generation <> $active AND NOT (n)--()
