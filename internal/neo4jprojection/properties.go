@@ -79,31 +79,52 @@ func appendMetadata(properties map[string]any, metadata map[string]any) projecti
 	if len(metadata) == 0 {
 		return warnings
 	}
-	keys := make([]string, 0, len(metadata))
+	budget := metadataBudget{}
+	keys := make([]string, 0, min(len(metadata), maxMetadataElements))
 	for key := range metadata {
+		if sensitiveMetadataKey(key) {
+			warnings.Secret++
+			continue
+		}
+		// Charge each source key before retaining it for sorting. The factor
+		// bounds the original key, escaped property name, key-map entry, and
+		// JSON quoting/separator allocation before any of those are built.
+		budget.elements++
+		budget.bytes += len(key)*4 + len("meta_\"\":\"\",")
+		if budget.elements > maxMetadataElements || budget.bytes > maxMetadataBytes {
+			warnings.Unsupported += len(metadata) - warnings.Secret - len(keys)
+			return warnings
+		}
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	keyMap := make(map[string]string)
 	encodings := make(map[string]string)
 	used := make(map[string]string)
-	budget := metadataBudget{}
 	for _, key := range keys {
-		if sensitiveMetadataKey(key) {
-			warnings.Secret++
-			continue
-		}
 		encoded := encodeMetadataKey(key)
 		if prior, exists := used[encoded]; exists && prior != key {
 			encoded += "_" + projectionDigest("", key)[1:9]
 		}
 		used[encoded] = key
+		propertyKey := "meta_" + encoded
+		before := budget
 		value, encoding, ok := projectMetadataValueWithBudget(metadata[key], &budget)
 		if !ok {
 			warnings.Unsupported++
 			continue
 		}
-		propertyKey := "meta_" + encoded
+		// Charge the generated encoding-map entry only when present. Key-map
+		// space was conservatively charged during the allocation-safe preflight.
+		if encoding != "" {
+			budget.elements++
+			budget.bytes += len(propertyKey) + len(encoding) + len("\"\":\"\",")
+		}
+		if budget.elements > maxMetadataElements || budget.bytes > maxMetadataBytes {
+			budget = before
+			warnings.Unsupported++
+			continue
+		}
 		properties[propertyKey] = value
 		keyMap[propertyKey] = key
 		if encoding != "" {

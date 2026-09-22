@@ -2,6 +2,7 @@ package neo4jprojection
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"os"
 	"slices"
@@ -150,6 +151,42 @@ func TestProjectionMetadataBudgets(t *testing.T) {
 		}
 		if _, second := properties["meta_second"]; second {
 			t.Fatal("cumulative budget overflow was retained")
+		}
+	})
+	t.Run("many long keys and generated maps", func(t *testing.T) {
+		metadata := make(map[string]any, maxMetadataElements)
+		for i := range maxMetadataElements {
+			metadata[fmt.Sprintf("%08d-%s", i, strings.Repeat("k", 128))] = "x"
+		}
+		properties := map[string]any{}
+		warnings := appendMetadata(properties, metadata)
+		if warnings.Unsupported == 0 {
+			t.Fatal("metadata envelope exceeding key/generated-map budget was accepted")
+		}
+		encoded, err := canonicalJSON(properties)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(encoded) > maxMetadataBytes {
+			t.Fatalf("projected metadata envelope = %d bytes, max %d", len(encoded), maxMetadataBytes)
+		}
+	})
+	t.Run("escaped collision map budget", func(t *testing.T) {
+		metadata := make(map[string]any)
+		for i := range maxMetadataElements {
+			metadata[fmt.Sprintf("collision/%08d/%s", i, strings.Repeat("?", 32))] = []string{"value"}
+		}
+		properties := map[string]any{}
+		warnings := appendMetadata(properties, metadata)
+		if warnings.Unsupported == 0 {
+			t.Fatal("escaped key-map and encoding-marker expansion was accepted without rejection")
+		}
+		encoded, err := canonicalJSON(properties)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(encoded) > maxMetadataBytes {
+			t.Fatalf("generated metadata properties = %d bytes, max %d", len(encoded), maxMetadataBytes)
 		}
 	})
 }
