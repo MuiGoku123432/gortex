@@ -2,6 +2,8 @@ package neo4jprojection
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -60,6 +62,7 @@ type ProjectionBatch struct {
 	Owner             string
 	OperationID       string
 	PendingGeneration string
+	AttemptID         string
 	SourceGeneration  int64
 	Nodes             []*graph.Node
 	Edges             []graph.ScopedEdgeRow
@@ -70,16 +73,22 @@ type CleanupCounts struct {
 	Relationships int
 }
 
+type MaterializedCounts struct {
+	Nodes         int
+	Relationships int
+}
+
 var ErrCleanupIncomplete = errors.New("neo4j projection cleanup incomplete")
 
 // Transport is an invocation-local projection target. Activate is the only
 // operation allowed to change the exact owner's visible generation pointer.
 type Transport interface {
 	Inspect(context.Context, bool) error
-	Acquire(context.Context, string, string, string) (string, error)
-	Abort(context.Context, string, string, string) error
+	Acquire(context.Context, string, string, string, string, time.Time) (string, error)
+	Abort(context.Context, string, string, string, string, int) error
 	Stage(context.Context, ProjectionBatch) error
-	Activate(context.Context, string, string, string, string, Result) error
+	MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error)
+	Activate(context.Context, string, string, string, string, string, Result) error
 	Reconcile(context.Context, string, string, int) (CleanupCounts, error)
 	Close(context.Context) error
 }
@@ -240,9 +249,14 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 		report(result.Phase, result.NodeCount+result.EdgeCount)
 		return result, nil
 	}
+	attemptBytes := make([]byte, 16)
+	if _, err := rand.Read(attemptBytes); err != nil {
+		return result, fmt.Errorf("create projection attempt: %w", err)
+	}
+	attemptID := hex.EncodeToString(attemptBytes)
 	result.Phase = "locking"
 	report(result.Phase, 0)
-	prior, err := transport.Acquire(ctx, request.Owner, request.OperationID, result.PendingGeneration)
+	prior, err := transport.Acquire(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(30*time.Second))
 	if err != nil {
 		return result, fmt.Errorf("acquire projection owner: %w", err)
 	}
@@ -250,7 +264,13 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	activated := false
 	defer func() {
 		if retErr != nil && !activated {
-			retErr = errors.Join(retErr, transport.Abort(context.WithoutCancel(ctx), request.Owner, request.OperationID, result.PendingGeneration))
+			abortTimeout, _ := time.ParseDuration(request.TransactionTimeout)
+			if abortTimeout <= 0 {
+				abortTimeout = neo4jTransactionTimeout
+			}
+			abortCtx, abortCancel := context.WithTimeout(context.WithoutCancel(ctx), abortTimeout)
+			defer abortCancel()
+			retErr = errors.Join(retErr, transport.Abort(abortCtx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, request.BatchSize))
 		}
 	}()
 	result.Phase = "staging"
@@ -258,7 +278,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	processed, lastReport := 0, time.Now()
 	stage := func(nodes []*graph.Node, edges []graph.ScopedEdgeRow) error {
 		for len(nodes)+len(edges) > 0 {
-			batch := ProjectionBatch{Owner: request.Owner, OperationID: request.OperationID, PendingGeneration: result.PendingGeneration, SourceGeneration: descriptor.SourceGeneration}
+			batch := ProjectionBatch{Owner: request.Owner, OperationID: request.OperationID, PendingGeneration: result.PendingGeneration, AttemptID: attemptID, SourceGeneration: descriptor.SourceGeneration}
 			takeNodes := min(len(nodes), request.BatchSize)
 			batch.Nodes, nodes = nodes[:takeNodes], nodes[takeNodes:]
 			remaining := request.BatchSize - takeNodes
@@ -313,9 +333,17 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	if err != nil {
 		return result, fmt.Errorf("stage projection: %w", err)
 	}
+	result.Phase = "marking_complete"
+	report(result.Phase, processed)
+	materialized, err := transport.MarkComplete(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID)
+	if err != nil {
+		return result, fmt.Errorf("mark projection complete: %w", err)
+	}
+	result.NodeCount = materialized.Nodes
+	result.EdgeCount = materialized.Relationships
 	result.Phase = "activating"
 	report(result.Phase, processed)
-	if err := transport.Activate(ctx, request.Owner, request.OperationID, result.PendingGeneration, prior, result); err != nil {
+	if err := transport.Activate(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, prior, result); err != nil {
 		return result, fmt.Errorf("activate projection: %w", err)
 	}
 	activated = true

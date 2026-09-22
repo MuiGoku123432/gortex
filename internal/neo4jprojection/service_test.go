@@ -39,17 +39,20 @@ type tracerTransport struct {
 }
 
 func (t *tracerTransport) Inspect(context.Context, bool) error { return t.record("inspect") }
-func (t *tracerTransport) Acquire(context.Context, string, string, string) (string, error) {
+func (t *tracerTransport) Acquire(context.Context, string, string, string, string, time.Time) (string, error) {
 	if err := t.record("lock"); err != nil {
 		return "", err
 	}
 	return t.active, nil
 }
-func (t *tracerTransport) Abort(context.Context, string, string, string) error {
+func (t *tracerTransport) Abort(context.Context, string, string, string, string, int) error {
 	return t.record("abort")
 }
 func (t *tracerTransport) Stage(context.Context, ProjectionBatch) error { return t.record("stage") }
-func (t *tracerTransport) Activate(_ context.Context, owner, operation, generation, prior string, result Result) error {
+func (t *tracerTransport) MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error) {
+	return MaterializedCounts{Nodes: 2, Relationships: 1}, t.record("mark_complete")
+}
+func (t *tracerTransport) Activate(_ context.Context, owner, operation, generation, attempt, prior string, result Result) error {
 	if err := t.record("activate"); err != nil {
 		return err
 	}
@@ -124,10 +127,12 @@ type batchTransport struct {
 }
 
 func (t *batchTransport) Inspect(context.Context, bool) error { return nil }
-func (t *batchTransport) Acquire(context.Context, string, string, string) (string, error) {
+func (t *batchTransport) Acquire(context.Context, string, string, string, string, time.Time) (string, error) {
 	return "prior", nil
 }
-func (t *batchTransport) Abort(context.Context, string, string, string) error { return nil }
+func (t *batchTransport) Abort(context.Context, string, string, string, string, int) error {
+	return nil
+}
 func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -139,7 +144,23 @@ func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 	}
 	return nil
 }
-func (t *batchTransport) Activate(context.Context, string, string, string, string, Result) error {
+func (t *batchTransport) MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error) {
+	counts := MaterializedCounts{}
+	seen := map[string]bool{}
+	for _, batch := range t.batches {
+		counts.Relationships += len(batch.Edges)
+		for _, node := range batch.Nodes {
+			seen[node.ID] = true
+		}
+		for _, row := range batch.Edges {
+			seen[row.Edge.From] = true
+			seen[row.Edge.To] = true
+		}
+	}
+	counts.Nodes = len(seen)
+	return counts, nil
+}
+func (t *batchTransport) Activate(context.Context, string, string, string, string, string, Result) error {
 	return nil
 }
 func (t *batchTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
@@ -254,7 +275,7 @@ func TestNeo4jTracerContract(t *testing.T) {
 		if !result.Complete || result.ActiveGeneration == "" || result.ActiveGeneration == "generation-old" || result.NodeCount != 2 || result.EdgeCount != 1 {
 			t.Fatalf("unexpected result: %#v", result)
 		}
-		if want := []string{"inspect", "lock", "stage", "stage", "activate", "cleanup", "close"}; !reflect.DeepEqual(transport.operations, want) {
+		if want := []string{"inspect", "lock", "stage", "stage", "mark_complete", "activate", "cleanup", "close"}; !reflect.DeepEqual(transport.operations, want) {
 			t.Fatalf("operations = %v, want %v", transport.operations, want)
 		}
 		if !snapshot.closed || !transport.closed {

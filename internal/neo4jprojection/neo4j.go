@@ -85,15 +85,21 @@ func constraintQueries(relationshipTypes []string) []string {
 	return queries
 }
 
-func (t *neo4jTransport) Acquire(ctx context.Context, owner, operation, generation string) (string, error) {
+func (t *neo4jTransport) Acquire(ctx context.Context, owner, operation, generation, attempt string, leaseUntil time.Time) (string, error) {
 	result, err := t.query(ctx, `
 MERGE (m:GortexProjectionManifest {gortex_owner: $owner})
-ON CREATE SET m.active_generation = '', m.pending_generation = '', m.operation_id = ''
+ON CREATE SET m.active_generation = '', m.pending_generation = '', m.operation_id = '', m.operation_state = 'idle'
 WITH m
-WHERE m.operation_id = '' OR (m.operation_id = $operation AND m.pending_generation = $generation)
-SET m.pending_generation = $generation, m.operation_id = $operation,
+WHERE m.operation_id = '' OR m.operation_state IN ['failed', 'abandoned']
+   OR m.lease_until < datetime()
+   OR (m.operation_id = $operation AND m.pending_generation = $generation AND m.attempt_id = $attempt)
+SET m.pending_generation = $generation, m.operation_id = $operation, m.attempt_id = $attempt,
+    m.operation_state = 'active', m.lease_until = datetime($lease_until),
     m.pending_complete = false, m.cleanup_complete = false
-RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner, "operation": operation, "generation": generation})
+RETURN m.active_generation AS active_generation`, map[string]any{
+		"owner": owner, "operation": operation, "generation": generation,
+		"attempt": attempt, "lease_until": leaseUntil.UTC().Format(time.RFC3339Nano),
+	})
 	if err != nil {
 		return "", classifyNeo4jError(err)
 	}
@@ -105,22 +111,53 @@ RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner,
 	return value, nil
 }
 
-func (t *neo4jTransport) Abort(ctx context.Context, owner, operation, generation string) error {
-	_, err := t.query(ctx, `
+func (t *neo4jTransport) Abort(ctx context.Context, owner, operation, generation, attempt string, batchSize int) error {
+	if err := t.execute(ctx, `
 MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
-WHERE m.operation_id = $operation AND m.pending_generation = $generation
-SET m.operation_id = '', m.pending_generation = '', m.pending_complete = false
-WITH m
-OPTIONAL MATCH ()-[r {gortex_owner: $owner, gortex_generation: $generation}]->()
-DELETE r
-WITH m
-OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner, gortex_generation: $generation})
-DETACH DELETE n
-RETURN m.active_generation AS active_generation`, map[string]any{"owner": owner, "operation": operation, "generation": generation})
-	return classifyNeo4jError(err)
+WHERE m.operation_id = $operation AND m.pending_generation = $generation AND m.attempt_id = $attempt
+SET m.operation_state = 'failed', m.pending_complete = false`, map[string]any{"owner": owner, "operation": operation, "generation": generation, "attempt": attempt}); err != nil {
+		return classifyNeo4jError(err)
+	}
+	for {
+		result, err := t.query(ctx, `MATCH ()-[r {gortex_owner: $owner, gortex_generation: $generation}]->() WITH r LIMIT $batch_size DELETE r RETURN count(r) AS deleted`, map[string]any{"owner": owner, "generation": generation, "batch_size": batchSize})
+		if err != nil {
+			return classifyNeo4jError(err)
+		}
+		if recordCount(result, "deleted") == 0 {
+			break
+		}
+	}
+	for {
+		result, err := t.query(ctx, `MATCH (n:GortexNode {gortex_owner: $owner, gortex_generation: $generation}) WHERE NOT (n)--() WITH n LIMIT $batch_size DELETE n RETURN count(n) AS deleted`, map[string]any{"owner": owner, "generation": generation, "batch_size": batchSize})
+		if err != nil {
+			return classifyNeo4jError(err)
+		}
+		if recordCount(result, "deleted") == 0 {
+			break
+		}
+	}
+	return t.execute(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.pending_generation = $generation AND m.attempt_id = $attempt AND m.operation_state = 'failed'
+SET m.operation_id = '', m.pending_generation = '', m.attempt_id = '', m.operation_state = 'idle'`, map[string]any{"owner": owner, "operation": operation, "generation": generation, "attempt": attempt})
 }
 
 func (t *neo4jTransport) Stage(ctx context.Context, batch ProjectionBatch) error {
+	lock, err := t.query(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.pending_generation = $generation
+  AND m.attempt_id = $attempt AND m.operation_state = 'active'
+SET m.lease_until = datetime() + duration('PT30S')
+RETURN m.active_generation AS active_generation`, map[string]any{
+		"owner": batch.Owner, "operation": batch.OperationID,
+		"generation": batch.PendingGeneration, "attempt": batch.AttemptID,
+	})
+	if err != nil {
+		return classifyNeo4jError(err)
+	}
+	if len(lock.Records) != 1 {
+		return fmt.Errorf("projection owner %q staging lost its attempt lease", batch.Owner)
+	}
 	nodesByLabel := make(map[string][]map[string]any)
 	knownNodes := make(map[string]struct{}, len(batch.Nodes))
 	for _, node := range batch.Nodes {
@@ -216,16 +253,37 @@ func relationshipMergeQuery(relationshipType string) string {
 	return fmt.Sprintf("UNWIND $rows AS row\nMATCH (source:GortexNode {gortex_physical_key: row.source})\nMATCH (target:GortexNode {gortex_physical_key: row.target})\nMERGE (source)-[r:%s {gortex_physical_key: row.physical}]->(target)\nSET r += row.properties", relationshipType)
 }
 
-func (t *neo4jTransport) Activate(ctx context.Context, owner, operation, generation, prior string, result Result) error {
+func (t *neo4jTransport) MarkComplete(ctx context.Context, owner, operation, generation, attempt string) (MaterializedCounts, error) {
 	queryResult, err := t.query(ctx, `
 MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
-WHERE m.operation_id = $operation AND m.pending_generation = $generation
+WHERE m.operation_id = $operation AND m.pending_generation = $generation AND m.attempt_id = $attempt
+OPTIONAL MATCH (n:GortexNode {gortex_owner: $owner, gortex_generation: $generation})
+WITH m, count(n) AS nodes
+OPTIONAL MATCH ()-[r {gortex_owner: $owner, gortex_generation: $generation}]->()
+WITH m, nodes, count(r) AS relationships
+SET m.pending_complete = true, m.expected_node_count = nodes, m.expected_edge_count = relationships
+RETURN nodes, relationships`, map[string]any{"owner": owner, "operation": operation, "generation": generation, "attempt": attempt})
+	if err != nil {
+		return MaterializedCounts{}, classifyNeo4jError(err)
+	}
+	if len(queryResult.Records) != 1 {
+		return MaterializedCounts{}, fmt.Errorf("projection owner %q lost its pending generation before completion", owner)
+	}
+	return MaterializedCounts{Nodes: int(recordCount(queryResult, "nodes")), Relationships: int(recordCount(queryResult, "relationships"))}, nil
+}
+
+func (t *neo4jTransport) Activate(ctx context.Context, owner, operation, generation, attempt, prior string, result Result) error {
+	queryResult, err := t.query(ctx, `
+MATCH (m:GortexProjectionManifest {gortex_owner: $owner})
+WHERE m.operation_id = $operation AND m.pending_generation = $generation AND m.attempt_id = $attempt
+  AND m.pending_complete = true
+  AND m.expected_node_count = $node_count AND m.expected_edge_count = $edge_count
   AND coalesce(m.active_generation, '') = $prior
-SET m.active_generation = $generation, m.pending_generation = '', m.operation_id = '',
+SET m.active_generation = $generation, m.pending_generation = '', m.operation_id = '', m.attempt_id = '', m.operation_state = 'idle',
     m.source_generation = $source_generation, m.node_count = $node_count,
     m.edge_count = $edge_count, m.complete = true, m.cleanup_complete = false
 RETURN m.active_generation AS active_generation`, map[string]any{
-		"owner": owner, "operation": operation, "generation": generation, "prior": prior,
+		"owner": owner, "operation": operation, "generation": generation, "attempt": attempt, "prior": prior,
 		"source_generation": result.SourceGeneration, "node_count": result.NodeCount, "edge_count": result.EdgeCount,
 	})
 	if err != nil {
