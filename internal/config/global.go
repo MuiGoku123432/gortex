@@ -167,11 +167,16 @@ func (gc *GlobalConfig) ResolveNeo4jProfile(name string) (ResolvedNeo4jProfile, 
 	if password == "" {
 		return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: environment variable %s is empty", name, profile.PasswordEnv)
 	}
+	host := strings.ToLower(parsed.Hostname())
+	loopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
 	switch strings.ToLower(parsed.Scheme) {
-	case "neo4j+s", "neo4j+ssc", "bolt+s", "bolt+ssc":
+	case "neo4j+s", "bolt+s":
+	case "neo4j+ssc", "bolt+ssc":
+		if !loopback {
+			return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: self-signed tls is permitted only for loopback hosts", name)
+		}
 	case "neo4j", "bolt":
-		host := strings.ToLower(parsed.Hostname())
-		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		if !loopback {
 			return ResolvedNeo4jProfile{}, fmt.Errorf("neo4j profile %q: unencrypted uri is permitted only for loopback hosts", name)
 		}
 	default:
