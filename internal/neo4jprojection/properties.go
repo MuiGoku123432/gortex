@@ -86,12 +86,8 @@ func appendMetadata(properties map[string]any, metadata map[string]any) projecti
 			warnings.Secret++
 			continue
 		}
-		// Charge each source key before retaining it for sorting. The factor
-		// bounds the original key, escaped property name, key-map entry, and
-		// JSON quoting/separator allocation before any of those are built.
 		budget.elements++
-		budget.bytes += len(key)*4 + len("meta_\"\":\"\",")
-		if budget.elements > maxMetadataElements || budget.bytes > maxMetadataBytes {
+		if budget.elements > maxMetadataElements {
 			warnings.Unsupported += len(metadata) - warnings.Secret - len(keys)
 			return warnings
 		}
@@ -114,22 +110,37 @@ func appendMetadata(properties map[string]any, metadata map[string]any) projecti
 			warnings.Unsupported++
 			continue
 		}
-		// Charge the generated encoding-map entry only when present. Key-map
-		// space was conservatively charged during the allocation-safe preflight.
-		if encoding != "" {
-			budget.elements++
-			budget.bytes += len(propertyKey) + len(encoding) + len("\"\":\"\",")
+
+		candidate := make(map[string]any, len(properties)+3)
+		for property, retained := range properties {
+			candidate[property] = retained
 		}
-		if budget.elements > maxMetadataElements || budget.bytes > maxMetadataBytes {
+		candidate[propertyKey] = value
+		candidateKeyMap := make(map[string]string, len(keyMap)+1)
+		for property, source := range keyMap {
+			candidateKeyMap[property] = source
+		}
+		candidateKeyMap[propertyKey] = key
+		candidate["gortex_meta_key_map"] = mustCanonicalJSONString(candidateKeyMap)
+		candidateEncodings := make(map[string]string, len(encodings)+1)
+		for property, retainedEncoding := range encodings {
+			candidateEncodings[property] = retainedEncoding
+		}
+		if encoding != "" {
+			candidateEncodings[propertyKey] = encoding
+		}
+		if len(candidateEncodings) > 0 {
+			candidate["gortex_meta_encoding"] = mustCanonicalJSONString(candidateEncodings)
+		}
+		encodedEnvelope, err := canonicalJSON(candidate)
+		if err != nil || len(encodedEnvelope) > maxMetadataBytes {
 			budget = before
 			warnings.Unsupported++
 			continue
 		}
 		properties[propertyKey] = value
-		keyMap[propertyKey] = key
-		if encoding != "" {
-			encodings[propertyKey] = encoding
-		}
+		keyMap = candidateKeyMap
+		encodings = candidateEncodings
 	}
 	if len(keyMap) > 0 {
 		properties["gortex_meta_key_map"] = mustCanonicalJSONString(keyMap)

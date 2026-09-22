@@ -35,26 +35,30 @@ type Request struct {
 
 // Result describes the source and activated target generation without secrets.
 type Result struct {
-	Profile           string `json:"profile"`
-	Namespace         string `json:"namespace"`
-	Owner             string `json:"owner"`
-	OperationID       string `json:"operation_id"`
-	PendingGeneration string `json:"pending_generation,omitempty"`
-	ActiveGeneration  string `json:"active_generation,omitempty"`
-	SourceGeneration  int64  `json:"source_generation"`
-	NodeCount         int    `json:"node_count"`
-	EdgeCount         int    `json:"edge_count"`
-	StaleNodeCount    int    `json:"stale_node_count"`
-	StaleEdgeCount    int    `json:"stale_edge_count"`
-	Phase             string `json:"phase"`
-	Complete          bool   `json:"complete"`
-	CleanupComplete   bool   `json:"cleanup_complete"`
-	CleanupStatus     string `json:"cleanup_status,omitempty"`
-	CleanupAction     string `json:"cleanup_action,omitempty"`
-	DryRun            bool   `json:"dry_run"`
-	Cancelled         bool   `json:"cancelled"`
-	ErrorCode         string `json:"error_code,omitempty"`
-	ErrorMessage      string `json:"error_message,omitempty"`
+	Profile              string   `json:"profile"`
+	Namespace            string   `json:"namespace"`
+	Owner                string   `json:"owner"`
+	OperationID          string   `json:"operation_id"`
+	PendingGeneration    string   `json:"pending_generation,omitempty"`
+	ActiveGeneration     string   `json:"active_generation,omitempty"`
+	SourceGeneration     int64    `json:"source_generation"`
+	NodeCount            int      `json:"node_count"`
+	EdgeCount            int      `json:"edge_count"`
+	StaleNodeCount       int      `json:"stale_node_count"`
+	StaleEdgeCount       int      `json:"stale_edge_count"`
+	Phase                string   `json:"phase"`
+	Complete             bool     `json:"complete"`
+	CleanupComplete      bool     `json:"cleanup_complete"`
+	CleanupStatus        string   `json:"cleanup_status,omitempty"`
+	CleanupAction        string   `json:"cleanup_action,omitempty"`
+	PlannedActions       []string `json:"planned_actions,omitempty"`
+	MissingConstraints   []string `json:"missing_constraints,omitempty"`
+	SecretOmissions      int      `json:"secret_omissions"`
+	UnsupportedOmissions int      `json:"unsupported_omissions"`
+	DryRun               bool     `json:"dry_run"`
+	Cancelled            bool     `json:"cancelled"`
+	ErrorCode            string   `json:"error_code,omitempty"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
 }
 
 // ProjectionBatch is the complete tracer slice staged under one generation.
@@ -73,6 +77,19 @@ type CleanupCounts struct {
 	Relationships int
 }
 
+type IntendedPlan struct {
+	NodeLogicalKeys   []string
+	EdgeLogicalKeys   []string
+	RelationshipTypes []string
+}
+
+type TargetPlan struct {
+	ActiveGeneration   string
+	StaleNodes         int
+	StaleRelationships int
+	MissingConstraints []string
+}
+
 type MaterializedCounts struct {
 	Nodes         int
 	Relationships int
@@ -84,14 +101,15 @@ var ErrCleanupIncomplete = errors.New("neo4j projection cleanup incomplete")
 // operation allowed to change the exact owner's visible generation pointer.
 type Transport interface {
 	Inspect(context.Context, bool) error
+	Plan(context.Context, string, IntendedPlan) (TargetPlan, error)
 	LeaseDuration() time.Duration
 	Acquire(context.Context, string, string, string, string, time.Time) (string, error)
 	Renew(context.Context, string, string, string, string, time.Time) error
 	Abort(context.Context, string, string, string, string, int) error
 	Stage(context.Context, ProjectionBatch) error
-	MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error)
+	MarkComplete(context.Context, string, string, string, string, MaterializedCounts) (MaterializedCounts, error)
 	Activate(context.Context, string, string, string, string, string, Result) error
-	Reconcile(context.Context, string, string, int) (CleanupCounts, error)
+	Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error)
 	Close(context.Context) error
 }
 
@@ -162,6 +180,7 @@ func NormalizeRequest(request Request) (Request, error) {
 const (
 	defaultBatchSize = 500
 	defaultTimeout   = 30 * time.Minute
+	closeTimeout     = 5 * time.Second
 )
 
 func (s *Service) Push(ctx context.Context, request Request) (result Result, retErr error) {
@@ -224,12 +243,66 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	result.SourceGeneration = descriptor.SourceGeneration
 	stableGeneration := generationKey(request.Owner, request.OperationID, descriptor.SourceGeneration)
 	result.PendingGeneration = stableGeneration
+	intendedNodes := make(map[string]struct{})
+	intendedEdges := make(map[string]struct{})
+	intendedRelationshipTypes := make(map[string]struct{})
+	countNode := func(node *graph.Node) error {
+		projected, warnings, err := projectNode(request.Owner, result.PendingGeneration, node)
+		if err != nil {
+			return err
+		}
+		if warnings.Secret+warnings.Unsupported > 0 && (node.ID == "" || node.RepoPrefix == "" && node.WorkspaceID == "" && node.ProjectID == "") {
+			return fmt.Errorf("identity, scope, or provenance metadata cannot be omitted for node %q", node.ID)
+		}
+		logical := projected.Properties["gortex_logical_key"].(string)
+		if _, exists := intendedNodes[logical]; !exists {
+			intendedNodes[logical] = struct{}{}
+			result.SecretOmissions += warnings.Secret
+			result.UnsupportedOmissions += warnings.Unsupported
+		}
+		return nil
+	}
+	countEdge := func(row graph.ScopedEdgeRow) error {
+		for _, endpoint := range []*graph.Node{row.Source, row.Target} {
+			if endpoint != nil {
+				if err := countNode(endpoint); err != nil {
+					return err
+				}
+			}
+		}
+		if row.Target == nil {
+			if err := countNode(&graph.Node{ID: row.Edge.To, Kind: graph.NodeKind("unresolved"), Name: row.Edge.To, Meta: map[string]any{"synthetic": true}}); err != nil {
+				return err
+			}
+		}
+		projected, warnings, err := projectEdge(request.Owner, result.PendingGeneration, row.Edge)
+		if err != nil {
+			return err
+		}
+		if warnings.Secret+warnings.Unsupported > 0 && (row.Edge.From == "" || row.Edge.To == "" || row.Edge.Kind == "" || row.Edge.Origin == "") {
+			return fmt.Errorf("identity, scope, or provenance metadata cannot be omitted for relationship %q", row.Edge.Kind)
+		}
+		intendedRelationshipTypes[projected.Type] = struct{}{}
+		logical := projected.Properties["gortex_logical_key"].(string)
+		if _, exists := intendedEdges[logical]; !exists {
+			intendedEdges[logical] = struct{}{}
+			result.SecretOmissions += warnings.Secret
+			result.UnsupportedOmissions += warnings.Unsupported
+		}
+		return nil
+	}
 
 	transport, err := s.transport(ctx)
 	if err != nil {
 		return result, fmt.Errorf("create neo4j transport: %w", err)
 	}
-	defer func() { retErr = errors.Join(retErr, transport.Close(context.WithoutCancel(ctx))) }()
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), closeTimeout)
+		defer closeCancel()
+		if closeErr := transport.Close(closeCtx); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close neo4j transport: %w", closeErr))
+		}
+	}()
 
 	result.Phase = "inspecting"
 	report(result.Phase, 0)
@@ -240,16 +313,6 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	if request.DryRun {
 		result.Phase = "reading_snapshot"
 		report(result.Phase, 0)
-		nodeKeys := make(map[string]struct{})
-		edgeKeys := make(map[string]struct{})
-		countNode := func(node *graph.Node) error {
-			projected, _, err := projectNode(request.Owner, result.PendingGeneration, node)
-			if err != nil {
-				return err
-			}
-			nodeKeys[projected.Properties["gortex_physical_key"].(string)] = struct{}{}
-			return nil
-		}
 		err = snapshot.ReadNodePages(ctx, func(nodes []*graph.Node) error {
 			for _, node := range nodes {
 				if err := countNode(node); err != nil {
@@ -261,23 +324,9 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 		if err == nil {
 			err = snapshot.ReadEdgePages(ctx, func(edges []graph.ScopedEdgeRow) error {
 				for _, row := range edges {
-					for _, endpoint := range []*graph.Node{row.Source, row.Target} {
-						if endpoint != nil {
-							if err := countNode(endpoint); err != nil {
-								return err
-							}
-						}
-					}
-					if row.Target == nil {
-						if err := countNode(&graph.Node{ID: row.Edge.To, Kind: graph.NodeKind("unresolved"), Name: row.Edge.To, Meta: map[string]any{"synthetic": true}}); err != nil {
-							return err
-						}
-					}
-					projected, _, err := projectEdge(request.Owner, result.PendingGeneration, row.Edge)
-					if err != nil {
+					if err := countEdge(row); err != nil {
 						return err
 					}
-					edgeKeys[projected.Properties["gortex_physical_key"].(string)] = struct{}{}
 				}
 				return nil
 			})
@@ -286,7 +335,41 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 			result.Cancelled = errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 			return result, fmt.Errorf("read projection snapshot: %w", err)
 		}
-		result.NodeCount, result.EdgeCount = len(nodeKeys), len(edgeKeys)
+		result.NodeCount, result.EdgeCount = len(intendedNodes), len(intendedEdges)
+		nodeKeys := make([]string, 0, len(intendedNodes))
+		for key := range intendedNodes {
+			nodeKeys = append(nodeKeys, key)
+		}
+		edgeKeys := make([]string, 0, len(intendedEdges))
+		for key := range intendedEdges {
+			edgeKeys = append(edgeKeys, key)
+		}
+		relationshipTypes := make([]string, 0, len(intendedRelationshipTypes))
+		for relationshipType := range intendedRelationshipTypes {
+			relationshipTypes = append(relationshipTypes, relationshipType)
+		}
+		sort.Strings(nodeKeys)
+		sort.Strings(edgeKeys)
+		sort.Strings(relationshipTypes)
+		plan, planErr := transport.Plan(ctx, request.Owner, IntendedPlan{NodeLogicalKeys: nodeKeys, EdgeLogicalKeys: edgeKeys, RelationshipTypes: relationshipTypes})
+		if planErr != nil {
+			return result, fmt.Errorf("inspect neo4j target plan: %w", planErr)
+		}
+		result.ActiveGeneration = plan.ActiveGeneration
+		result.StaleNodeCount, result.StaleEdgeCount = plan.StaleNodes, plan.StaleRelationships
+		result.MissingConstraints = plan.MissingConstraints
+		if len(plan.MissingConstraints) > 0 {
+			result.PlannedActions = append(result.PlannedActions, "create_missing_constraints")
+		}
+		if result.NodeCount > 0 {
+			result.PlannedActions = append(result.PlannedActions, "merge_nodes")
+		}
+		if result.EdgeCount > 0 {
+			result.PlannedActions = append(result.PlannedActions, "merge_relationships")
+		}
+		if result.StaleNodeCount+result.StaleEdgeCount > 0 {
+			result.PlannedActions = append(result.PlannedActions, "delete_stale_records")
+		}
 		result.Phase, result.Complete = "complete", true
 		report(result.Phase, result.NodeCount+result.EdgeCount)
 		return result, nil
@@ -353,28 +436,35 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	}
 	var pendingNodes []*graph.Node
 	err = snapshot.ReadNodePages(ctx, func(page []*graph.Node) error {
+		for _, node := range page {
+			if err := countNode(node); err != nil {
+				return err
+			}
+		}
 		pendingNodes = append(pendingNodes, page...)
 		for len(pendingNodes) >= request.BatchSize {
 			if err := stage(pendingNodes[:request.BatchSize], nil); err != nil {
 				return err
 			}
-			result.NodeCount += request.BatchSize
 			pendingNodes = pendingNodes[request.BatchSize:]
 		}
 		return nil
 	})
 	if err == nil && len(pendingNodes) > 0 {
 		err = stage(pendingNodes, nil)
-		result.NodeCount += len(pendingNodes)
 	}
 	if err == nil {
 		err = snapshot.ReadEdgePages(ctx, func(page []graph.ScopedEdgeRow) error {
+			for _, row := range page {
+				if err := countEdge(row); err != nil {
+					return err
+				}
+			}
 			for len(page) > 0 {
 				take := min(len(page), request.BatchSize)
 				if err := stage(nil, page[:take]); err != nil {
 					return err
 				}
-				result.EdgeCount += take
 				page = page[take:]
 			}
 			return nil
@@ -383,12 +473,13 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	if err != nil {
 		return result, fmt.Errorf("stage projection: %w", err)
 	}
+	result.NodeCount, result.EdgeCount = len(intendedNodes), len(intendedEdges)
 	result.Phase = "marking_complete"
 	report(result.Phase, processed)
 	if err := transport.Renew(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, time.Now().Add(leaseDuration)); err != nil {
 		return result, fmt.Errorf("renew projection lease before completion: %w", err)
 	}
-	materialized, err := transport.MarkComplete(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID)
+	materialized, err := transport.MarkComplete(ctx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, MaterializedCounts{Nodes: result.NodeCount, Relationships: result.EdgeCount})
 	if err != nil {
 		return result, fmt.Errorf("mark projection complete: %w", err)
 	}
@@ -407,7 +498,7 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	result.Complete = true
 	result.Phase = "cleanup"
 	report(result.Phase, processed)
-	remaining, cleanupErr := transport.Reconcile(ctx, request.Owner, result.ActiveGeneration, request.BatchSize)
+	remaining, cleanupErr := transport.Reconcile(ctx, request.Owner, request.OperationID, result.ActiveGeneration, attemptID, request.BatchSize)
 	result.StaleNodeCount = remaining.Nodes
 	result.StaleEdgeCount = remaining.Relationships
 	result.CleanupComplete = cleanupErr == nil && remaining.Nodes == 0 && remaining.Relationships == 0
@@ -420,10 +511,17 @@ func (s *Service) Push(ctx context.Context, request Request) (result Result, ret
 	result.CleanupStatus = "incomplete"
 	result.CleanupAction = "rerun the same projection command to resume exact-owner cleanup"
 	result.Cancelled = errors.Is(cleanupErr, context.Canceled) || errors.Is(cleanupErr, context.DeadlineExceeded)
+	stopTimeout, _ := time.ParseDuration(request.TransactionTimeout)
+	if stopTimeout <= 0 {
+		stopTimeout = neo4jTransactionTimeout
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), stopTimeout)
+	stopErr := transport.Abort(stopCtx, request.Owner, request.OperationID, result.PendingGeneration, attemptID, request.BatchSize)
+	stopCancel()
 	if cleanupErr == nil {
 		cleanupErr = ErrCleanupIncomplete
 	}
-	return result, cleanupErr
+	return result, errors.Join(cleanupErr, stopErr)
 }
 
 func generationKey(owner, operation string, sourceGeneration int64) string {

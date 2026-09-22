@@ -245,13 +245,13 @@ func (t *cancelBeforeActivationTransport) Activate(context.Context, string, stri
 	return context.Canceled
 }
 
-func (t *cancelBeforeActivationTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+func (t *cancelBeforeActivationTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{}, nil
 }
 
 type failCleanupTransport struct{ Transport }
 
-func (t *failCleanupTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+func (t *failCleanupTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{Nodes: 2, Relationships: 1}, ErrCleanupIncomplete
 }
 
@@ -261,7 +261,7 @@ func (t *failBeforeActivationTransport) Activate(context.Context, string, string
 	return fmt.Errorf("injected failure before activation")
 }
 
-func (t *failBeforeActivationTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+func (t *failBeforeActivationTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{}, nil
 }
 

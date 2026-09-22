@@ -153,6 +153,21 @@ func TestProjectionMetadataBudgets(t *testing.T) {
 			t.Fatal("cumulative budget overflow was retained")
 		}
 	})
+	t.Run("single hostile key exact envelope", func(t *testing.T) {
+		properties := map[string]any{}
+		hostile := strings.Repeat("?", 220_000)
+		warnings := appendMetadata(properties, map[string]any{hostile: "x"})
+		if warnings.Unsupported != 1 {
+			t.Fatalf("unsupported warnings = %d, want 1", warnings.Unsupported)
+		}
+		encoded, err := canonicalJSON(properties)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(encoded) > maxMetadataBytes {
+			t.Fatalf("hostile envelope = %d bytes, max %d", len(encoded), maxMetadataBytes)
+		}
+	})
 	t.Run("many long keys and generated maps", func(t *testing.T) {
 		metadata := make(map[string]any, maxMetadataElements)
 		for i := range maxMetadataElements {

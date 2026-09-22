@@ -28,7 +28,10 @@ type protocolTransport struct {
 }
 
 func (t *protocolTransport) Inspect(context.Context, bool) error { return nil }
-func (t *protocolTransport) LeaseDuration() time.Duration        { return 20 * time.Millisecond }
+func (t *protocolTransport) Plan(context.Context, string, IntendedPlan) (TargetPlan, error) {
+	return TargetPlan{ActiveGeneration: t.active}, nil
+}
+func (t *protocolTransport) LeaseDuration() time.Duration { return 20 * time.Millisecond }
 func (t *protocolTransport) Renew(_ context.Context, _ string, operation, generation, attempt string, leaseUntil time.Time) error {
 	if operation != t.lockOperation || generation != t.lockGeneration || attempt != t.lockAttempt || t.failed || time.Now().After(t.leaseUntil) {
 		return errors.New("attempt lease lost")
@@ -88,7 +91,7 @@ func TestNeo4jSlowStageRenewsLeaseAndSupersededWriterFailsClosed(t *testing.T) {
 		t.Fatal("old abort cleared replacement ownership")
 	}
 }
-func (t *protocolTransport) MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error) {
+func (t *protocolTransport) MarkComplete(context.Context, string, string, string, string, MaterializedCounts) (MaterializedCounts, error) {
 	counts := MaterializedCounts{}
 	seen := map[string]bool{}
 	for _, batch := range t.staged {
@@ -113,7 +116,7 @@ func (t *protocolTransport) Activate(_ context.Context, _ string, operation, gen
 	t.lockOperation = ""
 	return nil
 }
-func (t *protocolTransport) Reconcile(ctx context.Context, _ string, active string, batchSize int) (CleanupCounts, error) {
+func (t *protocolTransport) Reconcile(ctx context.Context, _ string, _ string, active string, _ string, batchSize int) (CleanupCounts, error) {
 	if !t.activated || active != t.active {
 		return CleanupCounts{}, errors.New("cleanup before activation")
 	}
@@ -191,6 +194,29 @@ func TestNeo4jAbandonedAttemptRecovery(t *testing.T) {
 	transport.leaseUntil = time.Now().Add(time.Minute)
 	if _, err := transport.Acquire(context.Background(), "owner", "other", "other-generation", "other-attempt", time.Now().Add(time.Minute)); err == nil {
 		t.Fatal("live concurrent attempt was taken over")
+	}
+}
+
+func TestNeo4jStageQueriesFenceEveryMutationTransaction(t *testing.T) {
+	for _, query := range []string{nodeMergeQuery("Function"), relationshipMergeQuery(expectedRelationshipType)} {
+		for _, required := range []string{"m.operation_id = $operation", "m.pending_generation = $generation", "m.attempt_id = $attempt", "m.lease_until >= datetime()", "SET m.lease_until = datetime($lease_until)"} {
+			if !strings.Contains(query, required) {
+				t.Fatalf("stage query missing transactional fence %q: %s", required, query)
+			}
+		}
+	}
+}
+
+func TestNeo4jCompletionRequiresIndependentIntendedCensus(t *testing.T) {
+	source, err := os.ReadFile("neo4j.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, required := range []string{"m.intended_node_count", "m.observed_node_count", "nodes = $intended_nodes", "relationships = $intended_relationships"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("completion protocol missing %q", required)
+		}
 	}
 }
 

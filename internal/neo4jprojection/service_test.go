@@ -39,7 +39,10 @@ type tracerTransport struct {
 }
 
 func (t *tracerTransport) Inspect(context.Context, bool) error { return t.record("inspect") }
-func (t *tracerTransport) LeaseDuration() time.Duration        { return time.Minute }
+func (t *tracerTransport) Plan(context.Context, string, IntendedPlan) (TargetPlan, error) {
+	return TargetPlan{ActiveGeneration: t.active}, nil
+}
+func (t *tracerTransport) LeaseDuration() time.Duration { return time.Minute }
 func (t *tracerTransport) Renew(context.Context, string, string, string, string, time.Time) error {
 	return t.record("renew")
 }
@@ -53,7 +56,7 @@ func (t *tracerTransport) Abort(context.Context, string, string, string, string,
 	return t.record("abort")
 }
 func (t *tracerTransport) Stage(context.Context, ProjectionBatch) error { return t.record("stage") }
-func (t *tracerTransport) MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error) {
+func (t *tracerTransport) MarkComplete(context.Context, string, string, string, string, MaterializedCounts) (MaterializedCounts, error) {
 	return MaterializedCounts{Nodes: 2, Relationships: 1}, t.record("mark_complete")
 }
 func (t *tracerTransport) Activate(_ context.Context, owner, operation, generation, attempt, prior string, result Result) error {
@@ -63,7 +66,7 @@ func (t *tracerTransport) Activate(_ context.Context, owner, operation, generati
 	t.active = generation
 	return nil
 }
-func (t *tracerTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+func (t *tracerTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{}, t.record("cleanup")
 }
 func (t *tracerTransport) Close(context.Context) error { t.closed = true; return t.record("close") }
@@ -131,7 +134,10 @@ type batchTransport struct {
 }
 
 func (t *batchTransport) Inspect(context.Context, bool) error { return nil }
-func (t *batchTransport) LeaseDuration() time.Duration        { return time.Minute }
+func (t *batchTransport) Plan(context.Context, string, IntendedPlan) (TargetPlan, error) {
+	return TargetPlan{}, nil
+}
+func (t *batchTransport) LeaseDuration() time.Duration { return time.Minute }
 func (t *batchTransport) Renew(context.Context, string, string, string, string, time.Time) error {
 	return nil
 }
@@ -152,11 +158,14 @@ func (t *batchTransport) Stage(ctx context.Context, batch ProjectionBatch) error
 	}
 	return nil
 }
-func (t *batchTransport) MarkComplete(context.Context, string, string, string, string) (MaterializedCounts, error) {
+func (t *batchTransport) MarkComplete(_ context.Context, _, _, _, _ string, intended MaterializedCounts) (MaterializedCounts, error) {
 	counts := MaterializedCounts{}
 	seen := map[string]bool{}
+	edges := map[string]bool{}
 	for _, batch := range t.batches {
-		counts.Relationships += len(batch.Edges)
+		for _, row := range batch.Edges {
+			edges[projectionEdgeLogicalKey("owner", row.Edge)] = true
+		}
 		for _, node := range batch.Nodes {
 			seen[node.ID] = true
 		}
@@ -166,12 +175,16 @@ func (t *batchTransport) MarkComplete(context.Context, string, string, string, s
 		}
 	}
 	counts.Nodes = len(seen)
+	counts.Relationships = len(edges)
+	if counts != intended {
+		return counts, errors.New("intended census mismatch")
+	}
 	return counts, nil
 }
 func (t *batchTransport) Activate(context.Context, string, string, string, string, string, Result) error {
 	return nil
 }
-func (t *batchTransport) Reconcile(context.Context, string, string, int) (CleanupCounts, error) {
+func (t *batchTransport) Reconcile(context.Context, string, string, string, string, int) (CleanupCounts, error) {
 	return CleanupCounts{}, nil
 }
 func (t *batchTransport) Close(context.Context) error { return nil }
@@ -198,6 +211,33 @@ func projectionRecords(count int) ([]*graph.Node, []graph.ScopedEdgeRow) {
 		edges[i] = graph.ScopedEdgeRow{Edge: &graph.Edge{From: nodes[i].ID, To: nodes[i].ID, Kind: graph.EdgeReferences}, Source: nodes[i], Target: nodes[i]}
 	}
 	return nodes, edges
+}
+
+func TestProjectionDryRunReportsMapperOmissions(t *testing.T) {
+	source := &graph.Node{ID: "fixture/repo/main.go::Run", Kind: graph.KindFunction, RepoPrefix: "fixture/repo", Meta: map[string]any{"api_token": "secret", "unsupported": make(chan int)}}
+	snapshot := &batchSnapshot{nodes: []*graph.Node{source}, pageSize: 1}
+	transport := &batchTransport{}
+	result, err := NewService(batchOpener{snapshot}, func(context.Context) (Transport, error) { return transport, nil }).Push(context.Background(), Request{Owner: "owner", OperationID: "dry", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SecretOmissions != 1 || result.UnsupportedOmissions != 1 {
+		t.Fatalf("omissions not aggregated: %#v", result)
+	}
+}
+
+func TestProjectionIntendedCountsAreDeduplicated(t *testing.T) {
+	node := &graph.Node{ID: "n", Kind: graph.KindFunction}
+	edge := graph.ScopedEdgeRow{Edge: &graph.Edge{From: "n", To: "n", Kind: graph.EdgeCalls}, Source: node, Target: node}
+	snapshot := &batchSnapshot{nodes: []*graph.Node{node, node}, edges: []graph.ScopedEdgeRow{edge, edge}, pageSize: 2}
+	transport := &batchTransport{}
+	result, err := NewService(batchOpener{snapshot}, func(context.Context) (Transport, error) { return transport, nil }).Push(context.Background(), Request{Owner: "owner", OperationID: "apply", Scope: graph.ProjectionScope{Repositories: []string{"fixture/repo"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NodeCount != 1 || result.EdgeCount != 1 {
+		t.Fatalf("intended counts were not deduplicated: %#v", result)
+	}
 }
 
 func TestProjectionDryRunCountsMaterializedPlaceholders(t *testing.T) {
