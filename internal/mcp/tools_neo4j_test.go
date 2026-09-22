@@ -72,9 +72,14 @@ func TestNeo4jMutation(t *testing.T) {
 
 func TestNeo4jCleanupIncompletePreservesActivatedSnapshot(t *testing.T) {
 	result := neo4jprojection.Result{
-		Profile: "prod", Namespace: "view", Phase: "cleanup", Complete: true,
-		CleanupComplete: false, CleanupStatus: "incomplete",
-		CleanupAction: "rerun the same projection command", ActiveGeneration: "generation-new",
+		Profile:          "prod",
+		Namespace:        "view",
+		Phase:            "cleanup",
+		Complete:         true,
+		CleanupComplete:  false,
+		CleanupStatus:    "incomplete",
+		CleanupAction:    "rerun the same projection command",
+		ActiveGeneration: "generation-new",
 	}
 	srv := &Server{neo4jPush: func(_ context.Context, _ neo4jprojection.Request) (neo4jprojection.Result, error) {
 		return result, neo4jprojection.ErrCleanupIncomplete
@@ -82,12 +87,14 @@ func TestNeo4jCleanupIncompletePreservesActivatedSnapshot(t *testing.T) {
 	req := mcplib.CallToolRequest{}
 	req.Params.Name = "neo4j_push"
 	req.Params.Arguments = neo4jArgs()
+
 	response, err := srv.handleNeo4jPush(context.Background(), req)
 	require.NoError(t, err)
+
 	var got neo4jprojection.Result
 	text := response.Content[0].(mcplib.TextContent).Text
 	require.NoError(t, json.Unmarshal([]byte(text), &got))
-	require.True(t, got.Complete)
+	require.True(t, got.Complete, "successful activation must remain complete when only physical cleanup is incomplete")
 	require.False(t, got.CleanupComplete)
 	require.Equal(t, result.ActiveGeneration, got.ActiveGeneration)
 	require.Equal(t, result.CleanupAction, got.CleanupAction)
