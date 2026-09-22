@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,50 @@ func TestProjectionUnresolved(t *testing.T) {
 	if !slices.Contains(projected.Labels, "GortexUnresolved") {
 		t.Fatalf("unresolved labels = %v", projected.Labels)
 	}
+}
+
+func TestProjectionMetadataBudgets(t *testing.T) {
+	t.Run("oversized string", func(t *testing.T) {
+		_, _, ok := projectMetadataValue(strings.Repeat("x", maxMetadataBytes+1))
+		if ok {
+			t.Fatal("oversized string was accepted")
+		}
+	})
+	t.Run("oversized native list", func(t *testing.T) {
+		_, _, ok := projectMetadataValue(make([]int64, maxMetadataElements+1))
+		if ok {
+			t.Fatal("oversized homogeneous list was accepted")
+		}
+	})
+	t.Run("nested map and struct", func(t *testing.T) {
+		type nested struct {
+			Value any `json:"value"`
+		}
+		var value any = "leaf"
+		for range maxMetadataDepth + 1 {
+			value = map[string]any{"next": nested{Value: value}}
+		}
+		_, _, ok := projectMetadataValue(value)
+		if ok {
+			t.Fatal("over-depth map/struct graph was accepted")
+		}
+	})
+	t.Run("cumulative across keys", func(t *testing.T) {
+		properties := map[string]any{}
+		warnings := appendMetadata(properties, map[string]any{
+			"first":  strings.Repeat("a", maxMetadataBytes/2+1),
+			"second": strings.Repeat("b", maxMetadataBytes/2+1),
+		})
+		if warnings.Unsupported != 1 {
+			t.Fatalf("unsupported warnings = %d, want 1", warnings.Unsupported)
+		}
+		if _, first := properties["meta_first"]; !first {
+			t.Fatal("first bounded value was not retained")
+		}
+		if _, second := properties["meta_second"]; second {
+			t.Fatal("cumulative budget overflow was retained")
+		}
+	})
 }
 
 func TestProjectionSecretFiltering(t *testing.T) {

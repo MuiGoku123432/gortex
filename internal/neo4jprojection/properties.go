@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	maxMetadataDepth = 8
-	maxMetadataBytes = 1 << 20
+	maxMetadataDepth    = 8
+	maxMetadataElements = 10_000
+	maxMetadataBytes    = 1 << 20
 )
 
 type projectedNode struct {
@@ -86,6 +87,7 @@ func appendMetadata(properties map[string]any, metadata map[string]any) projecti
 	keyMap := make(map[string]string)
 	encodings := make(map[string]string)
 	used := make(map[string]string)
+	budget := metadataBudget{}
 	for _, key := range keys {
 		if sensitiveMetadataKey(key) {
 			warnings.Secret++
@@ -96,7 +98,7 @@ func appendMetadata(properties map[string]any, metadata map[string]any) projecti
 			encoded += "_" + projectionDigest("", key)[1:9]
 		}
 		used[encoded] = key
-		value, encoding, ok := projectMetadataValue(metadata[key])
+		value, encoding, ok := projectMetadataValueWithBudget(metadata[key], &budget)
 		if !ok {
 			warnings.Unsupported++
 			continue
@@ -145,8 +147,81 @@ func sensitiveMetadataKey(key string) bool {
 	return false
 }
 
+type metadataBudget struct {
+	elements int
+	bytes    int
+}
+
 func projectMetadataValue(value any) (any, string, bool) {
-	return projectMetadataValueAtDepth(value, 0)
+	return projectMetadataValueWithBudget(value, &metadataBudget{})
+}
+
+func projectMetadataValueWithBudget(value any, budget *metadataBudget) (any, string, bool) {
+	before := *budget
+	if !budget.preflight(reflect.ValueOf(value), 0) {
+		*budget = before
+		return nil, "", false
+	}
+	projected, encoding, ok := projectMetadataValueAtDepth(value, 0)
+	if !ok {
+		*budget = before
+	}
+	return projected, encoding, ok
+}
+
+func (b *metadataBudget) preflight(value reflect.Value, depth int) bool {
+	if !value.IsValid() || depth > maxMetadataDepth {
+		return false
+	}
+	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return false
+		}
+		value = value.Elem()
+	}
+	b.elements++
+	if b.elements > maxMetadataElements {
+		return false
+	}
+	switch value.Kind() {
+	case reflect.String:
+		b.bytes += value.Len()
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
+		b.bytes += int(value.Type().Size())
+	case reflect.Slice, reflect.Array:
+		if value.Len() > maxMetadataElements-b.elements {
+			return false
+		}
+		for i := 0; i < value.Len(); i++ {
+			if !b.preflight(value.Index(i), depth+1) {
+				return false
+			}
+		}
+	case reflect.Map:
+		if value.Len() > maxMetadataElements-b.elements {
+			return false
+		}
+		iter := value.MapRange()
+		for iter.Next() {
+			if !b.preflight(iter.Key(), depth+1) || !b.preflight(iter.Value(), depth+1) {
+				return false
+			}
+		}
+	case reflect.Struct:
+		if value.Type() == reflect.TypeOf(time.Time{}) {
+			b.bytes += len(time.RFC3339Nano)
+			break
+		}
+		for i := 0; i < value.NumField(); i++ {
+			if value.Type().Field(i).IsExported() && !b.preflight(value.Field(i), depth+1) {
+				return false
+			}
+		}
+	default:
+		return false
+	}
+	return b.bytes <= maxMetadataBytes
 }
 
 func projectMetadataValueAtDepth(value any, depth int) (any, string, bool) {
