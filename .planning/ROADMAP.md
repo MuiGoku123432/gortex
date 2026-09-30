@@ -74,7 +74,29 @@ Plans:
   4. A user can retrieve the same persisted node through an existing CLI query and an existing MCP query.
   5. The tracer acceptance passes with all AI providers disabled and no Neo4j installation, with SQLite as the sole authoritative store and no deterministic dual-write.
 
-**Plans**: TBD
+**Plans**: 6 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md -- Fork prerequisite: embedded grammar attestation, content-ID wrapper, pushed on the v0.26.0 line (D-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md -- Tracer: go.mod pin, grammar-only extractor, register swap, SQLite AddBatch to MCP/CLI get_symbol acceptance
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-03-PLAN.md -- Containment-path IDs, degraded/copybook/empty/concurrency guards, and fail-closed grammar checks
+- [ ] 02-04-PLAN.md -- VCS revision stamp in applyCoverageDomains and prov_* Neo4j projection contract test
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 02-05-PLAN.md -- CI read credential, disabled module caches, stock-grammar negative, credential-free release container
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 02-06-PLAN.md -- Requirement/roadmap/project amendments, doc scrub, full phase gate, CI secret and green-CI checkpoint
 
 ### Phase 3: Deterministic COBOL and Mainframe Breadth
 
