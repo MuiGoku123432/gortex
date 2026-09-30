@@ -86,6 +86,7 @@ type cobolTracerRepo struct {
 	cm                *config.ConfigManager
 	prefix            string
 	fileID, programID string
+	commit            string
 }
 
 // indexCobolTracerRepo commits the fixture to a fresh git repository and
@@ -111,6 +112,8 @@ func indexCobolTracerRepo(t *testing.T) cobolTracerRepo {
 		out, err := cmd.CombinedOutput()
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 	}
+	commit := gitCommitHash(root)
+	require.NotEmpty(t, commit, "fixture repository has no HEAD commit")
 
 	dbPath := filepath.Join(dir, "store.sqlite")
 	store, err := store_sqlite.Open(dbPath)
@@ -139,6 +142,7 @@ func indexCobolTracerRepo(t *testing.T) cobolTracerRepo {
 		prefix:    res.RepoPrefix,
 		fileID:    res.RepoPrefix + "/cobol/demopgm.cbl",
 		programID: res.RepoPrefix + "/cobol/demopgm.cbl::DEMOPGM",
+		commit:    commit,
 	}
 	// Asserted before any retrieval: get_symbol's ensureFresh may reindex.
 	require.True(t, recorder.saw(repo.programID), "AddBatch never received %s", repo.programID)
@@ -149,9 +153,10 @@ func indexCobolTracerRepo(t *testing.T) cobolTracerRepo {
 var cobolTracerHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // assertCobolTracerProgram checks one program node, as decoded JSON, against
-// the Phase 2 provenance contract. Numbers compare numerically because JSON
-// decoding yields float64.
-func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix string) {
+// the Phase 2 provenance contract, including the fixture's HEAD commit as its
+// VCS revision (D-09). Numbers compare numerically because JSON decoding
+// yields float64.
+func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix, commit string) {
 	t.Helper()
 	assert.Equal(t, "function", node["kind"])
 	assert.Equal(t, "DEMOPGM", node["name"])
@@ -179,6 +184,8 @@ func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix string) 
 	assert.Equal(t, "program_definition", meta["prov_observation_kind"])
 	assert.Equal(t, false, meta["prov_affected"])
 	assert.Equal(t, true, meta["prov_range_exact"])
+	assert.Equal(t, commit, meta["prov_vcs_commit"])
+	assert.NotContains(t, meta, "prov_vcs_commit_absence")
 
 	startRow, ok := meta["prov_start_row"].(float64)
 	require.True(t, ok, "prov_start_row = %v", meta["prov_start_row"])
@@ -220,7 +227,7 @@ func TestCobolTracer_PersistsThroughAddBatch(t *testing.T) {
 
 	live := repo.store.GetNode(repo.programID)
 	require.NotNil(t, live)
-	assertCobolTracerProgram(t, cobolTracerNodeJSON(t, live), repo.prefix)
+	assertCobolTracerProgram(t, cobolTracerNodeJSON(t, live), repo.prefix, repo.commit)
 
 	require.NoError(t, repo.mi.Close(context.Background()))
 	require.NoError(t, repo.store.Close())
@@ -231,12 +238,14 @@ func TestCobolTracer_PersistsThroughAddBatch(t *testing.T) {
 
 	program := reopened.GetNode(repo.programID)
 	require.NotNil(t, program, "program missing after reopen")
-	assertCobolTracerProgram(t, cobolTracerNodeJSON(t, program), repo.prefix)
+	assertCobolTracerProgram(t, cobolTracerNodeJSON(t, program), repo.prefix, repo.commit)
 	assert.Equal(t, repo.prefix, program.RepoPrefix)
 	assert.Empty(t, program.Origin)
 
 	file := reopened.GetNode(repo.fileID)
 	require.NotNil(t, file, "file node missing after reopen")
+	assert.Equal(t, repo.commit, file.Meta["prov_vcs_commit"])
+	assert.NotContains(t, file.Meta, "prov_vcs_commit_absence")
 	assert.NotEmpty(t, program.WorkspaceID)
 	assert.NotEmpty(t, program.ProjectID)
 	assert.Equal(t, file.WorkspaceID, program.WorkspaceID)
@@ -369,7 +378,7 @@ func TestCobolTracer_MCPGetSymbol(t *testing.T) {
 		map[string]any{"id": repo.programID, "detail": "full", "format": "json"})
 	require.NoError(t, json.Unmarshal([]byte(text), &payload))
 	require.Equal(t, repo.programID, payload.Node["id"])
-	assertCobolTracerProgram(t, payload.Node, repo.prefix)
+	assertCobolTracerProgram(t, payload.Node, repo.prefix, repo.commit)
 
 	var definedByFile bool
 	for _, e := range payload.InEdges {
@@ -393,7 +402,7 @@ func TestCobolTracer_CLIGetSymbol(t *testing.T) {
 	var payload cobolTracerSymbol
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &payload), "CLI output: %s", buf.String())
 	require.Equal(t, repo.programID, payload.Node["id"])
-	assertCobolTracerProgram(t, payload.Node, repo.prefix)
+	assertCobolTracerProgram(t, payload.Node, repo.prefix, repo.commit)
 }
 
 // TestCobolTracer_SearchSymbolsByName proves the program is discoverable by

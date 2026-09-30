@@ -220,6 +220,104 @@ func TestProjectionSecretFiltering(t *testing.T) {
 	}
 }
 
+// TestProjectNode_CobolProvenance is the D-08 contract check for PROV-06:
+// every key of the Phase 2 COBOL provenance contract (02-02-PLAN.md) projects
+// into Neo4j as its own meta_{key} property under its unchanged name, with no
+// secret filtering and no unsupported values. The key lists below mirror the
+// contract table and must stay identical to it.
+func TestProjectNode_CobolProvenance(t *testing.T) {
+	hex64 := strings.Repeat("ab", 32)
+	program := &graph.Node{
+		ID: "repo/cobol/demopgm.cbl::DEMOPGM", Kind: graph.KindFunction, Name: "DEMOPGM", QualName: "DEMOPGM",
+		FilePath: "repo/cobol/demopgm.cbl", RepoPrefix: "repo",
+		Meta: map[string]any{
+			"prov_source_path":            "cobol/demopgm.cbl",
+			"prov_source_id":              hex64,
+			"prov_revision_content_id":    hex64,
+			"prov_vcs_commit":             strings.Repeat("c", 40),
+			"prov_parser_tool_id":         hex64,
+			"prov_parser_grammar_id":      hex64,
+			"prov_parser_module":          "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/forest-shim/cobol@v0.0.0-20260101000000-000000000000",
+			"prov_parse_config_id":        hex64,
+			"prov_transform_config_id":    hex64,
+			"prov_handoff_schema":         "cobol-handoff-v1",
+			"prov_extractor_version":      "gortex-cobol-grammar/1",
+			"prov_evidence_class":         "DETERMINISTIC",
+			"prov_origin":                 "ast_resolved",
+			"prov_confidence":             1.0,
+			"prov_document_grade":         "amber",
+			"prov_document_grade_reasons": []string{"missing-node"},
+			"prov_grade_policy":           "policy-v1",
+			"cobol_kind":                  "program",
+			"prov_observation_kind":       "program_definition",
+			"prov_affected":               true,
+			"prov_start_row":              7,
+			"prov_start_column":           7,
+			"prov_end_row":                12,
+			"prov_end_column":             16,
+			"prov_start_byte":             120,
+			"prov_end_byte":               310,
+			"prov_range_exact":            false,
+			"prov_range_absence":          "no_original_projection",
+		},
+	}
+	file := &graph.Node{
+		ID: "repo/cobol/demopgm.cbl", Kind: graph.KindFile, Name: "demopgm.cbl",
+		FilePath: "repo/cobol/demopgm.cbl", RepoPrefix: "repo",
+		Meta: map[string]any{
+			"prov_vcs_commit_absence":     "working_tree_differs_from_head",
+			"prov_containment_unresolved": true,
+			"prov_unnamed_program_count":  2,
+			"prov_analysis_absence":       "copybook_standalone_analysis_unsupported",
+		},
+	}
+
+	for _, node := range []*graph.Node{program, file} {
+		projected, warnings, err := projectNode("owner", "generation", node)
+		if err != nil {
+			t.Fatalf("%s: %v", node.ID, err)
+		}
+		if warnings.Secret != 0 || warnings.Unsupported != 0 {
+			t.Fatalf("%s: warnings = %+v, want no secret and no unsupported", node.ID, warnings)
+		}
+		for key, want := range node.Meta {
+			if encoded := encodeMetadataKey(key); encoded != key {
+				t.Fatalf("%s: key %q encoded as %q, want it unchanged", node.ID, key, encoded)
+			}
+			got, ok := projected.Properties["meta_"+key]
+			if !ok {
+				t.Fatalf("%s: missing property meta_%s", node.ID, key)
+			}
+			switch typed := want.(type) {
+			case int:
+				want = int64(typed)
+			case []string:
+				list, isList := got.([]any)
+				if !isList || len(list) != len(typed) {
+					t.Fatalf("%s: meta_%s = %#v, want %v", node.ID, key, got, typed)
+				}
+				for i := range typed {
+					if list[i] != typed[i] {
+						t.Fatalf("%s: meta_%s[%d] = %#v, want %q", node.ID, key, i, list[i], typed[i])
+					}
+				}
+				continue
+			}
+			if got != want {
+				t.Fatalf("%s: meta_%s = %#v, want %#v", node.ID, key, got, want)
+			}
+		}
+	}
+
+	for _, meta := range []map[string]any{program.Meta, file.Meta} {
+		for key := range meta {
+			if sensitiveMetadataKey(key) {
+				t.Fatalf("contract key %q is classified sensitive and would be dropped", key)
+			}
+		}
+	}
+}
+
 func completeProjectionNode() *graph.Node {
 	return &graph.Node{
 		ID: "repo/a.go::A", Kind: graph.KindFunction, Name: "A", QualName: "pkg.A",
