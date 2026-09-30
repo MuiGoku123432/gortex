@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
@@ -116,6 +118,25 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	sourceID, err := preprocessor.NewSourceID(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("COBOL source identity for %s: %w", filePath, err)
+	}
+	if strings.EqualFold(filepath.Ext(filePath), ".cpy") {
+		// A standalone copybook has no program structure, so Analyze would
+		// grade it red for a meaningless reason (D-20). Record identity and
+		// revision only; parser and grade keys are omitted because nothing
+		// was parsed. The revision is the producer-domain content ID (D-09).
+		// note: the file-node shape repeats the analyzed path's below; two
+		// uses, so it stays inline (rule of three).
+		return &parser.ExtractionResult{Nodes: []*graph.Node{{
+			ID: filePath, Kind: graph.KindFile, Name: filePath,
+			FilePath: filePath, StartLine: 1, EndLine: bytes.Count(src, []byte("\n")) + 1,
+			Language: "cobol", Meta: map[string]any{
+				"prov_source_path":         filePath,
+				"prov_source_id":           string(sourceID),
+				"prov_revision_content_id": string(preprocessor.NewContentID(src)),
+				"prov_extractor_version":   cobolGrammarExtractorVersion,
+				"prov_analysis_absence":    "copybook_standalone_analysis_unsupported",
+			},
+		}}}, nil
 	}
 	var h handoff.Handoff
 	func() {
