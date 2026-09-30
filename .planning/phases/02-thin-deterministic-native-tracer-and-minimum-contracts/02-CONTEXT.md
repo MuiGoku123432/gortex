@@ -37,6 +37,20 @@ Out of scope here (later phases): paragraphs/sections/PERFORM/CALL/COPY/data ite
 - **D-13:** CI gets **read access** to the private fork (`GOPRIVATE` + read-only deploy key or fine-grained token as a CI secret) so the tracer runs in CI like any other test — no skip-when-missing. Provisioning the secret is a user action the plan must surface.
 - **D-14:** Fixtures are **invented COBOL only** (repo is public): one clean/green program as the tracer, plus guard cases — a nested program (containment-path ID), a degraded/amber program (degraded marking), and a parser-mismatch case that must fail.
 
+### Post-research confirmations (2026-09-30, user-confirmed after 02-RESEARCH.md)
+- **D-15:** Phase 2 ships **program node + source-file edge only** from the grammar (research Option A). The user accepts the temporary loss of divisions, sections, paragraphs, COPY, CALL, and PERFORM/THRU/GO TO edges until Phase 3 rebuilds them from `Observations`. Program node kind stays `graph.KindFunction` with `cobol_kind=program` (research Q2; GRAPH-SCHEMA.md:60). — **Reversibility:** costly — existing stores keep regex-era COBOL nodes until a full reindex.
+- **D-16:** The regex `internal/parser/languages/cobol.go` and its tests stay **untouched but unregistered**. Only `register.go:119` changes, to register the new grammar extractor.
+- **D-17:** **Windows:** a `!windows` build tag on the grammar extractor plus a Windows stub that returns a COBOL extraction error (consistent with D-05). No second fork change.
+- **D-18:** A small additive hook in the indexer's `applyCoverageDomains` stamps the VCS revision, or an absence reason, per D-09. This upstream-internals edit is approved.
+- **D-19:** Release binaries embedding the private fork's `grammar.json` and query files is **accepted** (the fork's releases are the user's own). Document it; no release-job changes.
+- **D-20 (research recommendations adopted by default):**
+  - Program names in IDs are kept **as written**, not upcased.
+  - `.cpy` copybooks get the file node only, with `prov_analysis_absence="copybook_standalone_analysis_unsupported"`, and skip `Analyze`.
+  - Provenance keys use the `prov_` underscore prefix and never contain secret-like substrings.
+  - The fork read credential (`COBOL_PARSER_READ_PAT`: fine-grained, single repo, Contents read-only) goes into **every** Go-building CI workflow, with setup-go module caching disabled in those jobs.
+  - The stale local `go.work` / `go.work.sum` is deleted (user-local); fork iteration uses a temporary `-modfile`.
+- **Open for Phase 3 (flag, don't plan):** confirm that the grammar distinguishes static and dynamic CALL the way the regex `dyncall` namespace does today.
+
 ### Claude's Discretion
 - Final extractor transition shape under D-06 (research decides, criterion: accuracy).
 - Native node kind for the program (keep `KindFunction` vs new `KindProgram`) — research decides, weighing existing query compatibility and fork hygiene against schema fidelity (`GRAPH-SCHEMA.md`).
