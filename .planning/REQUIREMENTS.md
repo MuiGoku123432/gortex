@@ -32,14 +32,14 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Parser Baseline
 
-- [ ] **BASE-01**: The production COBOL extraction path MUST use parser behavior reproducibly equivalent to `tree-sitter-cobol-upgrade/main` merge `97ac9f1`.
-- [ ] **BASE-02**: A clean build with `GOWORK=off` MUST either resolve the approved parser baseline or fail without silently falling back to the stock COBOL grammar.
-- [ ] **BASE-03**: Each COBOL extraction generation MUST record a parser grammar content identifier that can be compared across runs.
+- [x] **BASE-01**: The production COBOL extraction path MUST use parser behavior reproducibly equivalent to `tree-sitter-cobol-upgrade/main` merge `97ac9f1`.
+- [x] **BASE-02**: A clean build with `GOWORK=off` MUST either resolve the approved parser baseline or fail without silently falling back to the stock COBOL grammar.
+- [x] **BASE-03**: Each COBOL extraction generation MUST record a parser grammar content identifier that can be compared across runs.
 - [ ] **BASE-04**: Acceptance tests MUST verify named COBOL, DATA DIVISION, IDMS, CICS, SQL, bounded unparsed-tail, `ERROR`, and `MISSING` behavior required from baseline `97ac9f1`.
 
 ### Thin Deterministic Tracer
 
-- [ ] **TRACE-01**: The first implementation phase MUST trace one named COBOL program-definition node from the enhanced parser through the registered production extractor.
+- [x] **TRACE-01**: The first implementation phase MUST trace one named COBOL program-definition node from the enhanced parser through the registered production extractor.
 - [x] **TRACE-02**: The tracer MUST emit the program as a native Gortex graph node and its source-file relationship as a native Gortex graph edge.
 - [x] **TRACE-03**: The tracer MUST pass through the existing `ExtractionResult`, repository-prefixing, and indexer lifecycle rather than a parallel ingestion path.
 - [x] **TRACE-04**: The tracer MUST persist through the existing SQLite `AddBatch` transaction path.
@@ -50,10 +50,10 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 ### Exact Provenance
 
 - [x] **PROV-01**: Every deterministic source observation MUST retain repository, workspace, and project scope.
-- [ ] **PROV-02**: Every deterministic source observation MUST retain its normalized repository-relative source path.
-- [ ] **PROV-03**: Every deterministic source observation MUST retain exact start and end row and column positions from the parser.
+- [x] **PROV-02**: Every deterministic source observation MUST retain its normalized repository-relative source path.
+- [x] **PROV-03**: Every deterministic source observation MUST retain exact start and end row and column positions from the parser.
 - [ ] **PROV-04**: Every deterministic source observation MUST retain the source or retrieval revision that supplied its bytes.
-- [ ] **PROV-05**: Every deterministic source observation MUST retain parser and extractor version identifiers.
+- [x] **PROV-05**: Every deterministic source observation MUST retain parser and extractor version identifiers.
 - [ ] **PROV-06**: Evidence class, extraction origin, and confidence MUST remain separately queryable dimensions.
 
 ### Deterministic COBOL and Mainframe Breadth
@@ -73,8 +73,8 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Stable Identity and Incremental Idempotency
 
-- [ ] **ID-01**: Source-file and declaration identities MUST extend Gortex's existing repository-prefixed identity convention.
-- [ ] **ID-02**: Stable declaration identity MUST NOT use source line number as its sole discriminator.
+- [x] **ID-01**: Source-file and declaration identities MUST extend Gortex's existing repository-prefixed identity convention.
+- [x] **ID-02**: Stable declaration identity MUST NOT use source line number as its sole discriminator.
 - [ ] **ID-03**: Paragraph identity MUST include its owning program context.
 - [ ] **ID-04**: Resource identity MUST include the minimum available namespace needed to avoid merging distinct same-named artifacts.
 - [ ] **ID-05**: Multiple source occurrences supporting the same semantic relationship MUST retain distinguishable provenance.
@@ -219,11 +219,11 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | NEO-15 | Phase 1 | Complete |
 | NEO-16 | Phase 1 | Complete |
 | NEO-17 | Phase 1 | Complete |
-| BASE-01 | Phase 2 | Pending |
-| BASE-02 | Phase 2 | Pending |
-| BASE-03 | Phase 2 | Pending |
+| BASE-01 | Phase 2 | Complete |
+| BASE-02 | Phase 2 | Complete |
+| BASE-03 | Phase 2 | Complete |
 | BASE-04 | Phase 6 | Pending |
-| TRACE-01 | Phase 2 | Pending |
+| TRACE-01 | Phase 2 | Complete |
 | TRACE-02 | Phase 2 | Complete |
 | TRACE-03 | Phase 2 | Complete |
 | TRACE-04 | Phase 2 | Complete |
@@ -231,10 +231,10 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | TRACE-06 | Phase 2 | Complete |
 | TRACE-07 | Phase 2 | Pending |
 | PROV-01 | Phase 2 | Complete |
-| PROV-02 | Phase 2 | Pending |
-| PROV-03 | Phase 2 | Pending |
+| PROV-02 | Phase 2 | Complete |
+| PROV-03 | Phase 2 | Complete |
 | PROV-04 | Phase 2 | Pending |
-| PROV-05 | Phase 2 | Pending |
+| PROV-05 | Phase 2 | Complete |
 | PROV-06 | Phase 2 | Pending |
 | DET-01 | Phase 3 | Pending |
 | DET-02 | Phase 3 | Pending |
@@ -248,8 +248,8 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | DET-10 | Phase 3 | Pending |
 | DET-11 | Phase 3 | Pending |
 | DET-12 | Phase 3 | Pending |
-| ID-01 | Phase 2 | Pending |
-| ID-02 | Phase 2 | Pending |
+| ID-01 | Phase 2 | Complete |
+| ID-02 | Phase 2 | Complete |
 | ID-03 | Phase 4 | Pending |
 | ID-04 | Phase 4 | Pending |
 | ID-05 | Phase 4 | Pending |
