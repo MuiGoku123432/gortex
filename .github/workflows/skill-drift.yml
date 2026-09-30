@@ -26,6 +26,10 @@ on:
       - '.github/workflows/skill-drift.yml'
   workflow_dispatch:
 
+env:
+  # Keeps the private COBOL parser fork off proxy.golang.org and sum.golang.org.
+  GOPRIVATE: github.com/MuiGoku123432/tree-sitter-cobol-upgrade
+
 jobs:
   skill-drift:
     runs-on: ubuntu-latest
@@ -35,6 +39,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later (PR) runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Build CLI
         run: go build -o gortex ./cmd/gortex/

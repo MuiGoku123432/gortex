@@ -12,6 +12,10 @@ permissions:
   #   2. SLSA-3 provenance generation (the reusable workflow below also sets it)
   id-token: write
 
+env:
+  # Keeps the private COBOL parser fork off proxy.golang.org and sum.golang.org.
+  GOPRIVATE: github.com/MuiGoku123432/tree-sitter-cobol-upgrade
+
 jobs:
   # darwin is built on a NATIVE macOS runner so Apple's ld sets the
   # SG_READ_ONLY flag on the __DATA_CONST segment. The cross-compiled cask
@@ -33,6 +37,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Build darwin binaries (native Apple toolchain)
         run: |
@@ -164,6 +185,35 @@ jobs:
           # full history the changelog section will be empty or wrong.
           fetch-depth: 0
 
+      # The goreleaser-cross container below never sees the fork credential.
+      # Modules are downloaded here on the host, and the container reads that
+      # module cache offline (see "Run GoReleaser").
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+
+      - name: Download Go modules for the release container
+        run: |
+          set -euo pipefail
+          go mod download
+
       # cosign is installed on the host (outside the goreleaser-cross
       # container) so keyless OIDC signing can use the runner's identity
       # token directly — no need to plumb ACTIONS_ID_TOKEN_REQUEST_* vars
@@ -235,11 +285,21 @@ jobs:
         #
         # Image tag is pinned to the Go major.minor; bump together with
         # go.mod and the setup-go step elsewhere in the workflows.
+        #
+        # The container gets the host module cache read-only with
+        # GOPROXY=off, so it builds exactly the go.sum-pinned module set
+        # offline (or fails loudly) and needs no fork credential. Module mode
+        # stays the default read-only one, so go.mod/go.sum cannot be
+        # rewritten in here.
         run: |
           docker run --rm --privileged \
             -v "$PWD":/go/src/gortex \
+            -v "$(go env GOMODCACHE)":/go/pkg/mod:ro \
             -w /go/src/gortex \
             -e GITHUB_TOKEN \
+            -e GOPRIVATE \
+            -e GOMODCACHE=/go/pkg/mod \
+            -e GOPROXY=off \
             ghcr.io/goreleaser/goreleaser-cross:v1.27 \
             release --clean
         env:
@@ -478,6 +538,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:

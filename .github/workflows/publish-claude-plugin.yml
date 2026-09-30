@@ -36,6 +36,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keeps the private COBOL parser fork off proxy.golang.org and sum.golang.org.
+  GOPRIVATE: github.com/MuiGoku123432/tree-sitter-cobol-upgrade
+
 concurrency:
   # Serialise publishes; two concurrent runs against the same target
   # repo would race on the push.
@@ -78,8 +82,24 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: gortex/go.mod
-          cache: true
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later runs can restore.
+          cache: false
           cache-dependency-path: gortex/go.sum
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Regenerate plugin bundle
         working-directory: gortex
