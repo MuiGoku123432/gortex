@@ -156,19 +156,16 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	}
 	result := &parser.ExtractionResult{Nodes: []*graph.Node{fileNode}}
 
-	names := cobolProgramNames(h)
-	for i, o := range h.Facts.Observations {
-		name, ok := names[i]
-		if o.Kind != "program_definition" || !ok {
-			continue
-		}
+	programs, containmentUnresolved, unnamed := cobolProgramSymbols(h)
+	for _, p := range programs {
+		o := h.Facts.Observations[p.index]
 		meta := maps.Clone(docMeta)
 		meta["cobol_kind"] = "program"
 		meta["prov_observation_kind"] = o.Kind
 		meta["prov_affected"] = o.Affected
-		id := filePath + "::" + name
+		id := filePath + "::" + p.symbol
 		node := &graph.Node{
-			ID: id, Kind: graph.KindFunction, Name: name, QualName: name,
+			ID: id, Kind: graph.KindFunction, Name: p.name, QualName: p.symbol,
 			FilePath: filePath, Language: "cobol", Meta: meta,
 		}
 		if r := o.Original; r != nil {
@@ -195,37 +192,15 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 			Origin: graph.OriginASTResolved, Confidence: 1.0, ConfidenceLabel: "EXTRACTED",
 		})
 	}
+	// Set after the loop so these document-level flags stay on the file
+	// node and are not cloned into program Meta.
+	if containmentUnresolved {
+		docMeta["prov_containment_unresolved"] = true
+	}
+	if unnamed > 0 {
+		docMeta["prov_unnamed_program_count"] = unnamed
+	}
 	return result, nil
-}
-
-// cobolProgramNames maps each program_definition observation index to its
-// verbatim name: the program_name child of the identification_division
-// child of that definition. program_name children of end_program markers
-// are not definitions and never match.
-func cobolProgramNames(h handoff.Handoff) map[int]string {
-	obs := h.Facts.Observations
-	parentOf := func(i int) (int, bool) {
-		p := obs[i].Parent
-		return p, p >= 0 && p < len(obs) && p != i
-	}
-	names := make(map[int]string)
-	for i, o := range obs {
-		if o.Kind != "program_name" {
-			continue
-		}
-		div, ok := parentOf(i)
-		if !ok || obs[div].Kind != "identification_division" {
-			continue
-		}
-		def, ok := parentOf(div)
-		if !ok || obs[def].Kind != "program_definition" {
-			continue
-		}
-		if _, seen := names[def]; !seen {
-			names[def] = string(h.Generated[o.Generated.Start:o.Generated.End])
-		}
-	}
-	return names
 }
 
 var _ parser.Extractor = (*CobolGrammarExtractor)(nil)
