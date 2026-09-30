@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 02
 current_phase_name: Thin Deterministic Native Tracer and Minimum Contracts
 status: executing
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-09-30T23:35:04.945Z"
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-09-30T23:57:44.050Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 02 execution started
-state_head: db7480fdb9e30a1157efca4b7f59e9b17425cbb9
+state_head: 007e4e459e587976b907faca37dbf9af1c09f319
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 13
-  completed_plans: 11
+  completed_plans: 12
   percent: 11
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 02 (Thin Deterministic Native Tracer and Minimum Contracts) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 02 execution started
 
@@ -71,6 +71,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 02 P02 | 23 min | 2 tasks | 6 files |
 | Phase 02 P03 | 12min | 2 tasks | 4 files |
 | Phase 02 P04 | 5min | 2 tasks | 5 files |
+| Phase 02 P05 | 4min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-03: prov_extractor_version stays gortex-cobol-grammar/1 for the unreleased Phase 2 mapping; bump on first post-phase change
 - [Phase 02]: 02-03: '#'-in-ID owner helpers are harmless for KindFunction COBOL programs today; graph.NodeIsTest owner hop is latent (same-file is_test)
 - [Phase 02]: 02-04: VCS revision is sampled per stamp call (accuracy over reuse); ls-files uses --literal-pathspecs; timeouts map to git_unavailable; stamp deletes the opposite key so both never coexist
+- [Phase 02]: 02-05: Every Go-building workflow uses GOPRIVATE, setup-go cache: false, and a fail-closed COBOL_PARSER_READ_PAT insteadOf step; the release container reads a host-filled module cache read-only with GOPROXY=off and never receives the fork credential
+- [Phase 02]: 02-05: Neo4j go mod tidy drift left open (go.mod out of scope); ci.yml lint tidy check will fail until the one-line tidy result is committed (deferred-items From Plan 02-05)
 
 ### Pending Todos
 
@@ -131,6 +134,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T23:35:04.901Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-09-30T23:57:44.009Z
+Stopped at: Completed 02-05-PLAN.md
 Resume file: None

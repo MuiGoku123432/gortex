@@ -74,7 +74,7 @@ Plans:
   4. A user can retrieve the same persisted node through an existing CLI query and an existing MCP query.
   5. The tracer acceptance passes with all AI providers disabled and no Neo4j installation, with SQLite as the sole authoritative store and no deterministic dual-write.
 
-**Plans**: 4/6 plans executed
+**Plans**: 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -92,7 +92,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 02-05-PLAN.md -- CI read credential, disabled module caches, stock-grammar negative, credential-free release container
+- [x] 02-05-PLAN.md -- CI read credential, disabled module caches, stock-grammar negative, credential-free release container
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -213,7 +213,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. General Neo4j Projection Command | 7/7 | Complete    | 2026-09-22 |
-| 2. Thin Deterministic Native Tracer and Minimum Contracts | 4/6 | In Progress|  |
+| 2. Thin Deterministic Native Tracer and Minimum Contracts | 5/6 | In Progress|  |
 | 3. Deterministic COBOL and Mainframe Breadth | 0/TBD | Deferred: parser/grammar readiness | - |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 0/TBD | Deferred: Phase 3 | - |
 | 5. Explicit Unresolved Evidence | 0/TBD | Deferred: Phase 4 | - |
