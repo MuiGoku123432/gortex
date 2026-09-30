@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 02
 current_phase_name: Thin Deterministic Native Tracer and Minimum Contracts
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-30T22:20:03.187Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-09-30T22:47:10.623Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 02 execution started
-state_head: 96e8bedb546cd101000e096a25787f0186612316
+state_head: 397178a47acee8eec0b881a7ff341fd66b8b9177
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 13
-  completed_plans: 8
+  completed_plans: 9
   percent: 11
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 02 (Thin Deterministic Native Tracer and Minimum Contracts) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 02 execution started
 
@@ -68,6 +68,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 01 P06 | 38 min | 2 tasks | 7 files |
 | Phase 01 P07 | 37 min | 2 tasks | 11 files |
 | Phase 02 P01 | 30 min | 2 tasks | 5 files |
+| Phase 02 P02 | 23 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Classify neo4j_push as an external write while retaining dry-run without a second confirmation field.
 - [Phase 02]: Fork commit f9eaf99c34a92db6f5487d316cf9977295a62a7d (parent f19029f, floor 97ac9f1) is pushed and is the commit Plan 02-02 pins; it adds AttestEmbedded, NewEmbeddedAnalyzer, and NewContentID.
 - [Phase 02]: Embedded attestation drops only the on-disk checkout hash read; compiled-language identity comparison and ToolID are unchanged.
+- [Phase 02]: 02-02: Pinned fork preprocessor and forest-shim/cobol replace at v0.0.0-20260930215433-f9eaf99c34a9 (commit f9eaf99); prov_parser_module records the replacement path@version from build info.
+- [Phase 02]: 02-02: CobolGrammarExtractor (register.go:119) emits file + KindFunction program (cobol_kind=program) + EdgeDefines with the prov_* contract; unapproved grammar or failed attestation fails extraction with no fallback.
+- [Phase 02]: 02-02: Pre-existing go mod tidy drift (neo4j-go-driver indirect to direct) and the BASE-02 CI step's missing stock go.sum lines are deferred to Plan 02-05 (deferred-items.md).
 
 ### Pending Todos
 
@@ -120,6 +124,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T22:20:03.153Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-09-30T22:46:54.874Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None

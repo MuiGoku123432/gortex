@@ -40,16 +40,16 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 ### Thin Deterministic Tracer
 
 - [ ] **TRACE-01**: The first implementation phase MUST trace one named COBOL program-definition node from the enhanced parser through the registered production extractor.
-- [ ] **TRACE-02**: The tracer MUST emit the program as a native Gortex graph node and its source-file relationship as a native Gortex graph edge.
-- [ ] **TRACE-03**: The tracer MUST pass through the existing `ExtractionResult`, repository-prefixing, and indexer lifecycle rather than a parallel ingestion path.
-- [ ] **TRACE-04**: The tracer MUST persist through the existing SQLite `AddBatch` transaction path.
-- [ ] **TRACE-05**: The traced node MUST be retrievable through at least one existing CLI query.
-- [ ] **TRACE-06**: The traced node MUST be retrievable through at least one existing MCP query.
+- [x] **TRACE-02**: The tracer MUST emit the program as a native Gortex graph node and its source-file relationship as a native Gortex graph edge.
+- [x] **TRACE-03**: The tracer MUST pass through the existing `ExtractionResult`, repository-prefixing, and indexer lifecycle rather than a parallel ingestion path.
+- [x] **TRACE-04**: The tracer MUST persist through the existing SQLite `AddBatch` transaction path.
+- [x] **TRACE-05**: The traced node MUST be retrievable through at least one existing CLI query.
+- [x] **TRACE-06**: The traced node MUST be retrievable through at least one existing MCP query.
 - [ ] **TRACE-07**: The tracer acceptance test MUST pass with all AI providers disabled and no Neo4j installation.
 
 ### Exact Provenance
 
-- [ ] **PROV-01**: Every deterministic source observation MUST retain repository, workspace, and project scope.
+- [x] **PROV-01**: Every deterministic source observation MUST retain repository, workspace, and project scope.
 - [ ] **PROV-02**: Every deterministic source observation MUST retain its normalized repository-relative source path.
 - [ ] **PROV-03**: Every deterministic source observation MUST retain exact start and end row and column positions from the parser.
 - [ ] **PROV-04**: Every deterministic source observation MUST retain the source or retrieval revision that supplied its bytes.
@@ -224,13 +224,13 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | BASE-03 | Phase 2 | Pending |
 | BASE-04 | Phase 6 | Pending |
 | TRACE-01 | Phase 2 | Pending |
-| TRACE-02 | Phase 2 | Pending |
-| TRACE-03 | Phase 2 | Pending |
-| TRACE-04 | Phase 2 | Pending |
-| TRACE-05 | Phase 2 | Pending |
-| TRACE-06 | Phase 2 | Pending |
+| TRACE-02 | Phase 2 | Complete |
+| TRACE-03 | Phase 2 | Complete |
+| TRACE-04 | Phase 2 | Complete |
+| TRACE-05 | Phase 2 | Complete |
+| TRACE-06 | Phase 2 | Complete |
 | TRACE-07 | Phase 2 | Pending |
-| PROV-01 | Phase 2 | Pending |
+| PROV-01 | Phase 2 | Complete |
 | PROV-02 | Phase 2 | Pending |
 | PROV-03 | Phase 2 | Pending |
 | PROV-04 | Phase 2 | Pending |
