@@ -116,7 +116,7 @@ func RegisterAll(reg *parser.Registry) {
 	reg.Register(NewCrystalExtractor())
 	reg.Register(NewNimExtractor())
 	reg.Register(NewPascalExtractor())
-	reg.Register(NewCobolExtractor())
+	reg.Register(NewCobolGrammarExtractor())
 	reg.Register(NewJCLExtractor())
 	reg.Register(NewAdaExtractor())
 	reg.Register(NewPowerShellExtractor())
