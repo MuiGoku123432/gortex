@@ -52,9 +52,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - [x] **PROV-01**: Every deterministic source observation MUST retain repository, workspace, and project scope.
 - [x] **PROV-02**: Every deterministic source observation MUST retain its normalized repository-relative source path.
 - [x] **PROV-03**: Every deterministic source observation MUST retain exact start and end row and column positions from the parser.
-- [ ] **PROV-04**: Every deterministic source observation MUST retain the source or retrieval revision that supplied its bytes.
+- [x] **PROV-04**: Every deterministic source observation MUST retain the source or retrieval revision that supplied its bytes.
 - [x] **PROV-05**: Every deterministic source observation MUST retain parser and extractor version identifiers.
-- [ ] **PROV-06**: Evidence class, extraction origin, and confidence MUST remain separately queryable dimensions.
+- [x] **PROV-06**: Evidence class, extraction origin, and confidence MUST remain separately queryable dimensions.
 
 ### Deterministic COBOL and Mainframe Breadth
 
@@ -233,9 +233,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | PROV-01 | Phase 2 | Complete |
 | PROV-02 | Phase 2 | Complete |
 | PROV-03 | Phase 2 | Complete |
-| PROV-04 | Phase 2 | Pending |
+| PROV-04 | Phase 2 | Complete |
 | PROV-05 | Phase 2 | Complete |
-| PROV-06 | Phase 2 | Pending |
+| PROV-06 | Phase 2 | Complete |
 | DET-01 | Phase 3 | Pending |
 | DET-02 | Phase 3 | Pending |
 | DET-03 | Phase 3 | Pending |

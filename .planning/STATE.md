@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 02
 current_phase_name: Thin Deterministic Native Tracer and Minimum Contracts
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-09-30T23:26:25.478Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-09-30T23:35:04.945Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 02 execution started
-state_head: 45850336fb8a77f9f84af59a11fd088112744ae3
+state_head: db7480fdb9e30a1157efca4b7f59e9b17425cbb9
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 13
-  completed_plans: 10
+  completed_plans: 11
   percent: 11
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 02 (Thin Deterministic Native Tracer and Minimum Contracts) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 02 execution started
 
@@ -70,6 +70,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 02 P01 | 30 min | 2 tasks | 5 files |
 | Phase 02 P02 | 23 min | 2 tasks | 6 files |
 | Phase 02 P03 | 12min | 2 tasks | 4 files |
+| Phase 02 P04 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,7 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-03: Copybooks (.cpy/.CPY) skip Analyze and carry only identity + NewContentID revision + prov_analysis_absence=copybook_standalone_analysis_unsupported
 - [Phase 02]: 02-03: prov_extractor_version stays gortex-cobol-grammar/1 for the unreleased Phase 2 mapping; bump on first post-phase change
 - [Phase 02]: 02-03: '#'-in-ID owner helpers are harmless for KindFunction COBOL programs today; graph.NodeIsTest owner hop is latent (same-file is_test)
+- [Phase 02]: 02-04: VCS revision is sampled per stamp call (accuracy over reuse); ls-files uses --literal-pathspecs; timeouts map to git_unavailable; stamp deletes the opposite key so both never coexist
 
 ### Pending Todos
 
@@ -129,6 +131,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T23:26:25.435Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-09-30T23:35:04.901Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
