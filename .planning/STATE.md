@@ -4,11 +4,11 @@ milestone: v1.0
 current_phase: 02
 current_phase_name: Thin Deterministic Native Tracer and Minimum Contracts
 status: planning
-stopped_at: Phase 01 complete, ready to plan Phase 02
-last_updated: "2026-09-22T13:21:48.336Z"
+stopped_at: Phase 2 context gathered
+last_updated: "2026-09-30T16:43:01.153Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 01 complete, transitioned to Phase 02
-state_head: dcee2266a0ce4e414af530f237977ee9e245ea8f
+state_head: f130508d89551111dfc992ed2a0297fb60cfb140
 progress:
   total_phases: 9
   completed_phases: 1
@@ -103,7 +103,7 @@ None yet.
 
 - [Phase 1]: Exact command name, connection/driver syntax, and default stale-record deletion policy remain discuss-phase decisions; requirements define behavior, not those details.
 - [Phase 1]: Projection design must prove stable relationship keys, Neo4j constraint support, bounded retry behavior, and scope-safe stale-record reconciliation.
-- [Phase 2]: COBOL parser/grammar readiness blocks the tracer and all later grammar-dependent work.
+- [Phase 2]: COBOL parser/grammar readiness now available (2026-09-30) from tree-sitter-cobol-upgrade v0.26.0 -- see .planning/research/COBOL-PARSER-READINESS.md for setup (go.work is currently stale and must be recreated), the handoff API, and the Gortex mapping. Phase 2 can be planned.
 - [Phase 4]: Copybook/library search order and canonical cross-repository resolution domains need corpus evidence.
 - [Phases 7-9]: Provider authorization, retention, claim-ledger, reviewer authority, and evaluation thresholds remain policy/design decisions.
 
@@ -117,6 +117,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-21T23:24:03.982Z
-Stopped at: Phase 01 complete, ready to plan Phase 02
-Resume file: None
+Last session: 2026-09-30T16:43:01.111Z
+Stopped at: Phase 2 context gathered
+Resume file: .planning/phases/02-thin-deterministic-native-tracer-and-minimum-contracts/02-CONTEXT.md
