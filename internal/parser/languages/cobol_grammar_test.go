@@ -4,7 +4,10 @@ package languages
 
 import (
 	"context"
+	"errors"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
@@ -296,4 +299,172 @@ func TestCobolGrammar_UnnamedProgramCounted(t *testing.T) {
 	file := cobolFileNode(t, result, "src/unnamed.cbl")
 	assert.Equal(t, 1, file.Meta["prov_unnamed_program_count"])
 	assert.Equal(t, "red", file.Meta["prov_document_grade"])
+}
+
+const cobolAmberFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AMBERPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC X(
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           GOBACK.
+`
+
+const cobolRedFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BADPGM.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE ))) TO (((.
+           GOBACK.
+`
+
+const cobolCopybookFixture = `       01 CUST-REC.
+           05 CUST-ID      PIC 9(6).
+           05 CUST-NAME    PIC X(30).
+`
+
+var cobolGrammarHex64 = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// cobolWrongGrammarID is an approved-grammar pin no real grammar produces.
+var cobolWrongGrammarID = strings.Repeat("0", 64)
+
+func TestCobolGrammar_DegradedAmber(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	for _, tc := range []struct {
+		name, path, src, id, grade string
+	}{
+		{"amber", "src/amber.cbl", cobolAmberFixture, "src/amber.cbl::AMBERPGM", "amber"},
+		{"red", "src/bad.cbl", cobolRedFixture, "src/bad.cbl::BADPGM", "red"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			programs := cobolProgramNodes(extractCobolGrammar(t, e, tc.path, tc.src))
+			require.Len(t, programs, 1, "a degraded document still emits its program (D-07)")
+			program := programs[0]
+			assert.Equal(t, tc.id, program.ID)
+			assert.Equal(t, tc.grade, program.Meta["prov_document_grade"])
+			reasons, ok := program.Meta["prov_document_grade_reasons"].([]string)
+			require.True(t, ok)
+			assert.NotEmpty(t, reasons)
+			if tc.grade == "amber" {
+				assert.Contains(t, reasons, "missing-node")
+			}
+			// Confidence is not evidence (handoff section 6): degradation
+			// shows in the grade keys, never in a lowered confidence.
+			assert.InDelta(t, 1.0, program.Meta["prov_confidence"], 0)
+
+			h := cobolTestHandoff(t, e, tc.path, tc.src)
+			affected, found := false, false
+			for _, o := range h.Facts.Observations {
+				if o.Kind == "program_definition" {
+					affected, found = o.Affected, true
+					break
+				}
+			}
+			require.True(t, found)
+			assert.Equal(t, affected, program.Meta["prov_affected"])
+		})
+	}
+}
+
+func TestCobolGrammar_CopybookSkipsAnalysis(t *testing.T) {
+	for _, path := range []string{"copy/custrec.cpy", "COPY/CUSTREC.CPY"} {
+		t.Run(path, func(t *testing.T) {
+			for _, e := range []*CobolGrammarExtractor{
+				NewCobolGrammarExtractor(),
+				// A wrong pin still succeeds: Analyze and the grammar check
+				// are never reached for a copybook.
+				{approvedGrammarID: cobolWrongGrammarID},
+			} {
+				result := extractCobolGrammar(t, e, path, cobolCopybookFixture)
+				require.Len(t, result.Nodes, 1)
+				assert.Empty(t, result.Edges)
+				file := cobolFileNode(t, result, path)
+				assert.Equal(t, "copybook_standalone_analysis_unsupported", file.Meta["prov_analysis_absence"])
+				assert.Equal(t, path, file.Meta["prov_source_path"])
+				assert.Equal(t, cobolGrammarExtractorVersion, file.Meta["prov_extractor_version"])
+				assert.Regexp(t, cobolGrammarHex64, file.Meta["prov_source_id"])
+				assert.Equal(t, string(preprocessor.NewContentID([]byte(cobolCopybookFixture))),
+					file.Meta["prov_revision_content_id"])
+				assert.NotContains(t, file.Meta, "prov_document_grade")
+				for key := range file.Meta {
+					assert.False(t, strings.HasPrefix(key, "prov_parser_"), "copybook carries %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestCobolGrammar_EmptySource(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	result, err := e.Extract("src/empty.cbl", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Nodes, 1, "no program is fabricated from an empty source")
+	assert.Empty(t, result.Edges)
+	file := cobolFileNode(t, result, "src/empty.cbl")
+	for _, key := range cobolDocumentKeys {
+		assert.Contains(t, file.Meta, key)
+	}
+	assert.Equal(t, "red", file.Meta["prov_document_grade"])
+}
+
+func TestCobolGrammar_ConcurrentExtract(t *testing.T) {
+	// A fresh extractor, so the sync.Once initialization races as well.
+	e := NewCobolGrammarExtractor()
+	const workers = 8
+	ids := make([][]string, workers)
+	errs := make([]error, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := e.Extract("src/nest.cbl", []byte(cobolNestedFixture))
+			errs[i] = err
+			if err == nil {
+				ids[i] = cobolProgramIDs(result)
+			}
+		}()
+	}
+	wg.Wait()
+	want := []string{"src/nest.cbl::OUTERPGM", "src/nest.cbl::OUTERPGM/INNERPGM"}
+	for i := range workers {
+		require.NoError(t, errs[i])
+		assert.Equal(t, want, ids[i], "worker %d", i)
+	}
+}
+
+func TestCobolGrammar_ApprovedGrammarPinned(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	first := extractCobolGrammar(t, e, "src/demo.cbl", cobolDemoFixture)
+	second := extractCobolGrammar(t, e, "src/nest.cbl", cobolNestedFixture)
+
+	firstFile := cobolFileNode(t, first, "src/demo.cbl")
+	secondFile := cobolFileNode(t, second, "src/nest.cbl")
+	programs := cobolProgramNodes(first)
+	require.Len(t, programs, 1)
+	for _, n := range []*graph.Node{firstFile, programs[0], secondFile} {
+		assert.Equal(t, cobolApprovedGrammarID, n.Meta["prov_parser_grammar_id"], n.ID)
+		for _, key := range []string{
+			"prov_parser_tool_id", "prov_source_id", "prov_revision_content_id",
+			"prov_parse_config_id", "prov_transform_config_id",
+		} {
+			assert.Regexp(t, cobolGrammarHex64, n.Meta[key], "%s %s", n.ID, key)
+		}
+	}
+	// PROV-05: one process, one parser and extractor identity for every file.
+	for _, key := range []string{"prov_parser_tool_id", "prov_parser_module", "prov_extractor_version"} {
+		assert.Equal(t, firstFile.Meta[key], secondFile.Meta[key], key)
+	}
+}
+
+func TestCobolGrammar_GrammarMismatchFails(t *testing.T) {
+	e := &CobolGrammarExtractor{approvedGrammarID: cobolWrongGrammarID}
+	result, err := e.Extract("src/demo.cbl", []byte(cobolDemoFixture))
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, errCobolGrammarNotApproved), "err = %v", err)
+	assert.Contains(t, err.Error(), cobolApprovedGrammarID, "names the observed grammar")
+	assert.Contains(t, err.Error(), cobolWrongGrammarID, "names the expected grammar")
 }
