@@ -150,6 +150,10 @@ status: complete
 
 - The unfiltered `./preprocessor/` suite ran for more than 10 minutes during planning, so the plan's anchored test selectors were used.
 
+## Requirements Status Note
+
+`requirements-completed` lists this plan's IDs, as the template requires. This plan delivers only the producer-side prerequisite for BASE-01, BASE-02, and BASE-03. The Gortex-side requirements (a `GOWORK=off` build that resolves the pin, fail-closed on the stock grammar, and a per-generation grammar ID) are not met until Plan 02-02 and later plans land. For that reason `REQUIREMENTS.md` checkboxes and traceability rows were left at Pending rather than marked Complete.
+
 ## User Setup Required
 
 None. The one human step, the push, is done.
