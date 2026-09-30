@@ -258,18 +258,20 @@ func TestCobolTracer_PersistsThroughAddBatch(t *testing.T) {
 		"no SQLite node row for %s", repo.programID)
 }
 
-// TestCobolTracer_MCPGetSymbol retrieves the program by its exact prefixed ID
-// through the real daemon relay and MCP get_symbol with detail=full.
-func TestCobolTracer_MCPGetSymbol(t *testing.T) {
-	repo := indexCobolTracerRepo(t)
+// startCobolTracerDaemon indexes the fixture repository and serves it from an
+// in-process daemon over the real relay. The MCP server gets no LLM service,
+// and no Neo4j profile or environment is configured.
+func startCobolTracerDaemon(t *testing.T) (repo cobolTracerRepo, socket string, srv *gortexmcp.Server) {
+	t.Helper()
+	repo = indexCobolTracerRepo(t)
 
 	// note: second occurrence of spinUpDaemonWithConfig's wiring; that helper
 	// hard-codes an in-memory graph and a Go fixture, so it cannot host this
 	// SQLite-backed COBOL repository.
-	socket := filepath.Join(repo.dir, "s")
+	socket = filepath.Join(repo.dir, "s")
 	t.Setenv("GORTEX_DAEMON_SOCKET", socket)
 	t.Setenv("GORTEX_DAEMON_PIDFILE", filepath.Join(repo.dir, "p"))
-	srv := gortexmcp.NewServer(query.NewEngine(repo.store), repo.store, repo.idx, nil, zap.NewNop(), nil,
+	srv = gortexmcp.NewServer(query.NewEngine(repo.store), repo.store, repo.idx, nil, zap.NewNop(), nil,
 		gortexmcp.MultiRepoOptions{MultiIndexer: repo.mi, ConfigManager: repo.cm})
 	lifecycle, err := indexer.NewCheckoutLifecycle(indexer.CheckoutLifecycleConfig{
 		MultiIndexer:  repo.mi,
@@ -303,10 +305,16 @@ func TestCobolTracer_MCPGetSymbol(t *testing.T) {
 	})
 	require.Eventually(t, func() bool { return daemon.IsRunningAt(socket) },
 		2*time.Second, 10*time.Millisecond)
+	return repo, socket, srv
+}
 
+// callCobolTracerTool runs one MCP tools/call over the daemon relay and
+// returns the first content text of a successful result.
+func callCobolTracerTool(t *testing.T, socket, cwd, tool string, args map[string]any) string {
+	t.Helper()
 	client, err := daemon.DialTo(socket, daemon.Handshake{
 		Mode:       daemon.ModeMCP,
-		CWD:        repo.root,
+		CWD:        cwd,
 		ClientName: "cobol-tracer",
 		Tools:      cliLegacyToolSurface,
 		ToolsMode:  cliLegacyToolMode,
@@ -321,10 +329,7 @@ func TestCobolTracer_MCPGetSymbol(t *testing.T) {
 
 	frame, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-		"params": map[string]any{
-			"name":      "get_symbol",
-			"arguments": map[string]any{"id": repo.programID, "detail": "full", "format": "json"},
-		},
+		"params": map[string]any{"name": tool, "arguments": args},
 	})
 	require.NoError(t, err)
 	require.NoError(t, client.WriteMCPFrame(frame))
@@ -341,15 +346,28 @@ func TestCobolTracer_MCPGetSymbol(t *testing.T) {
 		Error map[string]any `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal(reply, &resp))
-	require.Nil(t, resp.Error, "get_symbol must not error: %s", reply)
-	require.False(t, resp.Result.IsError, "get_symbol returned a tool error: %s", reply)
-	require.NotEmpty(t, resp.Result.Content, "no content: %s", reply)
+	require.Nil(t, resp.Error, "%s must not error: %s", tool, reply)
+	require.False(t, resp.Result.IsError, "%s returned a tool error: %s", tool, reply)
+	require.NotEmpty(t, resp.Result.Content, "%s returned no content: %s", tool, reply)
+	return resp.Result.Content[0].Text
+}
 
-	var payload struct {
-		Node    map[string]any   `json:"node"`
-		InEdges []map[string]any `json:"in_edges"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(resp.Result.Content[0].Text), &payload))
+// cobolTracerSymbol is the get_symbol detail=full payload.
+type cobolTracerSymbol struct {
+	Node    map[string]any   `json:"node"`
+	InEdges []map[string]any `json:"in_edges"`
+}
+
+// TestCobolTracer_MCPGetSymbol retrieves the program by its exact prefixed ID
+// through the real daemon relay and MCP get_symbol with detail=full.
+func TestCobolTracer_MCPGetSymbol(t *testing.T) {
+	repo, socket, _ := startCobolTracerDaemon(t)
+
+	var payload cobolTracerSymbol
+	// detail=full: the brief detail omits Meta, hiding every provenance key.
+	text := callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": repo.programID, "detail": "full", "format": "json"})
+	require.NoError(t, json.Unmarshal([]byte(text), &payload))
 	require.Equal(t, repo.programID, payload.Node["id"])
 	assertCobolTracerProgram(t, payload.Node, repo.prefix)
 
@@ -360,4 +378,62 @@ func TestCobolTracer_MCPGetSymbol(t *testing.T) {
 		}
 	}
 	assert.True(t, definedByFile, "in_edges lacks defines from %s: %v", repo.fileID, payload.InEdges)
+}
+
+// TestCobolTracer_CLIGetSymbol retrieves the program through the matching CLI
+// verb, `gortex call get_symbol`, over the real daemon relay (no stub).
+func TestCobolTracer_CLIGetSymbol(t *testing.T) {
+	repo, _, _ := startCobolTracerDaemon(t)
+
+	cmd, buf := newCallTestCmd(t)
+	callIndex = repo.root
+	callArgs = []string{"id=" + repo.programID, "detail=full"}
+	require.NoError(t, runCall(cmd, []string{"get_symbol"}))
+
+	var payload cobolTracerSymbol
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &payload), "CLI output: %s", buf.String())
+	require.Equal(t, repo.programID, payload.Node["id"])
+	assertCobolTracerProgram(t, payload.Node, repo.prefix)
+}
+
+// TestCobolTracer_SearchSymbolsByName proves the program is discoverable by
+// its name through MCP search_symbols.
+func TestCobolTracer_SearchSymbolsByName(t *testing.T) {
+	repo, socket, _ := startCobolTracerDaemon(t)
+
+	text := callCobolTracerTool(t, socket, repo.root, "search_symbols",
+		map[string]any{"query": "DEMOPGM", "format": "json"})
+	var found struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &found), "search_symbols output: %s", text)
+	var ids []string
+	for _, r := range found.Results {
+		ids = append(ids, r.ID)
+	}
+	assert.Contains(t, ids, repo.programID)
+}
+
+// TestCobolTracer_NoAINoNeo4j proves the slice runs with AI off: no LLM
+// service, an empty provider setting, and no ask tool, while get_symbol still
+// serves the program. No Neo4j profile or environment is configured here; the
+// plan's verify step separately proves the Neo4j driver is absent from the
+// indexer, parser, and SQLite store dependency closure.
+func TestCobolTracer_NoAINoNeo4j(t *testing.T) {
+	repo, socket, srv := startCobolTracerDaemon(t)
+
+	assert.Nil(t, srv.LLMService())
+	assert.Empty(t, os.Getenv("GORTEX_LLM_PROVIDER"))
+	tools := srv.RegisteredScopedTools()
+	assert.Contains(t, tools, "get_symbol")
+	assert.NotContains(t, tools, "ask")
+
+	var payload cobolTracerSymbol
+	// note: same get_symbol arguments as TestCobolTracer_MCPGetSymbol.
+	text := callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": repo.programID, "detail": "full", "format": "json"})
+	require.NoError(t, json.Unmarshal([]byte(text), &payload))
+	assert.Equal(t, repo.programID, payload.Node["id"])
 }
