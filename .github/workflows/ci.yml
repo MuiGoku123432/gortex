@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Keeps the private COBOL parser fork off proxy.golang.org and sum.golang.org.
+  GOPRIVATE: github.com/MuiGoku123432/tree-sitter-cobol-upgrade
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -23,9 +27,52 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later (PR) runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Build
         run: go build -o gortex ./cmd/gortex/
+
+      # BASE-02: dropping the forest-shim replace must make the grammar pin
+      # test fail on the attestation mismatch, never pass on the stock
+      # grammar and never fail for some other reason (e.g. a missing go.sum
+      # line). -mod=mod lets the temp modfile fetch stock cobol's sums.
+      - name: Stock COBOL grammar must fail closed
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cp go.mod "$tmp/stock.mod"
+          cp go.sum "$tmp/stock.sum"
+          go mod edit -modfile="$tmp/stock.mod" -dropreplace=github.com/alexaandru/go-sitter-forest/cobol
+          if GOFLAGS=-mod=mod go test -modfile="$tmp/stock.mod" -count=1 ./internal/parser/languages/ \
+              -run '^TestCobolGrammar_ApprovedGrammarPinned$' > "$tmp/stock.out" 2>&1; then
+            cat "$tmp/stock.out"
+            echo "::error::the stock go-sitter-forest COBOL grammar was accepted"
+            exit 1
+          fi
+          if ! grep -q 'compiled forest language identity mismatch' "$tmp/stock.out"; then
+            cat "$tmp/stock.out"
+            echo "::error::the stock COBOL grammar failed for the wrong reason"
+            exit 1
+          fi
+          echo "stock COBOL grammar rejected: compiled forest language identity mismatch"
 
       - name: Test
         if: matrix.os != 'windows-latest'
@@ -70,6 +117,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later (PR) runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Build with the release link flags
         env:
@@ -111,6 +175,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later (PR) runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
@@ -141,6 +222,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later (PR) runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Install ONNX Runtime
         run: |
@@ -179,6 +277,23 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The module cache holds the private COBOL parser source; never
+          # save it to an Actions cache that later (PR) runs can restore.
+          cache: false
+
+      - name: Configure read access to the private COBOL parser module
+        shell: bash
+        env:
+          COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
+            echo "::error::COBOL_PARSER_READ_PAT is not configured"
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
+            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
 
       - name: Run benchmarks
         run: go test -bench=. -benchmem -count=1 -benchtime=1s -timeout=20m ./internal/parser/languages/ ./internal/query/ ./internal/graph/
