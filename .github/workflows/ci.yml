@@ -35,15 +35,20 @@ jobs:
         shell: bash
         env:
           COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        # The URL rewrite holding the token lives only in this step's
+        # environment (GIT_CONFIG_*), never in ~/.gitconfig, so this step
+        # downloads every module and later steps, including third-party
+        # actions, build from the warm module cache without the token.
         run: |
           set -euo pipefail
           if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
             echo "::error::COBOL_PARSER_READ_PAT is not configured"
             exit 1
           fi
-          git config --global \
-            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
-            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          go mod download
 
       - name: Build
         run: go build -o gortex ./cmd/gortex/
@@ -125,15 +130,20 @@ jobs:
         shell: bash
         env:
           COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        # The URL rewrite holding the token lives only in this step's
+        # environment (GIT_CONFIG_*), never in ~/.gitconfig, so this step
+        # downloads every module and later steps, including third-party
+        # actions, build from the warm module cache without the token.
         run: |
           set -euo pipefail
           if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
             echo "::error::COBOL_PARSER_READ_PAT is not configured"
             exit 1
           fi
-          git config --global \
-            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
-            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          go mod download
 
       - name: Build with the release link flags
         env:
@@ -183,15 +193,20 @@ jobs:
         shell: bash
         env:
           COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        # The URL rewrite holding the token lives only in this step's
+        # environment (GIT_CONFIG_*), never in ~/.gitconfig, so this step
+        # downloads every module and later steps, including third-party
+        # actions, build from the warm module cache without the token.
         run: |
           set -euo pipefail
           if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
             echo "::error::COBOL_PARSER_READ_PAT is not configured"
             exit 1
           fi
-          git config --global \
-            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
-            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          go mod download
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
@@ -230,15 +245,20 @@ jobs:
         shell: bash
         env:
           COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        # The URL rewrite holding the token lives only in this step's
+        # environment (GIT_CONFIG_*), never in ~/.gitconfig, so this step
+        # downloads every module and later steps, including third-party
+        # actions, build from the warm module cache without the token.
         run: |
           set -euo pipefail
           if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
             echo "::error::COBOL_PARSER_READ_PAT is not configured"
             exit 1
           fi
-          git config --global \
-            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
-            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          go mod download
 
       - name: Install ONNX Runtime
         run: |
@@ -285,15 +305,20 @@ jobs:
         shell: bash
         env:
           COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        # The URL rewrite holding the token lives only in this step's
+        # environment (GIT_CONFIG_*), never in ~/.gitconfig, so this step
+        # downloads every module and later steps, including third-party
+        # actions, build from the warm module cache without the token.
         run: |
           set -euo pipefail
           if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
             echo "::error::COBOL_PARSER_READ_PAT is not configured"
             exit 1
           fi
-          git config --global \
-            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
-            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          go mod download
 
       - name: Run benchmarks
         run: go test -bench=. -benchmem -count=1 -benchtime=1s -timeout=20m ./internal/parser/languages/ ./internal/query/ ./internal/graph/

@@ -47,15 +47,20 @@ jobs:
         shell: bash
         env:
           COBOL_PARSER_READ_PAT: ${{ secrets.COBOL_PARSER_READ_PAT }}
+        # The URL rewrite holding the token lives only in this step's
+        # environment (GIT_CONFIG_*), never in ~/.gitconfig, so this step
+        # downloads every module and later steps, including third-party
+        # actions, build from the warm module cache without the token.
         run: |
           set -euo pipefail
           if [ -z "${COBOL_PARSER_READ_PAT:-}" ]; then
             echo "::error::COBOL_PARSER_READ_PAT is not configured"
             exit 1
           fi
-          git config --global \
-            url."https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade".insteadOf \
-            "https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="url.https://x-access-token:${COBOL_PARSER_READ_PAT}@github.com/MuiGoku123432/tree-sitter-cobol-upgrade.insteadOf"
+          export GIT_CONFIG_VALUE_0="https://github.com/MuiGoku123432/tree-sitter-cobol-upgrade"
+          go mod download
 
       - name: Build CLI
         run: go build -o gortex ./cmd/gortex/
