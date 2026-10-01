@@ -34,3 +34,10 @@ Out-of-scope discoveries logged during execution. They were not fixed in the pla
    - User action to restore Dependabot: create a Dependabot secret `COBOL_PARSER_READ_PAT` (same fine-grained, single-repo, Contents read-only token), then add the `registries: cobol-fork` entry shown in `.github/dependabot.yml` and reference it from the gomod update. The entry was not added yet, so the config never references a secret that does not exist.
    - Owner: user (secret provisioning), then a one-line config follow-up.
    status: open
+
+## From code review (02-REVIEW.md), deferred 2026-10-01 (user-approved)
+
+- [ ] **WR-04 — COBOL analyze slot is per-process; slot wait counts against `max_extract_millis`.** Needs the indexer's extraction budget plumbed into the extractor (upstream `skip_telemetry.go` beyond the D-18 hook) and a crash-isolation design decision. Target: Phase 4 (lifecycle). Documented in the `cobolAnalyzeSlot` comment (43c2e807).
+- [ ] **FK-01 (fork) — `AttestEmbedded` reports `CheckoutArtifactID` from a generated constant without verifying it.** Producer-side; needs a fork commit, user-approved push, and a Gortex re-pin. Gortex trust is unaffected (compiled-language ID is still verified; Gortex pins both modules).
+- [ ] **FK-02 (fork) — `dependencyVersion` ignores `replace`, so `ToolIdentity.ForestModuleVersion` records stock `v1.9.1`.** Same fix path as FK-01. Gortex's own `prov_parser_module` records the replaced shim version correctly.
+- [ ] **CR-01 residual — `prov_start_byte`/`prov_end_byte` are off by the BOM length for BOM-prefixed files.** PROV-03 edge case; fixtures have no BOM. Target: Phase 3.
