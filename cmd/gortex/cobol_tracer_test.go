@@ -171,7 +171,9 @@ func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix, commit 
 	module, _ := meta["prov_parser_module"].(string)
 	assert.True(t, strings.HasPrefix(module, "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/forest-shim/cobol@v0.0.0-"),
 		"prov_parser_module = %q", module)
-	assert.Equal(t, "gortex-cobol-grammar/1", meta["prov_extractor_version"])
+	assert.Equal(t, "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor@v0.0.0-20260930215433-f9eaf99c34a9",
+		meta["prov_preprocessor_module"])
+	assert.Equal(t, "gortex-cobol-grammar/2", meta["prov_extractor_version"])
 	assert.Equal(t, "DETERMINISTIC", meta["prov_evidence_class"])
 	assert.Equal(t, "ast_resolved", meta["prov_origin"])
 	assert.InDelta(t, 1.0, meta["prov_confidence"], 0)

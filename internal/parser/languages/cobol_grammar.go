@@ -25,21 +25,37 @@ import (
 const (
 	// cobolApprovedGrammarID is the Gortex-side approved-grammar pin. The
 	// preprocessor's embedded attestation proves the linked grammar is the
-	// one that module was generated against; this constant proves that
-	// module is the approved one, so a go.mod bump to another fork commit
-	// cannot silently move the parser baseline (BASE-01, BASE-02).
+	// one that module was generated against; this constant checks the
+	// compiled grammar the handoff reports (BASE-02). It does not move when
+	// only the preprocessor module changes; cobolApprovedPreprocessorModule
+	// covers that.
 	cobolApprovedGrammarID = "f97452e11a2b80b92acb7edf776131470bc2e1ffd7c077f4ade4ce3c3a47503d"
+	// cobolApprovedPreprocessorModule pins the producer module itself
+	// (BASE-01). A go.mod bump of the preprocessor alone can change the
+	// transform catalog, grade policy, handoff shape, or observation
+	// semantics this mapping depends on while the grammar ID stays the
+	// same, so init refuses any other module version and nothing is parsed
+	// under an unapproved producer.
+	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20260930215433-f9eaf99c34a9"
 	// cobolGrammarExtractorVersion identifies this handoff-to-graph mapping.
 	// Bump it whenever the emitted nodes, edges, or prov_* keys change.
-	cobolGrammarExtractorVersion = "gortex-cobol-grammar/1"
+	cobolGrammarExtractorVersion = "gortex-cobol-grammar/2"
 	// cobolForestModulePath is the module path the enhanced grammar is
 	// linked under; go.mod replaces it with the fork's forest-shim.
 	cobolForestModulePath = "github.com/alexaandru/go-sitter-forest/cobol"
+	// cobolPreprocessorModulePath is the producer module that builds the
+	// handoff.
+	cobolPreprocessorModulePath = "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
 )
 
 // errCobolGrammarNotApproved reports a handoff produced by a grammar other
 // than the approved one. Extraction fails; nothing falls back (D-05).
 var errCobolGrammarNotApproved = errors.New("COBOL handoff grammar is not the approved enhanced grammar")
+
+// errCobolPreprocessorNotApproved reports a binary linked against a
+// preprocessor module other than the approved one. Every Extract fails;
+// nothing falls back (D-05).
+var errCobolPreprocessorNotApproved = errors.New("COBOL preprocessor module is not the approved producer")
 
 // cobolAnalyzeSlot serializes Analyze across every extractor instance. A
 // single COBOL parse can need a large share of memory on a 16 GB host, so
@@ -54,18 +70,23 @@ var cobolAnalyzeSlot = make(chan struct{}, 1)
 // enhanced parser is unavailable or unapproved, Extract returns an error
 // and no result: there is no regex or stock-grammar fallback.
 type CobolGrammarExtractor struct {
-	approvedGrammarID string
-	once              sync.Once
-	analyzer          preprocessor.Analyzer
-	parserModule      string
-	initErr           error
+	approvedGrammarID          string
+	approvedPreprocessorModule string
+	once                       sync.Once
+	analyzer                   preprocessor.Analyzer
+	parserModule               string
+	preprocessorModule         string
+	initErr                    error
 }
 
 // NewCobolGrammarExtractor returns a grammar extractor pinned to the
-// approved grammar. Attestation runs lazily on the first Extract, because
-// RegisterAll runs for every gortex command.
+// approved grammar and preprocessor module. Attestation runs lazily on the
+// first Extract, because RegisterAll runs for every gortex command.
 func NewCobolGrammarExtractor() *CobolGrammarExtractor {
-	return &CobolGrammarExtractor{approvedGrammarID: cobolApprovedGrammarID}
+	return &CobolGrammarExtractor{
+		approvedGrammarID:          cobolApprovedGrammarID,
+		approvedPreprocessorModule: cobolApprovedPreprocessorModule,
+	}
 }
 
 // Language returns "cobol".
@@ -77,8 +98,9 @@ func (e *CobolGrammarExtractor) Extensions() []string {
 	return []string{".cob", ".cbl", ".cpy", ".COB", ".CBL", ".CPY"}
 }
 
-// init attests the embedded grammar and records the parser module identity.
-// Its error is cached so every later Extract fails the same way.
+// init attests the embedded grammar, records the parser module identity, and
+// checks the preprocessor module against its pin. Its error is cached so
+// every later Extract fails the same way.
 func (e *CobolGrammarExtractor) init() {
 	analyzer, err := preprocessor.NewEmbeddedAnalyzer(transform.NewCatalog(nil))
 	if err != nil {
@@ -91,18 +113,32 @@ func (e *CobolGrammarExtractor) init() {
 		return
 	}
 	for _, dep := range info.Deps {
-		if dep.Path != cobolForestModulePath {
+		if dep.Path != cobolForestModulePath && dep.Path != cobolPreprocessorModulePath {
 			continue
 		}
 		module := dep
 		if dep.Replace != nil {
 			module = dep.Replace
 		}
-		e.parserModule = module.Path + "@" + module.Version
+		if dep.Path == cobolForestModulePath {
+			e.parserModule = module.Path + "@" + module.Version
+		} else {
+			e.preprocessorModule = module.Path + "@" + module.Version
+		}
 	}
-	if e.parserModule == "" {
-		e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w",
-			fmt.Errorf("build info lists no %s dependency", cobolForestModulePath))
+	for _, m := range []struct{ path, found string }{
+		{cobolForestModulePath, e.parserModule},
+		{cobolPreprocessorModulePath, e.preprocessorModule},
+	} {
+		if m.found == "" {
+			e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w",
+				fmt.Errorf("build info lists no %s dependency", m.path))
+			return
+		}
+	}
+	if e.preprocessorModule != e.approvedPreprocessorModule {
+		e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w: linked %s, approved %s",
+			errCobolPreprocessorNotApproved, e.preprocessorModule, e.approvedPreprocessorModule)
 		return
 	}
 	e.analyzer = analyzer
@@ -160,6 +196,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		"prov_parser_tool_id":         h.ToolID,
 		"prov_parser_grammar_id":      h.Tool.CompiledLanguageID,
 		"prov_parser_module":          e.parserModule,
+		"prov_preprocessor_module":    e.preprocessorModule,
 		"prov_parse_config_id":        h.ParseConfigurationID,
 		"prov_transform_config_id":    h.Ledger.ConfigurationID,
 		"prov_handoff_schema":         h.SchemaVersion,

@@ -86,7 +86,7 @@ const cobolShiftPrefix = "\n\n\n" +
 var cobolDocumentKeys = []string{
 	"prov_source_path", "prov_source_id", "prov_revision_content_id",
 	"prov_parser_tool_id", "prov_parser_grammar_id", "prov_parser_module",
-	"prov_parse_config_id", "prov_transform_config_id", "prov_handoff_schema",
+	"prov_preprocessor_module", "prov_parse_config_id", "prov_transform_config_id", "prov_handoff_schema",
 	"prov_extractor_version", "prov_evidence_class", "prov_origin",
 	"prov_confidence", "prov_document_grade", "prov_document_grade_reasons",
 	"prov_grade_policy",
@@ -481,7 +481,7 @@ func TestCobolGrammar_CopybookSkipsAnalysis(t *testing.T) {
 				NewCobolGrammarExtractor(),
 				// A wrong pin still succeeds: Analyze and the grammar check
 				// are never reached for a copybook.
-				{approvedGrammarID: cobolWrongGrammarID},
+				{approvedGrammarID: cobolWrongGrammarID, approvedPreprocessorModule: cobolApprovedPreprocessorModule},
 			} {
 				result := extractCobolGrammar(t, e, path, cobolCopybookFixture)
 				require.Len(t, result.Nodes, 1)
@@ -553,6 +553,7 @@ func TestCobolGrammar_ApprovedGrammarPinned(t *testing.T) {
 	require.Len(t, programs, 1)
 	for _, n := range []*graph.Node{firstFile, programs[0], secondFile} {
 		assert.Equal(t, cobolApprovedGrammarID, n.Meta["prov_parser_grammar_id"], n.ID)
+		assert.Equal(t, cobolApprovedPreprocessorModule, n.Meta["prov_preprocessor_module"], n.ID)
 		for _, key := range []string{
 			"prov_parser_tool_id", "prov_source_id", "prov_revision_content_id",
 			"prov_parse_config_id", "prov_transform_config_id",
@@ -561,17 +562,32 @@ func TestCobolGrammar_ApprovedGrammarPinned(t *testing.T) {
 		}
 	}
 	// PROV-05: one process, one parser and extractor identity for every file.
-	for _, key := range []string{"prov_parser_tool_id", "prov_parser_module", "prov_extractor_version"} {
+	for _, key := range []string{"prov_parser_tool_id", "prov_parser_module", "prov_preprocessor_module", "prov_extractor_version"} {
 		assert.Equal(t, firstFile.Meta[key], secondFile.Meta[key], key)
 	}
 }
 
 func TestCobolGrammar_GrammarMismatchFails(t *testing.T) {
-	e := &CobolGrammarExtractor{approvedGrammarID: cobolWrongGrammarID}
+	e := &CobolGrammarExtractor{approvedGrammarID: cobolWrongGrammarID, approvedPreprocessorModule: cobolApprovedPreprocessorModule}
 	result, err := e.Extract("src/demo.cbl", []byte(cobolDemoFixture))
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.True(t, errors.Is(err, errCobolGrammarNotApproved), "err = %v", err)
 	assert.Contains(t, err.Error(), cobolApprovedGrammarID, "names the observed grammar")
 	assert.Contains(t, err.Error(), cobolWrongGrammarID, "names the expected grammar")
+}
+
+// WR-08: a preprocessor module other than the approved one fails init, so
+// no file, not even a copybook, is mapped under an unapproved producer.
+func TestCobolGrammar_PreprocessorMismatchFails(t *testing.T) {
+	const wrong = cobolPreprocessorModulePath + "@v0.0.0-20000101000000-000000000000"
+	e := &CobolGrammarExtractor{approvedGrammarID: cobolApprovedGrammarID, approvedPreprocessorModule: wrong}
+	for _, path := range []string{"src/demo.cbl", "copy/custrec.cpy"} {
+		result, err := e.Extract(path, []byte(cobolDemoFixture))
+		require.Error(t, err, path)
+		assert.Nil(t, result, path)
+		assert.True(t, errors.Is(err, errCobolPreprocessorNotApproved), "err = %v", err)
+		assert.Contains(t, err.Error(), cobolApprovedPreprocessorModule, "names the linked module")
+		assert.Contains(t, err.Error(), wrong, "names the approved module")
+	}
 }
