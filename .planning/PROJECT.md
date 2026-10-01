@@ -8,6 +8,19 @@ A private fork of [zzet/gortex](https://github.com/zzet/gortex) — the graph-ba
 
 A trustworthy graph representation of a mainframe estate that modernization cutover decisions can be made against — deterministic and reproducible first, enriched and simulated later.
 
+## Current Milestone: v1.0 Neo4j Projection and Mainframe Graph Foundation
+
+**Goal:** First provide a general, manually invoked, rebuildable Neo4j projection of Gortex's authoritative SQLite graph; when the enhanced COBOL grammar is ready for production integration, convert its named AST contract into a reproducible, provenance-aware native graph and add optional validated AI claims without changing deterministic facts.
+
+**Target features:**
+- A language-agnostic CLI command and MCP tool that materialize an explicitly scoped SQLite graph snapshot into Neo4j
+- Stable projection keys, Neo4j constraints, bounded retry-safe upserts, explicit stale-record handling, dry-run planning, progress/results, and cancellation/error behavior
+- SQLite as the sole authority: no reverse writes and no synchronous Neo4j dual-write in indexing
+- A thin deterministic tracer from one existing COBOL parser node through SQLite persistence and native CLI/MCP query surfaces
+- Stable identity, exact source provenance, idempotent incremental lifecycle, and explicit unresolved-gap modeling
+- A manually invoked Neo4j projection boundary with SQLite remaining authoritative
+- Optional bounded AI enrichment with validated, evidence-linked claims and human review
+
 ## Requirements
 
 ### Validated
@@ -20,6 +33,9 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 - ✓ Analyzer framework (dead code, hotspots, cycles, coverage, routes/models/components, k8s, dbt, cross-repo) — existing
 - ✓ Session notes + durable workspace memory layers — existing
 - ✓ Token-economy wire formats (GCX1, TOON) and body compression — existing
+- ✓ **General Neo4j projection command** — Phase 1 validated 2026-09-22: `gortex neo4j push` and MCP `neo4j_push` materialize an explicit workspace/project/repository SQLite snapshot through one shared request/result contract
+- ✓ **Scoped, retry-safe projection lifecycle** — stable keys, Neo4j constraints, bounded batches, exact-attempt fencing, atomic activation, bounded stale reconciliation, dry-run target planning, progress, cancellation, and truthful incomplete results
+- ✓ **SQLite authority and optional Neo4j** — DB/WAL/SHM plus canonical immutability verified; no index-time dual write, reverse write, background synchronization, or ordinary startup dependency
 
 ### Shipped in this fork
 
@@ -38,31 +54,24 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
   inter-program call graph was missing
 - ✓ **`cobolprobe`** (`80f0c08e`) — harness measuring the vendored COBOL grammar
   against a real estate; skips without a `-corpus` flag
+- ✓ **Enhanced deterministic COBOL parser baseline** — `tree-sitter-cobol-upgrade/main`
+  at merge commit `97ac9f1`, including DATA DIVISION, IDMS, CICS, and SQL nodes,
+  bounded unparsed tails, 149/149 non-comment corpus assertions, 371 passing NIST
+  COBOL-85 tests, and merged gortex cascade/acceptance gates
 
 ### Active
 
 <!-- Big-picture staged vision. Detailed per-stage scoping is deliberately deferred to milestone/phase planning. -->
 
-- [ ] **Stage 1 — Deterministic mainframe processing:** ingest mainframe artifacts into the graph (COBOL + copybooks first-class; aspirationally "everything" — JCL, DB2, CICS, etc.), consuming pre-processed input from `cobol-repo-architect`
-- [ ] **Register the vendored COBOL tree-sitter grammar for `.cpy`** — the next
-  concrete step. `go-sitter-forest/cobol` v1.9.1 (vendoring
-  `yutaro-sakamoto/tree-sitter-cobol`, MIT) is **already a `go.mod` dependency
-  and already compiled in**, with no extractor registered because `cobol.go`
-  claims `.cbl`/`.cpy`. Measured recall on 958 DCC copybooks: **93%** of 24,478
-  fields once wrapped in a synthetic program shell, against **0** from the regex
-  extractor. This is the DATA DIVISION, i.e. the field-level lineage everything
-  else is for
-- [ ] **Extend the grammar for `EXEC CICS`/`EXEC SQL` and IDMS DML** — programs
-  sit at 27% recall because grammar errors **cascade to the end of their
-  division**: one `EXEC CICS` leaves 1 of 20 following paragraphs, one IDMS
-  `SCHEMA SECTION` leaves 0 of 20 data items. Upstreamable to `@yutaro-sakamoto`
-- [ ] **JCL symbolic resolution** (`SET` / `INCLUDE` / `JCLLIB ORDER`) — absent
-  entirely, so `DSN=&DCC1XN..EXTRACT` never resolves and the job→dataset→job
-  graph never forms. Unmeasured; needs its own baseline pass
-- [ ] **Stage 1 — Deterministic analyses** over the mainframe graph (impact analysis, lineage, batch flow — exact capability set TBD at phase planning)
-- [ ] **Stage 2 — LLM enrichment layer** on top of the deterministic graph (interpretation, summarization, business-rule extraction — scoped later)
-- [ ] **Stage 3 — Digital twin, staged:** static structural twin → behavioral simulation → live-synced twin (feasibility-gated), with data integration
-- [ ] Twin outputs that directly support **modernization cutover** (the end goal all stages serve)
+- [ ] Resume COBOL graph extraction only after the required parser/grammar integration is ready
+- [ ] Map the completed parser contract onto gortex's existing node, edge, provenance, identity, and SQLite persistence models
+- [ ] Deliver the first vertical slice as a thin deterministic tracer from one existing COBOL parser node through the native graph and CLI/MCP query surfaces
+- [ ] Extend deterministic extraction across source-positioned COBOL, IDMS, CICS, SQL, copybook, call, and resource facts
+- [ ] Make deterministic facts and findings stable and idempotent across identical and incremental indexing runs
+- [ ] Represent parser failures and unavailable artifacts as separate, queryable unresolved gaps before any AI enrichment
+- [ ] Validate the user-approved manual Neo4j projection boundary without widening it into continuous synchronization or authority
+- [ ] Add optional, policy-gated AI review that emits schema-validated, evidence-linked claims without mutating deterministic facts
+- [ ] Support human confirmation, contradiction, and supersession while retaining claim lineage
 
 ### Out of Scope
 
@@ -72,7 +81,9 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
   Either this exclusion or the upstream framing has to give. A human decision;
   no PR should be opened until it is settled
 - Reusing `cobol-ingestor` or `mainframe-viewer` internals — explicit fresh start; those tools stay separate
-- Committing to a v1 artifact list or deterministic feature set now — user chose to keep planning big-picture; details land in phase planning
+- Replacing SQLite with Neo4j -- the approved projection is downstream, manually invoked, and rebuildable
+- Continuous Neo4j synchronization, index-time dual-write, or reverse writes from Neo4j
+- Expanding this milestone into full JCL symbolic resolution or a complete digital twin — both remain later work unless required by the thin tracer or gap contract
 - Live-synced twin as a hard commitment — pursued only "if possible and feasible" after static + behavioral stages prove out
 
 ## Context
@@ -82,6 +93,11 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 - Related prior work (`cobol-ingestor`, `mainframe-viewer`) informs the domain but is intentionally not coupled.
 - Fork remotes: `origin` = MuiGoku123432/gortex (personal, via `github-personal` SSH), `upstream` = zzet/gortex.
 - The engine's existing multi-language graph, dataflow, and analyzer machinery is the substrate the mainframe layers extend.
+- The authoritative parser baseline is the `tree-sitter-cobol-upgrade` v0.26.0 line pinned at commit `f9eaf99c34a9` (accepted at `f19029f`, behavioral floor `97ac9f1`). Gortex consumes it as the fork's `preprocessor` module plus the `forest-shim/cobol` replacement of the forest COBOL module, both through go.mod pseudo-versions resolved under `GOPRIVATE`, with embedded grammar attestation — never through go.work.
+- Stores and Neo4j projections created before the grammar-extractor swap keep regex-era COBOL nodes until a full reindex (track the repository again), a daemon restart, and a re-run of the manual projection.
+- Gortex's durable graph remains SQLite today. Existing Neo4j support is a manual Cypher export path, not an authoritative or synchronized store.
+- The user has approved a general SQLite-to-Neo4j projection command as the immediate v1.0 priority. It must remain language-agnostic and usable independently of COBOL parser readiness.
+- COBOL tracer and grammar-dependent phases remain in the milestone but are deferred behind parser/grammar readiness. The completed parser baseline and its history remain authoritative planning evidence.
 
 ## Constraints
 
@@ -99,9 +115,17 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 | Staged twin: static → behavioral → live-synced | De-risks the vision; each stage has standalone modernization value | — Pending |
 | Deterministic before LLM enrichment | LLM interpretation belongs on top of a reproducible substrate, not in place of one | — Pending |
 | Fix the existing COBOL/JCL extractors rather than write new ones | Gortex already shipped them, and `cobolStripLine` already had the fixed-format column model right. Every gap was specific and measurable | ✓ Items 0 and 1 shipped 2026-08-27 |
-| Hybrid parser: tree-sitter for copybooks, island regex for programs | Measured, not assumed — 93% field recall on `.cpy` versus 27% on `.cbl`, because grammar errors cascade to end-of-division. Same conclusion Koopa reached for real COBOL | ✓ Decided 2026-08-27 |
+| Hybrid parser: tree-sitter for copybooks, island regex for programs | Superseded by the completed enhanced parser baseline, which now preserves the required DATA DIVISION, IDMS, CICS, and SQL structures under gortex acceptance tests | Superseded 2026-09-15 |
+| Parser baseline for graph milestone | Pin planning and acceptance evidence to `tree-sitter-cobol-upgrade/main` merge `97ac9f1`; parser changes are not part of this milestone unless a graph-blocking regression is proven | Superseded 2026-09-30 by the v0.26.0-line pin `f9eaf99c34a9` |
+| Native graph before AI enrichment | Deterministic extraction, stable identity, and explicit unresolved gaps must exist before claims can be generated or consumed | ✓ Decided 2026-09-15 |
+| General Neo4j projection is the immediate priority | Users need an explicit CLI/MCP path to materialize selected SQLite graph snapshots now; this capability is language-agnostic and does not depend on COBOL grammar readiness | ✓ Implemented and verified in Phase 1, 2026-09-22 |
+| SQLite remains sole authority while Neo4j is a downstream projection | A manual, rebuildable projection provides Neo4j utility without split-brain indexing, reverse writes, or making ordinary Gortex operations depend on Neo4j | ✓ Implemented and verified in Phase 1, 2026-09-22 |
+| Defer COBOL graph phases until parser/grammar readiness | Planning history and baseline `97ac9f1` are preserved, but implementation should not start while required grammars are unavailable | ✓ Readiness met 2026-09-30 |
 | Run this fork's daemon on an isolated `~/.gortex-fork` store | Keeps the official Homebrew install tracking every other repo while the fork is three minor versions ahead. Verified: fork-only commands leave `~/.gortex` byte-identical | ✓ Verified 2026-08-27 |
 | Drop `COPY REPLACING` and `COPY x OF y` from scope | Measured **zero** occurrences in the estate; building for them would be speculative generality | ✓ Decided 2026-08-27 |
+| Pin the v0.26.0 parser line through go.mod with embedded attestation | A go.mod `require` of the fork `preprocessor` plus a `replace` of the forest COBOL module with the fork's `forest-shim/cobol`, both at the `f9eaf99c34a9` pseudo-version, resolve reproducibly under `GOWORK=off`; the fork attests its grammar against an embedded hash, and Gortex checks the result against its own approved-grammar ID, failing COBOL extraction on any mismatch (D-01 through D-05) | ✓ Decided 2026-09-30 |
+| Grammar-only COBOL extraction: program node and source-file edge only | Grammar facts are accurate where the regex extractor guessed; COBOL extraction now yields programs from the enhanced grammar, and the temporary loss of divisions, sections, paragraphs, COPY, CALL, and PERFORM/THRU/GO TO edges is accepted until Phase 3 rebuilds them from parser observations (D-06, D-15) | ✓ Decided 2026-09-30 |
+| Release binaries embed the private fork's `grammar.json` and query `.scm` files | An accepted consequence of linking the fork through go.mod (D-02); the fork's releases are the user's own, so no release-job changes (D-19) | ✓ Accepted 2026-09-30 |
 
 ## Evolution
 
@@ -121,7 +145,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-27 — items 0 and 1 shipped, tree-sitter grammar measured.*
+*Last updated: 2026-09-22 -- Phase 1 general Neo4j projection verified complete; COBOL graph phases remain deferred until parser/grammar readiness.*
 
 *Companion docs: `FORK-NOTES.md` (how to run this fork, fix order, upstream
 workflow) and `PythonApps/cobol-kg/HANDOFF.md` (session entry point, corpus,

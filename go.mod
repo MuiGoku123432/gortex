@@ -3,6 +3,7 @@ module github.com/zzet/gortex
 go 1.27.0
 
 require (
+	github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor v0.0.0-20260930215433-f9eaf99c34a9
 	github.com/alexaandru/go-sitter-forest/ada v1.9.0
 	github.com/alexaandru/go-sitter-forest/agda v1.9.0
 	github.com/alexaandru/go-sitter-forest/aiken v1.9.0
@@ -242,6 +243,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/mark3labs/mcp-go v1.0.0
 	github.com/muesli/termenv v0.16.0
+	github.com/neo4j/neo4j-go-driver/v6 v6.3.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/pkoukk/tiktoken-go-loader v0.0.2
@@ -363,3 +365,11 @@ replace github.com/mattn/go-pointer => ./internal/thirdparty/go-pointer
 // blocked the Windows build because github.com/coder/hnsw imports it
 // unconditionally. See internal/thirdparty/renameio.
 replace github.com/google/renameio => ./internal/thirdparty/renameio
+
+// Enhanced COBOL grammar from the private tree-sitter-cobol-upgrade fork
+// (accepted v0.26.0 Estate Parse Recovery line; behavioral floor 97ac9f1).
+// The forest-shim module intentionally declares the upstream module path,
+// so the preprocessor's own go-sitter-forest/cobol import links it too.
+// go.sum pins both fork modules; builds need GOPRIVATE covering
+// github.com/MuiGoku123432/tree-sitter-cobol-upgrade.
+replace github.com/alexaandru/go-sitter-forest/cobol => github.com/MuiGoku123432/tree-sitter-cobol-upgrade/forest-shim/cobol v0.0.0-20260930215433-f9eaf99c34a9

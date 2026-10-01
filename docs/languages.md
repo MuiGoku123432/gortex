@@ -16,7 +16,7 @@ Three engine tiers are used, in order of decreasing extraction depth:
   keyword block heuristics. Captures top-level symbols and imports; call edges
   vary per language. Used where no upstream tree-sitter grammar is available
   (Verse, AL, SAS, Stata, AutoHotkey, CoffeeScript) or for legacy / niche
-  languages where the regex path was sufficient (ABAP, COBOL, Fortran, …).
+  languages where the regex path was sufficient (ABAP, Fortran, …).
 - **forest signature-only** (~165 languages) — generic `*ts.Language`-driven
   extractor wrapping `github.com/alexaandru/go-sitter-forest`. Reads the
   grammar's bundled `tags.scm` (nvim-treesitter convention) when present and
@@ -276,7 +276,7 @@ What is **not** covered:
 | SAS | `.sas` | `proc` / `%macro` as function, `data` as variable, `%include` / `libname` |
 | Stata | `.do`, `.ado` | `program define`, `local` / `global`, `use` / `do` / `include` |
 | Fortran | `.f`, `.f90`, `.f95`, `.f03`, `.f08` | `subroutine` / `function` / `module`, `use X` |
-| COBOL | `.cob`, `.cbl`, `.cpy` | Programs, paragraphs, sections, `COPY` |
+| COBOL | `.cob`, `.cbl`, `.cpy` | Programs from the enhanced COBOL grammar, with exact source ranges and provenance; paragraphs, sections, `COPY`, and `CALL` are temporarily not extracted; COBOL extraction is unavailable on Windows |
 | Ada | `.ada`, `.adb`, `.ads` | Packages, procedures, functions, `with` |
 | Pascal / Delphi | `.pas`, `.pp`, `.dpr` | Units, procedures, functions, classes |
 | ABAP (SAP) | `.abap` | `FORM` / `FUNCTION` / `METHOD` / `CLASS…DEFINITION`, `INCLUDE` |

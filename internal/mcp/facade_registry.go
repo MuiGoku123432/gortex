@@ -393,7 +393,7 @@ func facadeOperationSpecs() []facadeOperationSpec {
 		"pr_context": "pr_review_context", "questions": "suggested_review_questions", "run": "review",
 		"sibling_context": "sibling_diff_context",
 	})
-	addFacadeGroup(&specs, "publish_review", facadeEffectExternalWrite, map[string]string{"post": "post_review"})
+	addFacadeGroup(&specs, "publish_review", facadeEffectExternalWrite, map[string]string{"post": "post_review", "neo4j_push": "neo4j_push"})
 	addFacadeGroup(&specs, "pr", facadeEffectRead, map[string]string{
 		"conflicts": "conflicts_prs", "impact": "get_pr_impact", "list": "list_prs",
 		"reviewers": "suggest_reviewers", "risk": "pr_risk", "triage": "triage_prs",

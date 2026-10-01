@@ -1,14 +1,144 @@
 package store_sqlite
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/testutil/graphfixture"
 )
+
+func TestScopedProjectionEstatePagination(t *testing.T) {
+	store := openScopedProjectionTestStore(t)
+	seedEstateProjection(t, store, scopedProjectionPage+31)
+	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"estate/b", "estate/a", "estate/a"}})
+	require.NoError(t, err)
+	defer snapshot.Close()
+	require.Equal(t, []string{"estate/a", "estate/b"}, snapshot.Descriptor().Scope.Repositories)
+
+	nodePages, nodeCount := 0, 0
+	require.NoError(t, snapshot.ReadNodePages(context.Background(), func(page []*graph.Node) error {
+		nodePages++
+		require.NotEmpty(t, page)
+		require.LessOrEqual(t, len(page), scopedProjectionPage)
+		for _, node := range page {
+			require.Contains(t, []string{"estate/a", "estate/b"}, node.RepoPrefix)
+		}
+		nodeCount += len(page)
+		return nil
+	}))
+	require.Greater(t, nodePages, 2)
+	require.Equal(t, (scopedProjectionPage+31)*4, nodeCount)
+
+	edgePages, edgeCount := 0, 0
+	kinds := map[graph.EdgeKind]int{}
+	require.NoError(t, snapshot.ReadEdgePages(context.Background(), func(page []graph.ScopedEdgeRow) error {
+		edgePages++
+		require.NotEmpty(t, page)
+		require.LessOrEqual(t, len(page), scopedProjectionPage)
+		for _, row := range page {
+			require.NotNil(t, row.Source)
+			require.NotNil(t, row.Target)
+			kinds[row.Edge.Kind]++
+		}
+		edgeCount += len(page)
+		return nil
+	}))
+	require.Greater(t, edgePages, 2)
+	require.Equal(t, (scopedProjectionPage+31)*4, edgeCount)
+	require.Equal(t, (scopedProjectionPage+31)*2, kinds[graph.EdgeCalls])
+	require.Equal(t, (scopedProjectionPage+31)*2, kinds[graph.EdgeReferences])
+}
+
+func TestScopedProjectionTracer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "graph.db")
+	store, err := Open(path)
+	require.NoError(t, err)
+	store.AddBatch([]*graph.Node{
+		{ID: graphfixture.ScopedNodeID, RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
+		{ID: graphfixture.ScopedTargetID, RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "fixture/repo/main.go", Kind: graph.NodeKind("type"), Name: "Store"},
+		{ID: "fixture/repo/other-workspace.go::Run", RepoPrefix: "fixture/repo", WorkspaceID: "other-ws", ProjectID: "project", FilePath: "fixture/repo/other-workspace.go", Kind: graph.NodeKind("function"), Name: "WrongWorkspace"},
+		{ID: "fixture/repo/other-project.go::Run", RepoPrefix: "fixture/repo", WorkspaceID: "ws", ProjectID: "other-project", FilePath: "fixture/repo/other-project.go", Kind: graph.NodeKind("function"), Name: "WrongProject"},
+		{ID: "neighbor/repo/main.go::Run", RepoPrefix: "neighbor/repo", WorkspaceID: "ws", ProjectID: "project", FilePath: "neighbor/repo/main.go", Kind: graph.NodeKind("function"), Name: "Run"},
+	}, []*graph.Edge{
+		{From: graphfixture.ScopedNodeID, To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/main.go"},
+		{From: graphfixture.ScopedNodeID, To: "neighbor/repo/main.go::Run", Kind: graph.EdgeKind("calls"), FilePath: "fixture/repo/main.go"},
+		{From: graphfixture.ScopedNodeID, To: "fixture/repo/other-workspace.go::Run", Kind: graph.EdgeKind("calls"), FilePath: "fixture/repo/main.go"},
+		{From: graphfixture.ScopedNodeID, To: "fixture/repo/other-project.go::Run", Kind: graph.EdgeKind("calls"), FilePath: "fixture/repo/main.go"},
+		{From: "fixture/repo/other-workspace.go::Run", To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/other-workspace.go"},
+		{From: "fixture/repo/other-project.go::Run", To: graphfixture.ScopedTargetID, Kind: graph.EdgeKind("references"), FilePath: "fixture/repo/other-project.go"},
+	})
+	require.NoError(t, store.CheckpointWAL())
+	warm, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"fixture/repo"}})
+	require.NoError(t, err)
+	err = warm.ReadNodePages(context.Background(), func([]*graph.Node) error { return nil })
+	require.NoError(t, err)
+	require.NoError(t, warm.Close())
+	before := projectionFileBytes(t, path)
+
+	_, err = store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{})
+	require.ErrorContains(t, err, "repository allow-set is required")
+
+	snapshot, err := store.OpenScopedProjectionSnapshot(context.Background(), graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"fixture/repo"}})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), snapshot.Descriptor().SourceGeneration)
+	var nodes []*graph.Node
+	require.NoError(t, snapshot.ReadNodePages(context.Background(), func(page []*graph.Node) error { nodes = append(nodes, page...); return nil }))
+	require.Len(t, nodes, 2)
+	require.Equal(t, []string{graphfixture.ScopedNodeID, graphfixture.ScopedTargetID}, []string{nodes[0].ID, nodes[1].ID})
+	var edges []graph.ScopedEdgeRow
+	require.NoError(t, snapshot.ReadEdgePages(context.Background(), func(page []graph.ScopedEdgeRow) error { edges = append(edges, page...); return nil }))
+	require.Len(t, edges, 4)
+	for _, row := range edges {
+		require.Equal(t, graphfixture.ScopedNodeID, row.Source.ID)
+		require.NotNil(t, row.Target)
+		if row.Edge.To == graphfixture.ScopedTargetID {
+			require.Equal(t, "Store", row.Target.Name)
+			continue
+		}
+		require.Equal(t, graph.NodeKind("unresolved"), row.Target.Kind)
+		require.Equal(t, row.Edge.To, row.Target.ID)
+		require.Empty(t, row.Target.Name)
+		require.Empty(t, row.Target.FilePath)
+		require.Empty(t, row.Target.Meta)
+		require.Empty(t, row.Target.RepoPrefix)
+		require.Empty(t, row.Target.WorkspaceID)
+		require.Empty(t, row.Target.ProjectID)
+		require.Empty(t, row.Target.Origin)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = snapshot.ReadNodePages(cancelled, func([]*graph.Node) error { return nil })
+	require.True(t, errors.Is(err, context.Canceled), "got %v", err)
+	require.NoError(t, snapshot.Close())
+	require.ErrorContains(t, snapshot.Close(), "closed")
+	require.NoError(t, store.CheckpointWAL())
+	require.Equal(t, before, projectionFileBytes(t, path))
+	require.NoError(t, store.Close())
+}
+
+func projectionFileBytes(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+	result := make(map[string][]byte)
+	for _, suffix := range []string{"", "-wal"} {
+		data, err := os.ReadFile(path + suffix)
+		if os.IsNotExist(err) {
+			continue
+		}
+		require.NoError(t, err)
+		result[suffix] = data
+	}
+	return result
+}
 
 func openScopedProjectionTestStore(t *testing.T) *Store {
 	t.Helper()

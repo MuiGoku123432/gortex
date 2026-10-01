@@ -1718,6 +1718,7 @@ func (idx *Indexer) applyCoverageDomains(relPath, lang string, src []byte, resul
 	// ASP.NET host files): symbols reachable only from a runtime.
 	// Stamped so dead-code analysis treats them as live roots.
 	entrypoints.Detect(relPath, lang, result.Nodes, result.Edges)
+	idx.stampSourceRevision(relPath, src, result)
 	if !idx.config.Coverage.IsEnabled("function_shape") {
 		stripFunctionShape(result)
 	}

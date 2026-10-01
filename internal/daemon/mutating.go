@@ -96,6 +96,7 @@ var ToolEffects = map[string]ToolEffect{
 	// Review publication mutates a remote forge. dry_run does not weaken the
 	// tool-level classification because ordinary calls can still post.
 	"post_review": EffectExternalWrite,
+	"neo4j_push":  EffectExternalWrite,
 
 	// overlay_merge normally changes session state and can also apply the
 	// branch to disk when to_disk=true.

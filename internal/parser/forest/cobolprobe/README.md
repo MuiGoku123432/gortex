@@ -2,29 +2,44 @@
 
 Measurement and parser-acceptance harness, not a production extractor test.
 Corpus measurements skip unless given a corpus flag. The cascade acceptance
-gate skips unless `-enhanced-parser` is set, so a stock gortex checkout remains
-green against the committed forest dependency.
+gate skips unless `-enhanced-parser` is set.
 
-The authoritative enhanced parser is `tree-sitter-cobol-upgrade/main` at merge
-commit `97ac9f1`. Activate its drop-in forest shim from this repository with:
+The enhanced parser is linked through go.mod: a `require` of the private
+fork's `github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor` module
+and a `replace` of `github.com/alexaandru/go-sitter-forest/cobol` with the
+fork's `forest-shim/cobol`, both at the pinned pseudo-version. `GOPRIVATE`
+must cover the fork. Run the cascade gate with:
 
-    go work init . \
-        /Users/e1001547-mbp-it/repos/mine/devDeps/tree-sitter-cobol-upgrade/forest-shim/cobol
-    go test -race ./internal/parser/forest/cobolprobe/ -run TestErrorCascade -v \
-        -enhanced-parser
+    GOWORK=off go test -race ./internal/parser/forest/cobolprobe/ \
+        -run TestErrorCascade -v -enhanced-parser
 
-The full estate measurements remain opt-in:
+The corpus measurements remain opt-in and take a local source directory:
 
-    go test ./internal/parser/forest/cobolprobe/ -v -timeout 20m \
-        -corpus      ~/repos/mine/cobolCode/cam-corpus-dcc/DCC \
-        -neut-corpus ~/repos/mine/cobolCode/cam-corpus-dcc/DCC
+    GOWORK=off go test ./internal/parser/forest/cobolprobe/ -v -timeout 20m \
+        -corpus      "$COBOL_CORPUS_ROOT" \
+        -neut-corpus "$COBOL_CORPUS_ROOT"
 
-Without the workspace override, the grammar under test is
-`github.com/alexaandru/go-sitter-forest/cobol` v1.9.1, which vendors
-**`yutaro-sakamoto/tree-sitter-cobol`** (MIT, revision `e99dbdc3`). It remains
-the committed module dependency; `go.work` is the intentional local integration
-boundary for the enhanced parser. No tree-sitter COBOL extractor is registered
-yet because the regex extractor in `cobol.go` still claims `.cbl`/`.cpy`.
+To iterate on a local fork checkout, point both fork modules at it through a
+temporary modfile instead of editing go.mod (never through go.work):
+
+    tmp="$(mktemp -d)"
+    cp go.mod "$tmp/dev.mod"
+    cp go.sum "$tmp/dev.sum"
+    go mod edit -modfile="$tmp/dev.mod" \
+        -replace=github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor="$COBOL_UPGRADE_ROOT/preprocessor" \
+        -replace=github.com/alexaandru/go-sitter-forest/cobol="$COBOL_UPGRADE_ROOT/forest-shim/cobol"
+    GOWORK=off go test -modfile="$tmp/dev.mod" -race \
+        ./internal/parser/forest/cobolprobe/ -run TestErrorCascade -v -enhanced-parser
+
+An edited grammar fails the fork's embedded attestation and Gortex's
+approved-grammar pin until the fork regenerates its expected identity and
+Gortex re-pins deliberately.
+
+`internal/parser/languages/cobol_grammar.go` is the production COBOL
+extractor. The regex extractor in `cobol.go` stays in-tree but unregistered.
+The measurements below were taken against the stock
+`github.com/alexaandru/go-sitter-forest/cobol` v1.9.1 grammar, which vendors
+**`yutaro-sakamoto/tree-sitter-cobol`** (MIT, revision `e99dbdc3`).
 
 ## What it measured, on 1,564 files (606 `.cbl`, 958 `.cpy`)
 
@@ -68,7 +83,7 @@ synthetic program shell. That takes `.cpy` from 0% to **93%** recall and lifts
 `.cbl` by 81% in absolute data items. The neutralised constructs are exactly the
 ones the island regexes already extract correctly, so nothing is lost.
 
-## Conclusion
+## Conclusion (stock grammar, before the enhanced parser)
 
 **Adopt for copybooks now** — 93% recall on the files that hold the field
 layouts, which is the DATA DIVISION content the regex path cannot produce at
