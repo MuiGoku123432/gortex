@@ -158,6 +158,24 @@ Plans:
 
 **Plans**: TBD
 
+### Phase 06.1: Deterministic VB.NET Extraction via Pinned tree-sitter-vbnet Grammar (INSERTED)
+
+**Goal:** A user can index VB.NET source into the same authoritative SQLite graph as the mainframe estate, with source-positioned declarations and references extracted deterministically from the user's `MuiGoku123432/tree-sitter-vbnet` grammar and retrievable through existing CLI and MCP surfaces.
+**Requirements**: TBD (to be defined at discuss/plan time; reuse the Phase 2 BASE/PROV/ID contract shapes for VB.NET)
+**Depends on:** Phase 6 (deterministic gate) and the Phase 2 pinned-grammar pattern
+**Success Criteria** (what must be TRUE):
+
+  1. The VB.NET grammar ships Go bindings and is pinned in `go.mod` at an exact commit, so a `GOWORK=off` build is reproducible; a missing or mismatched grammar fails VB.NET extraction instead of silently degrading.
+  2. A registered VB.NET extractor emits namespaces, modules, classes, structures, interfaces, enums, and methods/properties as native nodes with repository-prefixed identity and exact source ranges, through the existing `ExtractionResult`, indexer lifecycle, and SQLite path.
+  3. `Imports`, inheritance/`Implements`, and call references produce edges without claiming resolution the grammar cannot support; unresolved targets stay distinguishable.
+  4. `.vbproj` projects are recognised alongside existing `.sln`/`.csproj` handling.
+  5. Acceptance passes on invented VB.NET fixtures with AI providers disabled and no Neo4j installation.
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 06.1 to break down)
+
 ### Phase 7: AI Contract, Policy, and Evaluation Foundation
 
 **Goal**: An explicitly authorized user can prepare a minimal, redacted, reproducible AI review request without weakening AI-off behavior or exposing proprietary source by default.

@@ -5,16 +5,16 @@ current_phase: 02
 current_phase_name: Thin Deterministic Native Tracer and Minimum Contracts
 status: verifying
 stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-10-01T17:23:20.972Z"
+last_updated: "2026-10-01T20:11:09.538Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 02 execution started
-state_head: d4e0b3b78779b11206e2b90ecb3e2ccbc5065daa
+state_head: 3643fc2883cc4593462d8ce68036bc90b155381b
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 1
   total_plans: 13
   completed_plans: 13
-  percent: 11
+  percent: 10
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
 
@@ -34,7 +34,7 @@ Plan: 6 of 6
 Status: Phase complete — ready for verification
 Last activity: 2026-09-30 — Phase 02 execution started
 
-Progress: [█░░░░░░░░░] 11%
+Progress: [█░░░░░░░░░] 10%
 
 ## Performance Metrics
 
@@ -127,6 +127,10 @@ None yet.
 - [Phase 4]: Copybook/library search order and canonical cross-repository resolution domains need corpus evidence.
 - [Phases 7-9]: Provider authorization, retention, claim-ledger, reviewer authority, and evaluation thresholds remain policy/design decisions.
 - [Phase 2]: windows-latest CI test shard fails (runs 36877578916, 36889132850); cause unknown pending job-log access — see 02 deferred-items From Plan 02-06
+
+### Roadmap Evolution
+
+- Phase 6.1 inserted after Phase 6: Deterministic VB.NET extraction via pinned MuiGoku123432/tree-sitter-vbnet grammar; placed after the deterministic gate, before AI phases
 
 ## Deferred Items
 
