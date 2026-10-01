@@ -15,6 +15,7 @@ import (
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/sourcemap"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/transform"
 
 	"github.com/zzet/gortex/internal/graph"
@@ -189,23 +190,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 			ID: id, Kind: graph.KindFunction, Name: p.name, QualName: p.symbol,
 			FilePath: filePath, Language: "cobol", Meta: meta,
 		}
-		if r := o.Original; r != nil {
-			node.StartLine = int(r.Start.Row) + 1
-			node.EndLine = int(r.End.Row) + 1
-			node.StartColumn = int(r.Start.Column)
-			node.EndColumn = int(r.End.Column)
-			meta["prov_start_row"] = int(r.Start.Row)
-			meta["prov_start_column"] = int(r.Start.Column)
-			meta["prov_end_row"] = int(r.End.Row)
-			meta["prov_end_column"] = int(r.End.Column)
-			meta["prov_start_byte"] = int(r.Start.Byte)
-			meta["prov_end_byte"] = int(r.End.Byte)
-			meta["prov_range_exact"] = r.Exact
-		} else {
-			// Never invent coordinates for a range with no original image.
-			meta["prov_range_exact"] = false
-			meta["prov_range_absence"] = "no_original_projection"
-		}
+		cobolStampRange(node, o.Original)
 		result.Nodes = append(result.Nodes, node)
 		result.Edges = append(result.Edges, &graph.Edge{
 			From: fileNode.ID, To: id, Kind: graph.EdgeDefines,
@@ -222,6 +207,37 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		docMeta["prov_unnamed_program_count"] = unnamed
 	}
 	return result, nil
+}
+
+// cobolStampRange records r, the original-coordinate projection of a
+// program observation, on node and its Meta (D-10, PROV-03). Coordinates
+// are written only when r images original bytes. A missing projection, a
+// no-image projection, and a projection made only of inserted (synthetic)
+// bytes get prov_range_exact=false and a prov_range_absence reason instead:
+// their points are anchors, not where the program is in the file.
+func cobolStampRange(node *graph.Node, r *sourcemap.Projection) {
+	meta := node.Meta
+	switch {
+	case r == nil || r.NoImage:
+		meta["prov_range_exact"] = false
+		meta["prov_range_absence"] = "no_original_projection"
+		return
+	case r.Synthetic:
+		meta["prov_range_exact"] = false
+		meta["prov_range_absence"] = "synthetic_projection"
+		return
+	}
+	node.StartLine = int(r.Start.Row) + 1
+	node.EndLine = int(r.End.Row) + 1
+	node.StartColumn = int(r.Start.Column)
+	node.EndColumn = int(r.End.Column)
+	meta["prov_start_row"] = int(r.Start.Row)
+	meta["prov_start_column"] = int(r.Start.Column)
+	meta["prov_end_row"] = int(r.End.Row)
+	meta["prov_end_column"] = int(r.End.Column)
+	meta["prov_start_byte"] = int(r.Start.Byte)
+	meta["prov_end_byte"] = int(r.End.Byte)
+	meta["prov_range_exact"] = r.Exact
 }
 
 var _ parser.Extractor = (*CobolGrammarExtractor)(nil)

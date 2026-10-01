@@ -12,6 +12,7 @@ import (
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/sourcemap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -355,6 +356,47 @@ func TestCobolGrammar_EndProgramMatchesCaseInsensitively(t *testing.T) {
 			assert.NotContains(t, cobolFileNode(t, result, "src/case.cbl").Meta, "prov_containment_unresolved")
 		})
 	}
+}
+
+// WR-03: only a projection that images original bytes yields coordinates;
+// no-image and wholly synthetic projections carry anchors, not locations.
+func TestCobolGrammar_RangeNeverInvented(t *testing.T) {
+	anchor := sourcemap.Point{Byte: 40, Row: 2, Column: 7}
+	for _, tc := range []struct {
+		name    string
+		r       *sourcemap.Projection
+		absence string
+	}{
+		{"missing", nil, "no_original_projection"},
+		{"no_image", &sourcemap.Projection{Start: anchor, End: anchor, NoImage: true}, "no_original_projection"},
+		{"synthetic", &sourcemap.Projection{Start: anchor, End: anchor, Synthetic: true}, "synthetic_projection"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &graph.Node{ID: "src/demo.cbl::DEMOPGM", Meta: map[string]any{}}
+			cobolStampRange(node, tc.r)
+			assert.Equal(t, false, node.Meta["prov_range_exact"])
+			assert.Equal(t, tc.absence, node.Meta["prov_range_absence"])
+			assert.Zero(t, node.StartLine)
+			assert.Zero(t, node.EndLine)
+			for key := range node.Meta {
+				assert.False(t, strings.HasPrefix(key, "prov_start_") || strings.HasPrefix(key, "prov_end_"),
+					"%s carries invented coordinate %s", tc.name, key)
+			}
+		})
+	}
+
+	t.Run("imaged", func(t *testing.T) {
+		node := &graph.Node{ID: "src/demo.cbl::DEMOPGM", Meta: map[string]any{}}
+		cobolStampRange(node, &sourcemap.Projection{
+			Start: sourcemap.Point{Byte: 33, Row: 1, Column: 7},
+			End:   sourcemap.Point{Byte: 120, Row: 4, Column: 20},
+			Exact: true,
+		})
+		assert.Equal(t, true, node.Meta["prov_range_exact"])
+		assert.NotContains(t, node.Meta, "prov_range_absence")
+		assert.Equal(t, 33, node.Meta["prov_start_byte"])
+		assertCobolRange(t, node)
+	})
 }
 
 func TestCobolGrammar_UnnamedProgramCounted(t *testing.T) {
