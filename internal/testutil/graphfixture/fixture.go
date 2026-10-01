@@ -137,6 +137,10 @@ func Canonical(path string) (string, error) {
 			}
 			records = append(records, record)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return "", err
+		}
 		if err := rows.Close(); err != nil {
 			return "", err
 		}

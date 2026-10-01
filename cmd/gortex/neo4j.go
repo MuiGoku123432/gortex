@@ -61,7 +61,9 @@ func newNeo4jPushCommand() *cobra.Command {
 				return fmt.Errorf("decode neo4j_push result: %w", err)
 			}
 			if jsonOutput {
-				_, err = cmd.OutOrStdout().Write(append(raw, '\n'))
+				if _, err := cmd.OutOrStdout().Write(append(raw, '\n')); err != nil {
+					return fmt.Errorf("write neo4j_push result: %w", err)
+				}
 			} else {
 				fmt.Fprintf(cmd.ErrOrStderr(), "neo4j push: phase=%s records=%d\n", result.Phase, result.NodeCount+result.EdgeCount)
 				if result.Complete {

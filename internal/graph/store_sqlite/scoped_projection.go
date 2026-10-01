@@ -215,6 +215,10 @@ func (s *scopedProjectionSnapshot) readEndpointNodes(ctx context.Context, ids []
 			}
 			result[node.ID] = node
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scoped projection endpoints: %w", err)
+		}
 		if err := rows.Close(); err != nil {
 			return nil, fmt.Errorf("scoped projection endpoints: %w", err)
 		}
