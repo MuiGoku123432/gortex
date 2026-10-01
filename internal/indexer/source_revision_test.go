@@ -52,13 +52,22 @@ func headCommit(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// stampAt runs the stamp for relPath with the indexer rooted at root.
+// stampAt runs the stamp for relPath with the indexer rooted at root, as
+// if the file's current bytes on disk (none when it does not exist) had
+// been extracted.
 func stampAt(t *testing.T, root, relPath string) *parser.ExtractionResult {
+	t.Helper()
+	src, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	return stampBytes(t, root, relPath, src)
+}
+
+// stampBytes runs the stamp for relPath as if src had been extracted.
+func stampBytes(t *testing.T, root, relPath string, src []byte) *parser.ExtractionResult {
 	t.Helper()
 	idx := newTestIndexer(graph.New())
 	idx.rootPath = root
 	result := sourceRevisionResult(relPath)
-	idx.stampSourceRevision(relPath, result)
+	idx.stampSourceRevision(relPath, src, result)
 	return result
 }
 
@@ -182,6 +191,58 @@ func TestSourceRevisionStamp(t *testing.T) {
 		assertCommit(t, stampAt(t, filepath.Join(top, "estate"), rel), headCommit(t, top))
 	})
 
+	// CR-01: the claim follows the hashed bytes, never the worktree state.
+	t.Run("bom_stripped", func(t *testing.T) {
+		requireGit(t)
+		root := filepath.Join(t.TempDir(), "repo")
+		gitInitRepo(t, root)
+		raw := "\xEF\xBB\xBF       PROGRAM-ID. A.\n"
+		writeRepoFile(t, root, rel, raw)
+		runGit(t, root, "add", ".")
+		runGit(t, root, "commit", "-q", "-m", "init")
+		// The always-on pre-ingestion pipeline strips the BOM, so the
+		// extracted bytes are not the committed blob even though git
+		// reports the file clean.
+		src := newTestIndexer(graph.New()).transforms.run(rel, []byte(raw))
+		require.NotEqual(t, raw, string(src), "the BOM strip transform must have run")
+		assertAbsence(t, stampBytes(t, root, rel, src), "indexed_bytes_differ_from_file")
+	})
+
+	t.Run("reverted_after_hashing", func(t *testing.T) {
+		requireGit(t)
+		root := committedRepo(t)
+		// Modified bytes were read and hashed; the file was reverted to
+		// HEAD's content before the stamp ran.
+		assertAbsence(t, stampBytes(t, root, rel, []byte("       PROGRAM-ID. B.\n")), "indexed_bytes_differ_from_file")
+	})
+
+	t.Run("assume_unchanged", func(t *testing.T) {
+		requireGit(t)
+		root := committedRepo(t)
+		writeRepoFile(t, root, rel, "       PROGRAM-ID. B.\n")
+		// git status no longer reports the modification.
+		runGit(t, root, "update-index", "--assume-unchanged", rel)
+		assertAbsence(t, stampAt(t, root, rel), "working_tree_differs_from_head")
+	})
+
+	t.Run("sha256_repository", func(t *testing.T) {
+		requireGit(t)
+		root := filepath.Join(t.TempDir(), "repo")
+		require.NoError(t, os.MkdirAll(root, 0o755))
+		if err := exec.Command("git", "-C", root, "init", "-q", "--object-format=sha256").Run(); err != nil {
+			t.Skip("git without SHA-256 repository support")
+		}
+		runGit(t, root, "config", "user.email", "test@example.com")
+		runGit(t, root, "config", "user.name", "Test")
+		runGit(t, root, "config", "commit.gpgsign", "false")
+		writeRepoFile(t, root, rel, "       PROGRAM-ID. A.\n")
+		runGit(t, root, "add", ".")
+		runGit(t, root, "commit", "-q", "-m", "init")
+		head := headCommit(t, root)
+		require.Len(t, head, 64)
+		assertCommit(t, stampAt(t, root, rel), head)
+	})
+
 	t.Run("untouched", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 		idx := newTestIndexer(graph.New())
@@ -192,9 +253,9 @@ func TestSourceRevisionStamp(t *testing.T) {
 				{ID: "pkg/f.go::Run", Kind: graph.KindFunction, FilePath: "pkg/f.go"},
 			},
 		}
-		idx.stampSourceRevision("pkg/f.go", result)
+		idx.stampSourceRevision("pkg/f.go", nil, result)
 		assert.Equal(t, map[string]any{"lang": "go"}, result.Nodes[0].Meta)
 		assert.Nil(t, result.Nodes[1].Meta)
-		idx.stampSourceRevision("pkg/f.go", nil)
+		idx.stampSourceRevision("pkg/f.go", nil, nil)
 	})
 }
