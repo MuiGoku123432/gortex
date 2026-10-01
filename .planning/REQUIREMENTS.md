@@ -45,7 +45,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - [x] **TRACE-04**: The tracer MUST persist through the existing SQLite `AddBatch` transaction path.
 - [x] **TRACE-05**: The traced node MUST be retrievable through at least one existing CLI query.
 - [x] **TRACE-06**: The traced node MUST be retrievable through at least one existing MCP query.
-- [ ] **TRACE-07**: The tracer acceptance test MUST pass with all AI providers disabled and no Neo4j installation.
+- [x] **TRACE-07**: The tracer acceptance test MUST pass with all AI providers disabled and no Neo4j installation.
 
 ### Exact Provenance
 
@@ -229,7 +229,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | TRACE-04 | Phase 2 | Complete |
 | TRACE-05 | Phase 2 | Complete |
 | TRACE-06 | Phase 2 | Complete |
-| TRACE-07 | Phase 2 | Pending |
+| TRACE-07 | Phase 2 | Complete |
 | PROV-01 | Phase 2 | Complete |
 | PROV-02 | Phase 2 | Complete |
 | PROV-03 | Phase 2 | Complete |

@@ -15,3 +15,15 @@ Out-of-scope discoveries logged during execution. They were not fixed in the pla
 1. **Item 1 above (the Neo4j tidy drift) is still open, and the lint job will now reach it.** `GOWORK=off go mod tidy -diff` at `738c165e` still shows only that move of `neo4j-go-driver/v6 v6.3.0` from indirect to direct, with no go.sum change. Plan 02-05's file scope is the seven workflows, so go.mod was left untouched. Once `COBOL_PARSER_READ_PAT` exists, the `ci.yml` `lint` job's `go.mod is tidy` step will fail on this until someone commits the one-line `go mod tidy` result. Owner: a one-line chore before or during Plan 02-06's green-CI checkpoint.
    status: resolved
    **Resolution (commit 81b56bf2):** the orchestrator committed the `go mod tidy` result with the user's approval, moving `neo4j-go-driver/v6` to the direct `require` block. `GOWORK=off go mod tidy -diff` is now clean, and Plan 02-06's gate re-ran `go mod tidy` with no go.mod or go.sum diff.
+
+## From Plan 02-06
+
+1. **The windows-latest CI test shard fails, and the cause has not been diagnosed.** With `COBOL_PARSER_READ_PAT` provisioned, 12 of 13 checks passed on head `d4e0b3b78779b11206e2b90ecb3e2ccbc5065daa`. `test (windows-latest, 1.27)` failed in step `Test (windows, no race detector)` (`go test -v -timeout=45m ./...`, exit 1). It also failed in the same step on the first run at `54ac27c9`. The only public annotation is "Process completed with exit code 1.", and reading the job log needs repo-admin access, which the local `gh` session (an Enterprise Managed User account) does not have. So it is unknown whether the failure is in `TestCobolGrammarWindowsStub` (D-17), in another Phase 1 or 2 test, or in an upstream test that already failed on Windows. The user accepted Plan 02-06's CI checkpoint with this known exception.
+   - Second run (head `d4e0b3b7`): https://github.com/MuiGoku123432/gortex/actions/runs/36889132850/job/110460015885
+   - First run (head `54ac27c9`): https://github.com/MuiGoku123432/gortex/actions/runs/36877578916/job/110420852834
+   - Next step: as the repo owner, open the job log, find the first `--- FAIL` line, and decide whether it is phase-caused (fix it) or pre-existing (re-run on upstream `main` and record it). WINDOWS.md entry 2 stays open until this is resolved.
+   - Owner: a follow-up before Phase 2 verification signs off D-17, or `/gsd-debug`.
+   status: open
+2. **Pre-existing golangci-lint findings blocked the lint job.** The first credentialed run failed `lint` on 7 findings in Phase 1 code and the pre-milestone cobolprobe test.
+   status: resolved
+   **Resolution (commits 9f21e855, d4e0b3b7, user-approved):** fixed the unused, ineffassign, and errcheck findings, plus three real dropped-error bugs (`rows.Err()` in `graphfixture.Canonical` and in the scoped-projection endpoint read, and the `neo4j push --json` stdout write). `lint` is green on `d4e0b3b7`.
