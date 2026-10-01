@@ -26,6 +26,10 @@ type cobolProgramSymbol struct {
 //     marker cannot contain another. What stays open is its container path.
 //   - An END PROGRAM N pops down to the topmost open N. If N is not open,
 //     containmentUnresolved is set and the stack is left alone (no guess).
+//   - A program that closes without its own END PROGRAM marker while it
+//     contains another program (popped by an outer marker, by the walk, or
+//     still open at the end) also sets containmentUnresolved: its marker
+//     was matched by a different program, so the nesting is a guess.
 //   - The k-th program with the same container and name, for k >= 2, gets
 //     "#k" in observation order. The first occurrence has no ordinal.
 //
@@ -70,7 +74,11 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 		remaining[name]++
 	}
 	occurrences := make(map[string]int) // base symbol -> programs seen
-	var open []cobolProgramSymbol
+	type frame struct {
+		cobolProgramSymbol
+		hasChildren bool // another program was opened inside this one
+	}
+	var open []frame
 	for i, o := range obs {
 		switch o.Kind {
 		case "program_definition":
@@ -80,11 +88,15 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 				continue
 			}
 			for len(open) > 0 && remaining[open[len(open)-1].name] == 0 {
+				if open[len(open)-1].hasChildren {
+					containmentUnresolved = true
+				}
 				open = open[:len(open)-1]
 			}
 			base := name
 			if len(open) > 0 {
 				base = open[len(open)-1].symbol + "/" + name
+				open[len(open)-1].hasChildren = true
 			}
 			occurrences[base]++
 			symbol := base
@@ -93,7 +105,7 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 			}
 			program := cobolProgramSymbol{index: i, name: name, symbol: symbol}
 			programs = append(programs, program)
-			open = append(open, program)
+			open = append(open, frame{cobolProgramSymbol: program})
 		case "end_program":
 			name, ok := endNames[i]
 			if !ok {
@@ -108,7 +120,16 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 				containmentUnresolved = true
 				continue
 			}
+			if top < len(open)-1 {
+				// The frames above top close without their own marker.
+				containmentUnresolved = true
+			}
 			open = open[:top]
+		}
+	}
+	for _, f := range open {
+		if f.hasChildren {
+			containmentUnresolved = true
 		}
 	}
 	return programs, containmentUnresolved, unnamed

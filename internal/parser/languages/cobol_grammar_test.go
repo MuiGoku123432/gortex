@@ -292,6 +292,51 @@ func TestCobolGrammar_ContainmentUnresolved(t *testing.T) {
 	assert.Equal(t, true, cobolFileNode(t, result, "src/unres.cbl").Meta["prov_containment_unresolved"])
 }
 
+// cobolProgram is one invented program named name, closed by END PROGRAM
+// end when end is not empty.
+func cobolProgram(name, end string) string {
+	src := "       IDENTIFICATION DIVISION.\n" +
+		"       PROGRAM-ID. " + name + ".\n" +
+		"       PROCEDURE DIVISION.\n" +
+		"       MAIN-PARA.\n" +
+		"           GOBACK.\n"
+	if end != "" {
+		src += "       END PROGRAM " + end + ".\n"
+	}
+	return src
+}
+
+// WR-01: a program whose END PROGRAM marker is matched by a different
+// program cannot be placed; the IDs are emitted, but never as resolved.
+func TestCobolGrammar_StolenEndMarkerUnresolved(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	for _, tc := range []struct {
+		name, src string
+		ids       []string
+	}{
+		{
+			// APGM has no marker of its own; the later END PROGRAM APGM
+			// belongs to the second APGM, so the first stays open with
+			// children at end of file.
+			"marker_belongs_to_later_program",
+			cobolProgram("APGM", "") + cobolProgram("BPGM", "BPGM") + cobolProgram("APGM", "APGM"),
+			[]string{"src/stolen.cbl::APGM", "src/stolen.cbl::APGM/BPGM", "src/stolen.cbl::APGM/APGM"},
+		},
+		{
+			// END PROGRAM APGM closes the nested BPGM frame implicitly.
+			"outer_marker_skips_open_frame",
+			cobolProgram("APGM", "") + cobolProgram("BPGM", "APGM") + cobolProgram("BPGM", "BPGM"),
+			[]string{"src/stolen.cbl::APGM", "src/stolen.cbl::APGM/BPGM", "src/stolen.cbl::BPGM"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractCobolGrammar(t, e, "src/stolen.cbl", tc.src)
+			assert.Equal(t, tc.ids, cobolProgramIDs(result))
+			assert.Equal(t, true, cobolFileNode(t, result, "src/stolen.cbl").Meta["prov_containment_unresolved"])
+		})
+	}
+}
+
 func TestCobolGrammar_UnnamedProgramCounted(t *testing.T) {
 	e := NewCobolGrammarExtractor()
 	result := extractCobolGrammar(t, e, "src/unnamed.cbl", cobolUnnamedFixture)
