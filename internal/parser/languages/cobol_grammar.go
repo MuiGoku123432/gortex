@@ -57,9 +57,21 @@ var errCobolGrammarNotApproved = errors.New("COBOL handoff grammar is not the ap
 // nothing falls back (D-05).
 var errCobolPreprocessorNotApproved = errors.New("COBOL preprocessor module is not the approved producer")
 
-// cobolAnalyzeSlot serializes Analyze across every extractor instance. A
-// single COBOL parse can need a large share of memory on a 16 GB host, so
-// COBOL files parse one at a time while other languages stay parallel.
+// cobolAnalyzeSlot serializes Analyze across every extractor instance in
+// this process. A single COBOL parse can need a large share of memory on a
+// 16 GB host, so COBOL files parse one at a time while other languages stay
+// parallel.
+//
+// Known limits (code review WR-04, not yet fixed):
+//   - The bound is per process. Under crash isolation
+//     (index.crash_isolation or GORTEX_PARSER_ISOLATION=1) every parse
+//     worker subprocess has its own slot, so N workers can run N COBOL
+//     analyses at once and the memory bound does not hold.
+//   - Extract cannot see the indexer's max_extract_millis budget, whose
+//     timer starts before Extract waits here. Files queued behind a slow
+//     parse can time out while waiting, and each abandoned Extract still
+//     takes the slot later and runs Analyze to completion for a discarded
+//     result.
 var cobolAnalyzeSlot = make(chan struct{}, 1)
 
 // CobolGrammarExtractor extracts COBOL program definitions from the
