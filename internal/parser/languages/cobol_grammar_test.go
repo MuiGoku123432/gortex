@@ -337,6 +337,26 @@ func TestCobolGrammar_StolenEndMarkerUnresolved(t *testing.T) {
 	}
 }
 
+// WR-02: END PROGRAM matches a program name case-insensitively, as COBOL
+// compares user-defined words, while IDs keep the name as written (D-20).
+func TestCobolGrammar_EndProgramMatchesCaseInsensitively(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	for _, tc := range []struct {
+		name, outer, end string
+		ids              []string
+	}{
+		{"mixed_case", "OuterPgm", "OUTERPGM", []string{"src/case.cbl::OuterPgm", "src/case.cbl::OuterPgm/INNERPGM"}},
+		{"literal_name", `"LitOuter"`, "LITOUTER", []string{`src/case.cbl::"LitOuter"`, `src/case.cbl::"LitOuter"/INNERPGM`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := cobolProgram(tc.outer, "") + cobolProgram("INNERPGM", "innerpgm") + "       END PROGRAM " + tc.end + ".\n"
+			result := extractCobolGrammar(t, e, "src/case.cbl", src)
+			assert.Equal(t, tc.ids, cobolProgramIDs(result))
+			assert.NotContains(t, cobolFileNode(t, result, "src/case.cbl").Meta, "prov_containment_unresolved")
+		})
+	}
+}
+
 func TestCobolGrammar_UnnamedProgramCounted(t *testing.T) {
 	e := NewCobolGrammarExtractor()
 	result := extractCobolGrammar(t, e, "src/unnamed.cbl", cobolUnnamedFixture)

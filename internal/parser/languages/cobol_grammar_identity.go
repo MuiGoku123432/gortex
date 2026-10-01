@@ -4,6 +4,7 @@ package languages
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
 )
@@ -33,9 +34,12 @@ type cobolProgramSymbol struct {
 //   - The k-th program with the same container and name, for k >= 2, gets
 //     "#k" in observation order. The first occurrence has no ordinal.
 //
-// Names are the verbatim program_name bytes, never case-folded (D-20). A
-// program_definition with no program_name is counted in unnamed and gets no
-// symbol. Line numbers and byte offsets never enter a symbol.
+// Names in symbols are the verbatim program_name bytes, never case-folded
+// (D-20). END PROGRAM markers match a program the way COBOL compares
+// user-defined words: case-insensitively and ignoring the quotes of a
+// literal name, so `PROGRAM-ID. Outer.` is closed by `END PROGRAM OUTER.`.
+// A program_definition with no program_name is counted in unnamed and gets
+// no symbol. Line numbers and byte offsets never enter a symbol.
 func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, containmentUnresolved bool, unnamed int) {
 	obs := h.Facts.Observations
 	parentOf := func(i int) (int, bool) {
@@ -69,9 +73,11 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 		}
 	}
 
-	remaining := make(map[string]int) // END PROGRAM markers not yet reached
+	// key is the name END PROGRAM matching compares.
+	key := func(name string) string { return strings.ToUpper(strings.Trim(name, `"'`)) }
+	remaining := make(map[string]int) // END PROGRAM markers not yet reached, by key
 	for _, name := range endNames {
-		remaining[name]++
+		remaining[key(name)]++
 	}
 	occurrences := make(map[string]int) // base symbol -> programs seen
 	type frame struct {
@@ -87,7 +93,7 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 				unnamed++
 				continue
 			}
-			for len(open) > 0 && remaining[open[len(open)-1].name] == 0 {
+			for len(open) > 0 && remaining[key(open[len(open)-1].name)] == 0 {
 				if open[len(open)-1].hasChildren {
 					containmentUnresolved = true
 				}
@@ -111,9 +117,9 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 			if !ok {
 				continue
 			}
-			remaining[name]--
+			remaining[key(name)]--
 			top := len(open) - 1
-			for top >= 0 && open[top].name != name {
+			for top >= 0 && key(open[top].name) != key(name) {
 				top--
 			}
 			if top < 0 {
