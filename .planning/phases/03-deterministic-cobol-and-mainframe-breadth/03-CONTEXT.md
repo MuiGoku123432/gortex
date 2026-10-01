@@ -46,9 +46,27 @@ Not in this phase: incremental lifecycle and idempotency proofs (Phase 4), `PARS
 - **D-14:** Edges are classified by verb and reuse existing kinds: IDMS `OBTAIN`/`FIND`/`GET` → `reads`. `STORE`/`MODIFY`/`ERASE`/`CONNECT`/`DISCONNECT` → `writes`. CICS `RECEIVE MAP` → `reads`, `SEND MAP` → `writes`. Transaction references (`START`/`RETURN TRANSID`) → `references`. SQL `SELECT`/`FETCH`/cursor reads → `reads`, `INSERT`/`UPDATE`/`DELETE`/`MERGE` → `writes`. The raw verb or command is always kept in meta (`idms_verb`, `cics_command`, `sql_verb`). Research supplies the complete verb table, and any verb it cannot classify honestly becomes `references`.
 - **D-15:** Resource identity is **repository-scoped, with qualifiers taken only from source**. Examples: `<repo>::db2/<SCHEMA|_unqualified>/TABLE`, `<repo>::idms/<subschema|_unqualified>/RECORD`, `<repo>::cics/mapset/NAME`. An unknown qualifier is an explicit `_unqualified` marker, never a guess. Qualified and unqualified same-named resources stay distinct until Phase 4 resolution domains can justify a merge. — **Reversibility:** costly — the IDs are persisted and projected, and Phase 4 ID-04 depends on them.
 
+### Post-research confirmations (2026-10-01, user-confirmed after 03-RESEARCH.md)
+- **D-16:** **Copybook contents use Option A, a producer copybook mode in the fork.** This resolves D-08. Research verified that the pinned producer cannot parse a standalone copybook (the `start` rule accepts only programs, and `Analyze` takes no options).
+  - The fork adds a copybook entry point (for example `AnalyzeCopybook`). It wraps the member in a synthetic program/DATA DIVISION header recorded as `sourcemap.KindInsert` segments, so original coordinates and `OriginalContentID` stay the member's own. It also adds a copybook-aware grade/anchor rule.
+  - The grammar is unchanged, so the grammar ID stays the same. Only the preprocessor module is re-pinned (`cobolApprovedPreprocessorModule`).
+  - Copybook data items are owned by the copybook node and are not duplicated per including program.
+  - Procedure-fragment members need a second wrapper variant. `REPLACING` pseudo-text members are expected to fail and surface as explicit gaps or degraded output.
+  - **Scheduling:** treat it as a producer prerequisite in Phase 3's **last wave**, like P2 D-03: fork commit, then a **user-confirmed push checkpoint** (outward action), then the Gortex re-pin, then copybook data-item extraction. No other DET work depends on it. — **Reversibility:** costly — a fork API plus a re-pin; copybook-owned data-item IDs are persisted and projected.
+- **D-17:** Statement nodes (D-05 resolved to **all named statements**) use **`graph.KindLocal`** with `cobol_kind=statement` and `cobol_statement_kind=<observation kind>`. They attach to their paragraph through `member_of` only (no `defines`). `KindLocal` is already excluded from BM25 search, file-summary definitions, and dead-code results. Structural edges carry no full `prov_*` blob, matching the Phase 2 program edge. — **Reversibility:** costly — the kind is persisted and projected.
+- **D-18:** Name matching for CALL/COPY binding and for shared DB2/IDMS/CICS resource IDs uses a versioned rule, **`cobol-name-norm/1` = ASCII uppercase**. The rule ID is recorded in meta. Node display names stay as written (P2 D-20).
+- **D-19:** **`COPY IDMS ...` members are never bound.** They stay on their placeholder with a distinct reason (for example `idms_dictionary_member`), so they are never confused with missing copybooks.
+- Research defaults adopted, unless the planner finds a blocker:
+  - COBOL placeholders get their own `unresolved::cobol::` namespace, which the generic resolver passes skip.
+  - One whole-repo `resolveCobolReferences` pass enforces D-09/D-11.
+  - The extractor dedupes same-key edges itself, because SQLite keeps the first copy and the in-memory graph the last.
+  - The CR-01 BOM fix goes in the D-18 indexer hook (`source_revision.go`).
+  - `prov_extractor_version` bumps from `gortex-cobol-grammar/2` to `/3`.
+  - A nested program colliding with an 01 record at the same path uses the `#k` fallback.
+  - FETCH-via-cursor emits `reads` edges.
+
 ### Claude's Discretion
 - **SQL non-physical sources (DET-12):** research picks the representation from what `queries/sql.scm` actually exposes (`sql_table_alias`, `sql_cte_definition`, `sql_dynamic_source`, `sql_include_name`, `sql_source_candidate`). Hard constraints: an alias, CTE, include, or dynamic source is **never merged into or represented as a physical `KindTable`**, and no table is invented for dynamic SQL. The suggested default: resolve aliases onto the physical table's edge as meta, make CTEs statement-scoped and marked `sql_role=cte`, treat `EXEC SQL INCLUDE` like COPY, and give dynamic SQL an `unresolved::` placeholder.
-- The final statement granularity under D-05.
 - The exact existing kind per construct under D-01, placeholder namespace strings, and meta key names (`cobol_*` vs `prov_*`, following the P2 conventions).
 - The section and division containment kind and edge (`EdgeContains` vs `EdgeDefines`, matching existing language extractors).
 - The plan slicing and wave order. Suggested: structure and data first, then control flow and calls/COPY, then IDMS, CICS, and SQL.
