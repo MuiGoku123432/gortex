@@ -143,7 +143,6 @@ func (o batchOpener) OpenScopedProjectionSnapshot(context.Context, graph.Project
 type batchTransport struct {
 	batches    []ProjectionBatch
 	cancel     context.CancelFunc
-	dryRuns    int
 	markCounts *MaterializedCounts
 	activated  bool
 }

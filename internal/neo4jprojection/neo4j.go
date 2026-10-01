@@ -552,7 +552,3 @@ func classifyNeo4jError(err error) error {
 	}
 	return errors.New("neo4j projection operation failed")
 }
-
-func physicalKey(owner, generation, recordType, logical string) string {
-	return generationKey(owner, recordType+"\x00"+logical, int64(len(generation))) + ":" + generation
-}

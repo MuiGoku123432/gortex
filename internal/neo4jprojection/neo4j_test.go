@@ -87,7 +87,9 @@ func TestNeo4jSlowStageRenewsLeaseAndSupersededWriterFailsClosed(t *testing.T) {
 	if err := transport.Stage(context.Background(), ProjectionBatch{Owner: "owner", OperationID: "operation", PendingGeneration: "generation", AttemptID: "attempt-one"}); err == nil {
 		t.Fatal("superseded writer continued staging")
 	}
-	transport.Abort(context.Background(), "owner", "operation", "generation", "attempt-one", 1)
+	if err := transport.Abort(context.Background(), "owner", "operation", "generation", "attempt-one", 1); err != nil {
+		t.Fatal(err)
+	}
 	if transport.lockAttempt != "attempt-two" {
 		t.Fatal("old abort cleared replacement ownership")
 	}
