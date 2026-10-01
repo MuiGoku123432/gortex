@@ -68,7 +68,7 @@ Plans:
 **Requirements**: BASE-01, BASE-02, BASE-03, TRACE-01, TRACE-02, TRACE-03, TRACE-04, TRACE-05, TRACE-06, TRACE-07, PROV-01, PROV-02, PROV-03, PROV-04, PROV-05, PROV-06, ID-01, ID-02
 **Success Criteria** (what must be TRUE):
 
-  1. A clean or `GOWORK=off` build uses parser behavior equivalent to baseline `97ac9f1`, reports its grammar content identifier, or fails instead of silently selecting the stock grammar.
+  1. A clean or `GOWORK=off` build uses the pinned `tree-sitter-cobol-upgrade` v0.26.0-line commit `f9eaf99c34a9` (behavioral floor `97ac9f1`), records its grammar content identifier, or fails instead of silently selecting the stock grammar.
   2. Indexing the tracer fixture emits one named COBOL program as a native node and its source-file relationship as a native edge through the registered extractor, `ExtractionResult`, repository prefixing, indexer lifecycle, and SQLite `AddBatch` transaction.
   3. The traced observation exposes stable repository-prefixed identity, exact source range, scope, revision, parser/extractor versions, evidence class, origin, and confidence without using line number as its sole identity discriminator.
   4. A user can retrieve the same persisted node through an existing CLI query and an existing MCP query.

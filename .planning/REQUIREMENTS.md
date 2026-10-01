@@ -2,7 +2,7 @@
 
 **Defined:** 2026-09-15
 **Status:** Draft for roadmap planning
-**Source baseline:** `tree-sitter-cobol-upgrade/main` merge `97ac9f1`
+**Source baseline:** `tree-sitter-cobol-upgrade` v0.26.0 line (accepted at `f19029f`), pinned at commit `f9eaf99c34a9` through go.mod; behavioral floor `97ac9f1`
 
 ## Product Principle
 
@@ -32,9 +32,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Parser Baseline
 
-- [x] **BASE-01**: The production COBOL extraction path MUST use parser behavior reproducibly equivalent to `tree-sitter-cobol-upgrade/main` merge `97ac9f1`.
+- [x] **BASE-01**: The production COBOL extraction path MUST use parser behavior reproducibly equivalent to the pinned `tree-sitter-cobol-upgrade` v0.26.0-line commit `f9eaf99c34a9` (accepted line `f19029f`, behavioral floor `97ac9f1`).
 - [x] **BASE-02**: A clean build with `GOWORK=off` MUST either resolve the approved parser baseline or fail without silently falling back to the stock COBOL grammar.
-- [x] **BASE-03**: Each COBOL extraction generation MUST record a parser grammar content identifier that can be compared across runs.
+- [x] **BASE-03**: Each COBOL extraction generation MUST record the grammar content identifier of the pinned parser commit `f9eaf99c34a9` (persisted as `prov_parser_grammar_id`), comparable across runs.
 - [ ] **BASE-04**: Acceptance tests MUST verify named COBOL, DATA DIVISION, IDMS, CICS, SQL, bounded unparsed-tail, `ERROR`, and `MISSING` behavior required from baseline `97ac9f1`.
 
 ### Thin Deterministic Tracer
@@ -190,7 +190,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - Dual-writing deterministic index mutations to SQLite and Neo4j.
 - Reverse-synchronizing Neo4j edits or reviews into Gortex.
 - Parsing every COBOL dialect or every mainframe language.
-- Changing parser baseline `97ac9f1` unless graph integration proves a release-blocking parser defect.
+- Changing the pinned parser baseline `f9eaf99c34a9` (behavioral floor `97ac9f1`) unless graph integration proves a release-blocking parser defect.
 - Treating AI output, model confidence, or free-form `ask` responses as deterministic graph truth.
 - Inventing contents or attributes for unavailable programs, copybooks, JCL members, schemas, or subsystem definitions.
 - Full JCL symbolic resolution, behavioral simulation, or a live digital twin.
