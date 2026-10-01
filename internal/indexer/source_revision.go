@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -75,16 +76,20 @@ func (idx *Indexer) stampSourceRevision(relPath string, src []byte, result *pars
 	}
 }
 
-// classifySourceRevision returns the HEAD commit for rootPath/relPath when
-// the git blob of src equals the blob HEAD records for that path, otherwise
-// an empty commit and one absence reason: git_unavailable,
-// not_a_git_worktree, no_head_commit, not_under_version_control,
-// working_tree_differs_from_head, or indexed_bytes_differ_from_file (src is
-// not the file on disk, for example after a BOM strip or a command
-// transform, or because the file changed after it was read). It never
-// claims a commit for modified, staged-only, untracked, or ignored bytes
-// (T-02-16). Git runs without a shell and every path goes after `--` with
-// literal pathspecs (T-02-17).
+// classifySourceRevision returns the HEAD commit of the git repository
+// that contains rootPath/relPath (a submodule's own repository for a file
+// inside one) when the git blob of src equals the blob HEAD records for
+// that path, otherwise an empty commit and one absence reason:
+// git_unavailable (no git binary), not_a_git_worktree, no_head_commit,
+// not_under_version_control, working_tree_differs_from_head,
+// indexed_bytes_differ_from_file (src is not the file on disk, for example
+// after a BOM strip or a command transform, or because the file changed
+// after it was read), or vcs_query_failed (a git query timed out or failed
+// for a reason that says nothing about the file, such as a corrupt
+// repository or a safe.directory refusal). It never claims a commit for
+// modified, staged-only, untracked, or ignored bytes (T-02-16). Git runs
+// without a shell and every path goes after `--` with literal pathspecs
+// (T-02-17).
 func classifySourceRevision(rootPath, relPath string, src []byte) (commit, absence string) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return "", "git_unavailable"
@@ -99,25 +104,31 @@ func classifySourceRevision(rootPath, relPath string, src []byte) (commit, absen
 	if err != nil {
 		return "", "not_a_git_worktree"
 	}
-	top, err := gitcmd.Output(ctx, root, "rev-parse", "--show-toplevel")
+	// One query, run from the file's own directory so a file inside a
+	// submodule resolves to that submodule, prints the top level and then
+	// HEAD resolved to one commit. The tree lookup below and the returned
+	// claim use that commit even if HEAD moves meanwhile. An unborn HEAD
+	// prints only the top level and exits 1.
+	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(relPath)))
+	out, err := gitcmd.Run(ctx, dir, "rev-parse", "--show-toplevel", "-q", "--verify", "HEAD^{commit}")
 	if ctx.Err() != nil {
-		return "", "git_unavailable"
+		return "", "vcs_query_failed"
 	}
-	if err != nil || top == "" {
-		return "", "not_a_git_worktree"
+	top, head, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "not a git repository"):
+			return "", "not_a_git_worktree"
+		case gitExitedWithOne(err) && top != "":
+			return "", "no_head_commit"
+		}
+		return "", "vcs_query_failed"
+	}
+	if top == "" || head == "" {
+		return "", "vcs_query_failed"
 	}
 	if resolved, err := filepath.EvalSymlinks(top); err == nil {
 		top = resolved
-	}
-
-	// Resolve HEAD to one commit first, so the tree lookup below and the
-	// returned claim refer to the same commit even if HEAD moves meanwhile.
-	head, err := gitcmd.Output(ctx, top, "rev-parse", "-q", "--verify", "HEAD^{commit}")
-	if ctx.Err() != nil {
-		return "", "git_unavailable"
-	}
-	if err != nil || head == "" {
-		return "", "no_head_commit"
 	}
 
 	rel, err := filepath.Rel(top, filepath.Join(root, relPath))
@@ -131,9 +142,9 @@ func classifySourceRevision(rootPath, relPath string, src []byte) (commit, absen
 
 	// One entry, "<mode> SP <type> SP <oid> TAB <path> NUL", when HEAD
 	// holds rel as a file.
-	out, err := gitcmd.Run(ctx, top, "--literal-pathspecs", "ls-tree", "-z", head, "--", rel)
-	if ctx.Err() != nil || err != nil {
-		return "", "git_unavailable"
+	out, err = gitcmd.Run(ctx, top, "--literal-pathspecs", "ls-tree", "-z", head, "--", rel)
+	if err != nil {
+		return "", "vcs_query_failed"
 	}
 	var headBlob string
 	if info, path, ok := strings.Cut(strings.TrimSuffix(string(out), "\x00"), "\t"); ok && path == rel {
@@ -145,8 +156,8 @@ func classifySourceRevision(rootPath, relPath string, src []byte) (commit, absen
 		// HEAD does not hold rel. The index says whether it is staged
 		// (tracked, but not what HEAD holds) or not versioned at all.
 		_, err = gitcmd.Output(ctx, top, "--literal-pathspecs", "ls-files", "--error-unmatch", "--", rel)
-		if ctx.Err() != nil {
-			return "", "git_unavailable"
+		if ctx.Err() != nil || (err != nil && !gitExitedWithOne(err)) {
+			return "", "vcs_query_failed"
 		}
 		if err != nil {
 			return "", "not_under_version_control"
@@ -160,6 +171,14 @@ func classifySourceRevision(rootPath, relPath string, src []byte) (commit, absen
 		return "", "indexed_bytes_differ_from_file"
 	}
 	return "", "working_tree_differs_from_head"
+}
+
+// gitExitedWithOne reports whether err is git exiting with status 1, the
+// "not found" answer of `rev-parse -q --verify` and `ls-files
+// --error-unmatch`, as opposed to a fatal error (status 128) or a kill.
+func gitExitedWithOne(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 // gitBlobOID returns the git object ID of data as a blob: the hex hash of

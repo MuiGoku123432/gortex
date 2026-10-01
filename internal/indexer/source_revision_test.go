@@ -243,6 +243,29 @@ func TestSourceRevisionStamp(t *testing.T) {
 		assertCommit(t, stampAt(t, root, rel), head)
 	})
 
+	// WR-05: a git failure is never reported as a fact about the file.
+	t.Run("corrupt_repository", func(t *testing.T) {
+		requireGit(t)
+		root := committedRepo(t)
+		out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD^{tree}").Output()
+		require.NoError(t, err)
+		tree := strings.TrimSpace(string(out))
+		require.NoError(t, os.Remove(filepath.Join(root, ".git", "objects", tree[:2], tree[2:])))
+		assertAbsence(t, stampAt(t, root, rel), "vcs_query_failed")
+	})
+
+	t.Run("submodule", func(t *testing.T) {
+		requireGit(t)
+		sub := committedRepo(t)
+		root := filepath.Join(t.TempDir(), "super")
+		gitInitRepo(t, root)
+		runGit(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "vendor/sub")
+		runGit(t, root, "commit", "-q", "-m", "add submodule")
+		// The file is versioned by the submodule, so its commit is the
+		// submodule's HEAD, not "not under version control".
+		assertCommit(t, stampAt(t, root, "vendor/sub/"+rel), headCommit(t, filepath.Join(root, "vendor/sub")))
+	})
+
 	t.Run("untouched", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 		idx := newTestIndexer(graph.New())
