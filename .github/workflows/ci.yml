@@ -1,5 +1,15 @@
 name: CI
 
+# Every job needs COBOL_PARSER_READ_PAT to download the private COBOL parser
+# fork and fails at its credential step when the secret is empty (D-13: no
+# skip-when-missing). Two kinds of run never get the secret, so they always
+# fail there by design:
+#   - pull_request runs from a fork. To test an external contribution, a
+#     maintainer reviews it (including .github/) and pushes the branch to
+#     this repository, where the PR run gets the secret.
+#   - Dependabot-triggered runs, which see only Dependabot secrets. Adding a
+#     Dependabot secret named COBOL_PARSER_READ_PAT fixes CI for them; see
+#     .github/dependabot.yml for the gomod updater itself.
 on:
   push:
     branches: [main]

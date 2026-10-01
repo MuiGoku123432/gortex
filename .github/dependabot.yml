@@ -35,6 +35,23 @@ updates:
           - patch
 
   # Go module dependencies.
+  #
+  # The private COBOL parser fork (github.com/MuiGoku123432/
+  # tree-sitter-cobol-upgrade, required in go.mod) cannot be resolved here
+  # without credentials, so gomod updates fail until both of these exist:
+  # a Dependabot secret COBOL_PARSER_READ_PAT (the same fine-grained,
+  # single-repo, Contents read-only token CI uses) and this top-level
+  # entry, referenced from this update with `registries: [cobol-fork]`:
+  #
+  #   registries:
+  #     cobol-fork:
+  #       type: git
+  #       url: https://github.com
+  #       username: x-access-token
+  #       password: ${{secrets.COBOL_PARSER_READ_PAT}}
+  #
+  # It is left out until the secret is provisioned (a user action), so the
+  # config never references a secret that does not exist.
   - package-ecosystem: gomod
     directory: /
     schedule:

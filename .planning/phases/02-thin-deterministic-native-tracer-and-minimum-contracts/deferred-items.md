@@ -27,3 +27,10 @@ Out-of-scope discoveries logged during execution. They were not fixed in the pla
 2. **Pre-existing golangci-lint findings blocked the lint job.** The first credentialed run failed `lint` on 7 findings in Phase 1 code and the pre-milestone cobolprobe test.
    status: resolved
    **Resolution (commits 9f21e855, d4e0b3b7, user-approved):** fixed the unused, ineffassign, and errcheck findings, plus three real dropped-error bugs (`rows.Err()` in `graphfixture.Canonical` and in the scoped-projection endpoint read, and the `neo4j push --json` stdout write). `lint` is green on `d4e0b3b7`.
+
+## From code review (02-REVIEW.md WR-07)
+
+1. **Fork PRs and Dependabot cannot pass CI, by design of D-13.** `pull_request` runs from forks get no repository secrets, and Dependabot-triggered runs get only Dependabot secrets, so `COBOL_PARSER_READ_PAT` is empty and every Go-building job stops at `::error::COBOL_PARSER_READ_PAT is not configured`. D-13 chose "no skip-when-missing", and this is its recorded consequence. For a public repository it means an external contribution can only be tested after a maintainer reviews it (including `.github/`) and pushes the branch to this repository. Separately, Dependabot's gomod updater cannot resolve the private fork, so Go dependency updates stop. The behaviour is documented at the top of `.github/workflows/ci.yml` and in the gomod section of `.github/dependabot.yml`.
+   - User action to restore Dependabot: create a Dependabot secret `COBOL_PARSER_READ_PAT` (same fine-grained, single-repo, Contents read-only token), then add the `registries: cobol-fork` entry shown in `.github/dependabot.yml` and reference it from the gomod update. The entry was not added yet, so the config never references a secret that does not exist.
+   - Owner: user (secret provisioning), then a one-line config follow-up.
+   status: open
