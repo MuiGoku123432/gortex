@@ -1,7 +1,7 @@
 ---
 phase: 02-thin-deterministic-native-tracer-and-minimum-contracts
 verified: 2026-10-01T19:30:00Z
-status: human_needed
+status: passed
 score: 68/79 must-haves verified (5/5 roadmap success criteria verified on darwin/linux)
 covered_files:
   - ".github/workflows/bench-arm.yml"
@@ -61,13 +61,35 @@ human_verification:
   - test: "Review the ten judgment-tier prohibitions listed in the report (fail-closed attestation, no stock or regex facts, no source in Meta, invented fixtures, no silent degradation, no guessed containment, no false VCS attribution, no private paths in docs)"
     expected: "Each holds. The LLM-judge verdict below is 'holds' for all ten"
     why_human: "Judgment-tier prohibitions need explicit human resolution; the verifier's verdict is not authoritative (unverified-prohibition — human review recommended)"
+overrides:
+  - must_have: "Per D-17, a Windows build compiles a stub NewCobolGrammarExtractor whose Extract returns errCobolParserUnavailableOnWindows"
+    reason: "WR-09: the stub now covers every non-darwin/linux platform under //go:build !darwin && !linux (file cobol_grammar_unsupported.go) and returns errCobolParserUnsupportedPlatform; with !windows, freebsd and others selected the real extractor that cannot link"
+    accepted_by: "project owner (user)"
+    accepted_at: "2026-10-01T20:31:35Z"
+  - must_have: "Per D-17, the Windows stub test asserts Extract returns errCobolParserUnavailableOnWindows with the same Language and Extensions as the real extractor"
+    reason: "WR-09 rename; TestCobolGrammarUnsupportedPlatformStub asserts the same contract under the new name"
+    accepted_by: "project owner (user)"
+    accepted_at: "2026-10-01T20:31:35Z"
+  - must_have: "Per D-09, prov_vcs_commit_absence is exactly one of git_unavailable, not_a_git_worktree, no_head_commit, not_under_version_control, or working_tree_differs_from_head"
+    reason: "CR-01 added indexed_bytes_differ_from_file and WR-05 added vcs_query_failed; the vocabulary stays closed and a commit is claimed only when the extracted bytes hash to HEAD's blob"
+    accepted_by: "project owner (user)"
+    accepted_at: "2026-10-01T20:31:35Z"
+  - must_have: "PROV-04 adjacency: prov_vcs_commit is written only for a file that is tracked in the index and has no dirty entry; any worktree or index difference yields working_tree_differs_from_head"
+    reason: "CR-01 replaced the DirtySampler dirty-entry check with a HEAD blob-ID comparison of the exact extracted bytes; transformed or changed-after-read bytes now yield indexed_bytes_differ_from_file"
+    accepted_by: "project owner (user)"
+    accepted_at: "2026-10-01T20:31:35Z"
+  - must_have: "CI green on ubuntu, macos, and windows"
+    reason: "User accepted closing Phase 2 with the windows-latest test shard failing (cause undiagnosed; job log needs repo-admin access). ubuntu and macos race suites, lint, static, onnx, benchmark, govulncheck, init-smoke, skill-drift all green on a0d2eac9 (run 36909797580). windows-latest passed on origin/main cbcaf8d5, so the regression is on this branch (Phase 1 or Phase 2 code). Deferred: WINDOWS.md entry 2, deferred-items.md 02-06 item 1."
+    accepted_by: "project owner (user)"
+    accepted_at: "2026-10-01T20:31:35Z"
+human_acceptance: "Closed by the project owner on 2026-10-01T20:31:35Z ('I am fine with phase 2 closing out windows is not my priority right now'). Accepted without item-by-item review: the review-fix override candidates, the 5 backstop truths (TRACE-04 reindex idempotency; TRACE-07/PROV-01/PROV-02/PROV-04 ordering), and the 10 judgment-tier prohibitions (verifier verdict: all hold). Windows is an open, deferred exception."
 ---
 
 # Phase 2: Thin Deterministic Native Tracer and Minimum Contracts Verification Report
 
 **Phase Goal:** A user can retrieve one trustworthy named COBOL program observation through existing native Gortex surfaces after it traverses the real production indexing and SQLite path.
 **Verified:** 2026-10-01T19:30:00Z
-**Status:** human_needed
+**Status:** passed (accepted with exceptions by the project owner; see `overrides` and `human_acceptance` in frontmatter)
 **Re-verification:** No. This is the first verification. No earlier 02-VERIFICATION.md existed.
 **Code baseline:** HEAD `a0d2eac9` (after the review-fix commits 90cbc134..53d88fd3). The working tree has no source changes, only `.planning/config.json` and `.planning/state.json`.
 **Platform scope:** Every behavioral result below was observed on darwin (local). It also covers linux through CI on d4e0b3b7 and the ubuntu stock-grammar step on a0d2eac9. Nothing was observed running on Windows.

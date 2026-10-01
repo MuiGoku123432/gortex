@@ -12,7 +12,7 @@ This milestone now begins with a general, manually invoked projection that mater
 - Decimal phases are reserved for urgent insertions.
 
 - [x] **Phase 1: General Neo4j Projection Command** - Materialize a selected SQLite graph snapshot into Neo4j through equivalent explicit CLI and MCP operations. (completed 2026-09-22)
-- [ ] **Phase 2: Thin Deterministic Native Tracer and Minimum Contracts** - Deliver one trustworthy native COBOL trace after parser/grammar readiness.
+- [x] **Phase 2: Thin Deterministic Native Tracer and Minimum Contracts** - Deliver one trustworthy native COBOL trace after parser/grammar readiness. (completed 2026-10-01)
 - [ ] **Phase 3: Deterministic COBOL and Mainframe Breadth** - Expand native extraction across COBOL structure, control flow, data, calls, copybooks, IDMS, CICS, and SQL.
 - [ ] **Phase 4: Stable Incremental and Cross-Repository Lifecycle** - Make identity, reconciliation, and scoped resolution stable across reruns, changes, and repositories.
 - [ ] **Phase 5: Explicit Unresolved Evidence** - Persist parser gaps and unavailable artifacts as distinct, lifecycle-aware deterministic findings.
@@ -170,6 +170,7 @@ Plans:
   3. `Imports`, inheritance/`Implements`, and call references produce edges without claiming resolution the grammar cannot support; unresolved targets stay distinguishable.
   4. `.vbproj` projects are recognised alongside existing `.sln`/`.csproj` handling.
   5. Acceptance passes on invented VB.NET fixtures with AI providers disabled and no Neo4j installation.
+
 **Plans:** 0 plans
 
 Plans:
@@ -231,7 +232,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. General Neo4j Projection Command | 7/7 | Complete    | 2026-09-22 |
-| 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | In Progress|  |
+| 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
 | 3. Deterministic COBOL and Mainframe Breadth | 0/TBD | Deferred: parser/grammar readiness | - |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 0/TBD | Deferred: Phase 3 | - |
 | 5. Explicit Unresolved Evidence | 0/TBD | Deferred: Phase 4 | - |
