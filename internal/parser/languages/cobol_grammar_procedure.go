@@ -16,8 +16,8 @@ type cobolLabel struct {
 	symbol string // QualName (program-relative node symbol)
 }
 
-// cobolProcedure emits each named program's procedure division, its
-// procedure sections and paragraphs, and the calls edges of single-label
+// cobolProcedure emits each named program's divisions, its procedure
+// sections and paragraphs, and the calls edges of single-label
 // PERFORM statements (D-01, D-02).
 //
 // PURPOSE: paragraph-level control flow that get_callers and get_call_chain
@@ -47,17 +47,24 @@ func cobolProcedure(w *cobolWalk) {
 	var divisions []int
 
 	for div, o := range obs {
-		prog := w.programSymbol(div)
-		if o.Kind != "procedure_division" || prog == "" {
+		// Every direct *_division child of a named program_definition.
+		p, ok := w.parent(div)
+		if !ok || obs[p].Kind != "program_definition" || !strings.HasSuffix(o.Kind, "_division") {
 			continue
 		}
-		divisions = append(divisions, div)
-		progID := w.filePath + "::" + prog
+		prog := w.programs[p]
+		if prog == "" {
+			continue
+		}
 		divNode := w.symbolNode(symbolFor(prog+"/@"+o.Kind), o.Kind, graph.KindPackage, "division", div)
 		divNode.Meta["cobol_division"] = strings.TrimSuffix(o.Kind, "_division")
 		cobolStampRange(divNode, o.Original)
 		w.defines(divNode.ID, divNode.StartLine)
-		w.memberOf(divNode.ID, progID, divNode.StartLine)
+		w.memberOf(divNode.ID, w.filePath+"::"+prog, divNode.StartLine)
+		if o.Kind != "procedure_division" {
+			continue
+		}
+		divisions = append(divisions, div)
 
 		// An open section or paragraph: its node, header, and last division
 		// child so far (whose span covers its own descendants).
