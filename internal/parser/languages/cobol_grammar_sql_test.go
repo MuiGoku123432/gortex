@@ -45,6 +45,44 @@ const cobolSQLFixture = `       IDENTIFICATION DIVISION.
            GOBACK.
 `
 
+// cobolSQLCursorFixture declares its cursors in the procedure division: the
+// pinned grammar admits no EXEC SQL statement in WORKING-STORAGE (it parses
+// as an ERROR and grades the document red).
+const cobolSQLCursorFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CURPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC X(10).
+       01 WS-N PIC S9(4) COMP.
+       01 WS-SQLTXT PIC X(200).
+       PROCEDURE DIVISION.
+       P0.
+           EXEC SQL DECLARE C1 CURSOR FOR SELECT X FROM ORDERS
+           END-EXEC.
+           EXEC SQL DECLARE C_EMP CURSOR FOR SELECT X FROM EMP END-EXEC.
+           EXEC SQL DECLARE C2 CURSOR FOR SELECT X FROM T8 END-EXEC.
+           EXEC SQL DECLARE C2 CURSOR FOR SELECT X FROM T9 END-EXEC.
+       P2.
+           EXEC SQL OPEN C1 END-EXEC.
+           EXEC SQL FETCH C1 INTO :WS-X END-EXEC.
+           EXEC SQL FETCH NEXT FROM C1 INTO :WS-X END-EXEC.
+           EXEC SQL FETCH ABSOLUTE :WS-N FROM C1 INTO :WS-X END-EXEC.
+           EXEC SQL FETCH C_EMP INTO :WS-X END-EXEC.
+           EXEC SQL CLOSE C1 END-EXEC.
+       P3.
+           EXEC SQL FETCH C9 INTO :WS-X END-EXEC.
+           EXEC SQL FETCH C2 INTO :WS-X END-EXEC.
+       P4.
+           EXEC SQL PREPARE S1 FROM :WS-SQLTXT END-EXEC.
+           EXEC SQL EXECUTE S1 END-EXEC.
+           EXEC SQL EXECUTE IMMEDIATE :WS-SQLTXT END-EXEC.
+       P5.
+           EXEC SQL CREATE TABLE NEWT (A INT) END-EXEC.
+           EXEC SQL ALTER TABLE S.T10 ADD B INT END-EXEC.
+           EXEC SQL DROP TABLE T11 END-EXEC.
+           GOBACK.
+`
+
 // cobolTableIDs returns the IDs of the KindTable nodes in emission order.
 func cobolTableIDs(result *parser.ExtractionResult) []string {
 	var ids []string
@@ -191,5 +229,96 @@ func TestCobolGrammar_SQL(t *testing.T) {
 			"db2::_unqualified/T3", "db2::_unqualified/T4", "db2::_unqualified/T5",
 			"db2::_unqualified/ORDERS",
 		}, cobolTableIDs(result))
+	})
+	const cpath = "src/cur.cbl"
+	cursors := extractCobolGrammar(t, e, cpath, cobolSQLCursorFixture)
+	const cproc = "CURPGM/@proc/"
+	cstmt := func(p string, k int) string {
+		s := cproc + p + "/@exec_sql_statement"
+		if k >= 2 {
+			s += "#" + strconv.Itoa(k)
+		}
+		return s
+	}
+	const orders = "db2::_unqualified/ORDERS"
+
+	t.Run("cursor", func(t *testing.T) {
+		declare := cobolStatementEdges(cursors, cstmt("P0", 1))
+		require.Equal(t, []string{"reads " + orders}, cobolEdgeTargets(declare))
+		assert.Equal(t, cpath+"::"+cproc+"P0", declare[0].From)
+		assert.Equal(t, "C1", declare[0].Meta["sql_cursor"])
+		assert.Equal(t, "DECLARE", declare[0].Meta["sql_verb"])
+		assert.Equal(t, "C1", cobolNodeByID(t, cursors, cpath+"::"+cstmt("P0", 1)).Meta["sql_cursor"])
+		// An underscore cursor name is a hidden token, so it is read from
+		// the statement text.
+		emp := cobolStatementEdges(cursors, cstmt("P0", 2))
+		require.Equal(t, []string{"reads db2::_unqualified/EMP"}, cobolEdgeTargets(emp))
+		assert.Equal(t, "C_EMP", emp[0].Meta["sql_cursor"])
+
+		// OPEN, FETCH (plain, NEXT FROM, ABSOLUTE :hv FROM), and CLOSE of C1.
+		for k, verb := range []string{"OPEN", "FETCH", "FETCH", "FETCH"} {
+			edges := cobolStatementEdges(cursors, cstmt("P2", k+1))
+			require.Equal(t, []string{"reads " + orders}, cobolEdgeTargets(edges), "P2 statement %d", k+1)
+			assert.Equal(t, cpath+"::"+cproc+"P2", edges[0].From)
+			assert.Equal(t, "C1", edges[0].Meta["sql_via_cursor"])
+			assert.Equal(t, verb, edges[0].Meta["sql_verb"])
+			assertCobolRelationProvenance(t, edges[0], "exec_sql_statement")
+		}
+		fetchEmp := cobolStatementEdges(cursors, cstmt("P2", 5))
+		require.Equal(t, []string{"reads db2::_unqualified/EMP"}, cobolEdgeTargets(fetchEmp))
+		assert.Equal(t, "C_EMP", fetchEmp[0].Meta["sql_via_cursor"])
+		closeEdges := cobolStatementEdges(cursors, cstmt("P2", 6))
+		require.Equal(t, []string{"reads " + orders}, cobolEdgeTargets(closeEdges))
+		assert.Equal(t, "CLOSE", closeEdges[0].Meta["sql_verb"])
+	})
+
+	t.Run("cursor_unknown", func(t *testing.T) {
+		for k, cursor := range []string{"C9", "C2"} {
+			assert.Empty(t, cobolStatementEdges(cursors, cstmt("P3", k+1)))
+			n := cobolNodeByID(t, cursors, cpath+"::"+cstmt("P3", k+1))
+			assert.Equal(t, "cursor_not_declared", n.Meta["cobol_unresolved_reason"])
+			assert.Equal(t, cursor, n.Meta["sql_cursor"])
+		}
+		// Both DECLAREs of C2 keep their own reads edges.
+		assert.Equal(t, []string{"reads db2::_unqualified/T8"}, cobolEdgeTargets(cobolStatementEdges(cursors, cstmt("P0", 3))))
+		assert.Equal(t, []string{"reads db2::_unqualified/T9"}, cobolEdgeTargets(cobolStatementEdges(cursors, cstmt("P0", 4))))
+	})
+
+	t.Run("prepare", func(t *testing.T) {
+		edges := cobolStatementEdges(cursors, cstmt("P4", 1))
+		require.Equal(t, []string{
+			"references unresolved::cobol::dynamic::sql::" + cpath + "::CURPGM::WS-SQLTXT",
+			"references " + cpath + "::CURPGM/WS-SQLTXT",
+		}, cobolEdgeTargets(edges))
+		assert.Equal(t, "dynamic", edges[0].Meta["cobol_unresolved_reason"])
+		assert.Equal(t, "PREPARE", edges[0].Meta["sql_verb"])
+		assertCobolRelationProvenance(t, edges[0], "exec_sql_statement")
+		assert.Equal(t, "sql_dynamic_source", edges[1].Meta["cobol_ref_role"])
+		assert.NotContains(t, edges[1].Meta, "cobol_unresolved_reason")
+	})
+
+	t.Run("execute", func(t *testing.T) {
+		for k := 2; k <= 3; k++ {
+			assert.Empty(t, cobolStatementEdges(cursors, cstmt("P4", k)))
+			n := cobolNodeByID(t, cursors, cpath+"::"+cstmt("P4", k))
+			assert.Equal(t, true, n.Meta["sql_dynamic"])
+			assert.Equal(t, "EXECUTE", n.Meta["sql_verb"])
+		}
+	})
+
+	t.Run("ddl", func(t *testing.T) {
+		assert.Equal(t, []string{"references db2::_unqualified/NEWT"}, cobolEdgeTargets(cobolStatementEdges(cursors, cstmt("P5", 1))))
+		assert.Equal(t, []string{"references db2::S/T10"}, cobolEdgeTargets(cobolStatementEdges(cursors, cstmt("P5", 2))))
+		assert.Equal(t, []string{"references db2::_unqualified/T11"}, cobolEdgeTargets(cobolStatementEdges(cursors, cstmt("P5", 3))))
+		assertCobolTable(t, cursors, "db2::S/T10", "T10", "S")
+	})
+
+	t.Run("cursor_tables_exact", func(t *testing.T) {
+		// No table for a cursor, a prepared statement, or a dynamic source.
+		assert.Equal(t, []string{
+			orders, "db2::_unqualified/EMP", "db2::_unqualified/T8", "db2::_unqualified/T9",
+			"db2::_unqualified/NEWT", "db2::S/T10", "db2::_unqualified/T11",
+		}, cobolTableIDs(cursors))
+		assert.Equal(t, "amber", cobolNodeByID(t, cursors, cpath).Meta["prov_document_grade"])
 	})
 }
