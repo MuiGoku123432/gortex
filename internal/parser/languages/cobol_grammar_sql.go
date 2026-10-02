@@ -35,8 +35,17 @@ type cobolSQLTable struct {
 	location string
 }
 
-// cobolSQL emits the DB2 table edges of every EXEC SQL statement in a named
-// program (DET-11, DET-12).
+// cobolSQLOrientation holds the FETCH orientation and option keywords that
+// can stand between OPEN, FETCH, or CLOSE and its cursor name.
+var cobolSQLOrientation = map[string]bool{
+	"NEXT": true, "PRIOR": true, "FIRST": true, "LAST": true, "CURRENT": true,
+	"BEFORE": true, "AFTER": true, "ABSOLUTE": true, "RELATIVE": true, "FROM": true,
+	"ROWSET": true, "STARTING": true, "AT": true, "WITH": true, "SENSITIVE": true,
+	"INSENSITIVE": true, "CONTINUE": true,
+}
+
+// cobolSQL emits the DB2 table and dynamic SQL edges of every EXEC SQL
+// statement in a named program (DET-11, DET-12).
 //
 // PURPOSE: DB2 table use is the other half of the mainframe dependency
 // picture, and a false table would poison every impact query.
@@ -45,38 +54,129 @@ type cobolSQLTable struct {
 // KindTable db2::<schema key or _unqualified>/<table key> whose schema comes
 // only from source (D-13, D-15). Aliases, CTE names, and derived tables are
 // statement-scoped Meta, never nodes; EXEC SQL INCLUDE stays on the COPY
-// path. Every key passes through the SQL clause of cobol-name-norm/1 and
+// path. OPEN, FETCH, and CLOSE read the tables of the one same-program
+// DECLARE of their cursor, else are marked cursor_not_declared (D-12).
+// PREPARE goes to a per-program dynamic placeholder that is never bound, and
+// EXECUTE only marks its statement, so no table is invented for dynamic SQL.
+// Every key passes through the SQL clause of cobol-name-norm/1 and
 // cobolIDSegment (T-03-28, T-03-29).
-// KEYWORDS: cobol, db2, exec sql, KindTable, sql_verb, reads, writes.
+// KEYWORDS: cobol, db2, exec sql, KindTable, cursor, dynamic sql, sql_verb.
 func cobolSQL(w *cobolWalk, data *cobolDataIndex) {
-	for i, o := range w.h.Facts.Observations {
+	obs := w.h.Facts.Observations
+	type cursorUse struct {
+		stmt                          int
+		from, programID, verb, cursor string
+	}
+	declared := make(map[string][]int)      // program ID + cursor key -> DECLARE statements
+	tables := make(map[int][]cobolSQLTable) // DECLARE statement -> its tables
+	var uses []cursorUse
+	edge := func(from string, t cobolSQLTable, stmt int, verb string) *graph.Edge {
+		e := w.relationEdge(from, t.to, t.kind, stmt)
+		e.Meta["sql_verb"] = verb
+		e.Meta["cobol_name_norm"] = cobolNameNormRule
+		if len(t.aliases) > 0 {
+			e.Meta["sql_aliases"] = t.aliases
+		}
+		if t.location != "" {
+			e.Meta["sql_location"] = t.location
+		}
+		return e
+	}
+	for i, o := range obs {
 		prog := w.programSymbol(i)
 		if o.Kind != "exec_sql_statement" || prog == "" {
 			continue
 		}
 		// The pinned grammar admits EXEC SQL statements only in a procedure
 		// division; outside one the program is the flow source.
-		from := w.filePath + "::" + prog
+		programID := w.filePath + "::" + prog
+		from := programID
 		if w.flowFrom[i] != "" {
 			from = w.filePath + "::" + w.flowFrom[i]
 		}
-		verb, _ := cobolSQLVerb(w, i)
+		verb, at := cobolSQLVerb(w, i)
 		n := w.statementNode(i)
 		if n != nil && verb != "" {
 			n.Meta["sql_verb"] = verb
 		}
-		for _, t := range cobolSQLTables(w, i, n) {
-			edge := w.relationEdge(from, t.to, t.kind, i)
-			edge.Meta["sql_verb"] = verb
-			edge.Meta["cobol_name_norm"] = cobolNameNormRule
-			if len(t.aliases) > 0 {
-				edge.Meta["sql_aliases"] = t.aliases
+		sub, rest := "", ""
+		if at >= 0 {
+			if p := obs[at].Parent; p != i {
+				sub = obs[p].Kind
 			}
-			if t.location != "" {
-				edge.Meta["sql_location"] = t.location
+			rest = string(w.h.Generated[obs[at].Generated.End:o.Generated.End])
+		}
+		found := cobolSQLTables(w, i, n)
+		cursor := ""
+		switch norm := cobolNameNorm(verb); {
+		case sub == "sql_declare_cursor_statement":
+			if cursor = cobolSQLCursor(rest); cursor != "" {
+				key := programID + "\x00" + cobolSQLName(cursor)
+				declared[key] = append(declared[key], i)
+				tables[i] = found
+			}
+		case sub == "" && (norm == "OPEN" || norm == "FETCH" || norm == "CLOSE"):
+			uses = append(uses, cursorUse{i, from, programID, verb, cobolSQLCursor(rest)})
+		case sub == "" && norm == "EXECUTE":
+			if n != nil {
+				n.Meta["sql_dynamic"] = true
+			}
+		case sub == "sql_prepare_statement":
+			for _, c := range w.children[obs[at].Parent] {
+				if obs[c].Kind != "sql_dynamic_source" {
+					continue
+				}
+				name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(w.text(c)), ":"))
+				to := "unresolved::cobol::dynamic::sql::" + programID + "::" + cobolIDSegment(cobolNameNorm(name))
+				e := edge(from, cobolSQLTable{to: to, kind: graph.EdgeReferences}, i, verb)
+				e.Meta["cobol_unresolved_reason"] = "dynamic"
+				cobolDataReference(w, data, from, i, programID, name, nil, "sql_dynamic_source").Meta["sql_verb"] = verb
 			}
 		}
+		for _, t := range found {
+			if e := edge(from, t, i, verb); cursor != "" {
+				e.Meta["sql_cursor"] = cursor
+			}
+		}
+		if n != nil && cursor != "" {
+			n.Meta["sql_cursor"] = cursor
+		}
 	}
+
+	for _, u := range uses {
+		n := w.statementNode(u.stmt)
+		if n != nil && u.cursor != "" {
+			n.Meta["sql_cursor"] = u.cursor
+		}
+		decls := declared[u.programID+"\x00"+cobolSQLName(u.cursor)]
+		if len(decls) != 1 {
+			if n != nil {
+				n.Meta["cobol_unresolved_reason"] = "cursor_not_declared"
+			}
+			continue
+		}
+		for _, t := range tables[decls[0]] {
+			read := cobolSQLTable{to: t.to, kind: graph.EdgeReads, location: t.location}
+			edge(u.from, read, u.stmt, u.verb).Meta["sql_via_cursor"] = u.cursor
+		}
+	}
+}
+
+// cobolSQLCursor returns the cursor name as written in rest, the statement
+// text after its OPEN, FETCH, CLOSE, or DECLARE verb: the first token that
+// is no orientation keyword, host variable, or number. It reads the text
+// because an underscore name is a hidden token with no observation.
+func cobolSQLCursor(rest string) string {
+	for _, tok := range strings.Fields(rest) {
+		if strings.EqualFold(tok, "END-EXEC") {
+			break
+		}
+		if c := tok[0]; c == ':' || c == '+' || c == '-' || (c >= '0' && c <= '9') || cobolSQLOrientation[strings.ToUpper(tok)] {
+			continue
+		}
+		return tok
+	}
+	return ""
 }
 
 // cobolSQLVerb returns the verb of EXEC SQL statement stmt as written and
@@ -187,25 +287,6 @@ func cobolSQLTables(w *cobolWalk, stmt int, n *graph.Node) []cobolSQLTable {
 	return tables
 }
 
-// cobolSQLParts splits a table name as written on the dots outside double
-// quotes, trimming the space around each part.
-func cobolSQLParts(text string) []string {
-	var parts []string
-	start, quoted := 0, false
-	for i := 0; i < len(text); i++ {
-		switch text[i] {
-		case '"':
-			quoted = !quoted
-		case '.':
-			if !quoted {
-				parts = append(parts, strings.TrimSpace(text[start:i]))
-				start = i + 1
-			}
-		}
-	}
-	return append(parts, strings.TrimSpace(text[start:]))
-}
-
 // cobolSQLAlias returns the identifier of an sql_table_alias text, which
 // is always AS followed by the identifier.
 func cobolSQLAlias(text string) string {
@@ -213,14 +294,4 @@ func cobolSQLAlias(text string) string {
 		return ""
 	}
 	return strings.TrimSpace(text[2:])
-}
-
-// cobolSQLName is the SQL clause of cobol-name-norm/1: a delimited "…"
-// identifier is kept verbatim with its quotes, and an ordinary identifier
-// is ASCII upper-folded.
-func cobolSQLName(part string) string {
-	if strings.HasPrefix(part, `"`) {
-		return part
-	}
-	return cobolNameNorm(part)
 }

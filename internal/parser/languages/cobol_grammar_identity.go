@@ -170,6 +170,35 @@ func cobolUnquote(raw string) string {
 	return raw
 }
 
+// cobolSQLName is the SQL clause of cobol-name-norm/1: a delimited "…"
+// identifier is kept verbatim with its quotes, and an ordinary identifier
+// is ASCII upper-folded.
+func cobolSQLName(part string) string {
+	if strings.HasPrefix(part, `"`) {
+		return part
+	}
+	return cobolNameNorm(part)
+}
+
+// cobolSQLParts splits a table name as written on the dots outside double
+// quotes, trimming the space around each part.
+func cobolSQLParts(text string) []string {
+	var parts []string
+	start, quoted := 0, false
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+			quoted = !quoted
+		case '.':
+			if !quoted {
+				parts = append(parts, strings.TrimSpace(text[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, strings.TrimSpace(text[start:]))
+}
+
 // cobolIDSegment percent-encodes the ID metacharacters %, :, /, # and every
 // control byte (below 0x20, or 0x7f) in a name-derived ID segment, so source
 // text cannot forge an ::unresolved:: marker, an extra path segment, or a
