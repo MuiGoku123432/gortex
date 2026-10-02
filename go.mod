@@ -3,7 +3,7 @@ module github.com/zzet/gortex
 go 1.27.0
 
 require (
-	github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor v0.0.0-20260930215433-f9eaf99c34a9
+	github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor v0.0.0-20261002100409-e64234cc493c
 	github.com/alexaandru/go-sitter-forest/ada v1.9.0
 	github.com/alexaandru/go-sitter-forest/agda v1.9.0
 	github.com/alexaandru/go-sitter-forest/aiken v1.9.0

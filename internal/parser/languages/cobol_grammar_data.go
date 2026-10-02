@@ -54,7 +54,15 @@ func cobolDataItems(w *cobolWalk) *cobolDataIndex {
 		prog := w.programSymbol(s)
 		cobolDataSection(w, idx, w.filePath+"::"+prog, prog+"/", sect.ID, s)
 	}
-	// REDEFINES and RENAMES bind once every item of the owner is known.
+	cobolDataBind(w, idx)
+	return idx
+}
+
+// cobolDataBind emits the REDEFINES and RENAMES references of idx's items.
+// They bind once every item of the owner is known; Extract's copybook branch
+// calls it too, for items the copybook file owns.
+func cobolDataBind(w *cobolWalk, idx *cobolDataIndex) {
+	obs := w.h.Facts.Observations
 	for _, it := range idx.items {
 		for _, c := range w.children[it.entry] {
 			var role string
@@ -79,7 +87,6 @@ func cobolDataItems(w *cobolWalk) *cobolDataIndex {
 			}
 		}
 	}
-	return idx
 }
 
 // qualifiedName returns the data name and IN/OF qualifiers (innermost
@@ -170,10 +177,15 @@ type cobolDataFrame struct {
 // An entry with no level in 01-49, 66, 77, or 88 (a CONSTANT entry has
 // none) gets no node and is counted in cobol_unleveled_entry_count on the
 // section node. A COPY marks the innermost open item, else the section
-// node, with cobol_contains_copy, since its items are absent.
+// node, with cobol_contains_copy, since its items are absent. An empty
+// parentID means a copybook owns the items (D-16): its file node, emitted
+// first by Extract, stands in for the section node.
 func cobolDataSection(w *cobolWalk, idx *cobolDataIndex, owner, idPrefix, parentID string, section int) {
 	obs := w.h.Facts.Observations
 	sect := w.sections[section]
+	if parentID == "" {
+		sect = w.result.Nodes[0]
+	}
 	// COPY is a grammar extra (Pitfall 3): one after the last entry falls
 	// outside the section span, so the span runs to the next non-COPY.
 	start, end, open := obs[section].Generated.Start, obs[section].Generated.End, true

@@ -36,7 +36,7 @@ const (
 	// semantics this mapping depends on while the grammar ID stays the
 	// same, so init refuses any other module version and nothing is parsed
 	// under an unapproved producer.
-	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20260930215433-f9eaf99c34a9"
+	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20261002100409-e64234cc493c"
 	// cobolGrammarExtractorVersion identifies this handoff-to-graph mapping.
 	// Bump it whenever the emitted nodes, edges, or prov_* keys change.
 	cobolGrammarExtractorVersion = "gortex-cobol-grammar/3"
@@ -168,37 +168,23 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	if err != nil {
 		return nil, fmt.Errorf("COBOL source identity for %s: %w", filePath, err)
 	}
-	if strings.EqualFold(filepath.Ext(filePath), ".cpy") {
-		// A standalone copybook has no program structure, so Analyze would
-		// grade it red for a meaningless reason (D-20). Record identity and
-		// revision only; parser and grade keys are omitted because nothing
-		// was parsed. The revision is the producer-domain content ID (D-09).
-		// note: the file-node shape repeats the analyzed path's below; two
-		// uses, so it stays inline (rule of three).
-		base := filepath.Base(filePath)
-		return &parser.ExtractionResult{Nodes: []*graph.Node{{
-			ID: filePath, Kind: graph.KindFile, Name: filePath,
-			FilePath: filePath, StartLine: 1, EndLine: bytes.Count(src, []byte("\n")) + 1,
-			Language: "cobol", Meta: map[string]any{
-				"prov_source_path":         filePath,
-				"prov_source_id":           string(sourceID),
-				"prov_revision_content_id": string(preprocessor.NewContentID(src)),
-				"prov_extractor_version":   cobolGrammarExtractorVersion,
-				"prov_analysis_absence":    "copybook_standalone_analysis_unsupported",
-				// The binding keys resolveCobolReferences matches a COPY on.
-				"cobol_kind":      "copybook",
-				"cobol_name_key":  cobolIDSegment(cobolNameNorm(strings.TrimSuffix(base, filepath.Ext(base)))),
-				"cobol_name_norm": cobolNameNormRule,
-			},
-		}}}, nil
-	}
+	// A standalone copybook runs the producer's copybook mode (D-16), which
+	// wraps the member in a synthetic header and keeps its own coordinates.
+	copybook := strings.EqualFold(filepath.Ext(filePath), ".cpy")
 	var h handoff.Handoff
 	func() {
 		cobolAnalyzeSlot <- struct{}{}
 		defer func() { <-cobolAnalyzeSlot }()
-		h, err = e.analyzer.Analyze(context.Background(), sourceID, src)
+		if copybook {
+			h, err = e.analyzer.AnalyzeCopybook(context.Background(), sourceID, src)
+		} else {
+			h, err = e.analyzer.Analyze(context.Background(), sourceID, src)
+		}
 	}()
-	if err != nil {
+	switch {
+	case err != nil && copybook:
+		return nil, fmt.Errorf("enhanced COBOL copybook analysis of %s: %w", filePath, err)
+	case err != nil:
 		return nil, fmt.Errorf("enhanced COBOL analysis of %s: %w", filePath, err)
 	}
 	if h.Tool.CompiledLanguageID != e.approvedGrammarID {
@@ -231,6 +217,28 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		Language: "cobol", Meta: docMeta,
 	}
 	result := &parser.ExtractionResult{Nodes: []*graph.Node{fileNode}}
+	if copybook {
+		// The copybook file node owns the member's data items (D-07); the
+		// wrapper's program, divisions, and sections are never emitted. The
+		// walk gets its own docMeta copy, so COPY marks written on the file
+		// node never leak into item Meta.
+		w := newCobolWalk(h, src, filePath, maps.Clone(docMeta), nil, result)
+		idx := &cobolDataIndex{seen: make(map[string]int), taken: make(map[string]bool)}
+		for s, o := range h.Facts.Observations {
+			if p, ok := w.parent(s); ok && h.Facts.Observations[p].Kind == "data_division" && strings.HasSuffix(o.Kind, "_section") {
+				cobolDataSection(w, idx, filePath, "", "", s)
+			}
+		}
+		cobolDataBind(w, idx)
+		// Set after the walk so only the file node carries the binding keys
+		// resolveCobolReferences matches a COPY on.
+		base := filepath.Base(filePath)
+		docMeta["cobol_kind"] = "copybook"
+		docMeta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(strings.TrimSuffix(base, filepath.Ext(base))))
+		docMeta["cobol_name_norm"] = cobolNameNormRule
+		result.Edges = cobolDedupeEdges(result.Edges)
+		return result, nil
+	}
 
 	programs, containmentUnresolved, unnamed := cobolProgramSymbols(h)
 	for _, p := range programs {
