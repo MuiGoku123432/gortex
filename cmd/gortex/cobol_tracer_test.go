@@ -31,16 +31,32 @@ import (
 	"github.com/zzet/gortex/internal/testutil/graphfixture"
 )
 
-// cobolTracerFixture is an invented 7-column fixed-format program. It must
-// never be replaced with estate-derived source: this repository is public.
+// cobolTracerFixture, cobolTracerSubFixture, and cobolTracerCopybookFixture
+// are an invented 7-column fixed-format program, the program it calls, and
+// the copybook it copies. They must never be replaced with estate-derived
+// source: this repository is public.
 const cobolTracerFixture = "       IDENTIFICATION DIVISION.\n" +
 	"       PROGRAM-ID. DEMOPGM.\n" +
+	"       DATA DIVISION.\n" +
+	"       WORKING-STORAGE SECTION.\n" +
+	"       COPY CUSTREC.\n" +
 	"       PROCEDURE DIVISION.\n" +
 	"       MAIN-PARA.\n" +
 	"           PERFORM WORK-PARA.\n" +
+	"           CALL 'SUBPGM'.\n" +
 	"           STOP RUN.\n" +
 	"       WORK-PARA.\n" +
 	"           EXIT.\n"
+
+const cobolTracerSubFixture = "       IDENTIFICATION DIVISION.\n" +
+	"       PROGRAM-ID. SUBPGM.\n" +
+	"       PROCEDURE DIVISION.\n" +
+	"       SUB-PARA.\n" +
+	"           GOBACK.\n"
+
+const cobolTracerCopybookFixture = "       01 CUST-REC.\n" +
+	"          05 CUST-ID PIC X(8).\n" +
+	"          05 CUST-NAME PIC X(30).\n"
 
 // cobolTracerApprovedGrammarID mirrors languages.cobolApprovedGrammarID,
 // which is unexported; the tracer asserts the persisted value equals it.
@@ -104,9 +120,17 @@ func indexCobolTracerRepo(t *testing.T) cobolTracerRepo {
 	dir := testenv.ShortTempDir(t)
 	root := filepath.Join(dir, "repo")
 	gitInitRepo(t, root)
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "cobol"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "cobol", "demopgm.cbl"), []byte(cobolTracerFixture), 0o644))
-	for _, args := range [][]string{{"add", "cobol/demopgm.cbl"}, {"commit", "-m", "add cobol fixture"}} {
+	files := map[string]string{
+		"cobol/demopgm.cbl": cobolTracerFixture,
+		"cobol/subpgm.cbl":  cobolTracerSubFixture,
+		"copy/custrec.cpy":  cobolTracerCopybookFixture,
+	}
+	for rel, src := range files {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, filepath.Dir(rel)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte(src), 0o644))
+	}
+	add := []string{"add", "cobol/demopgm.cbl", "cobol/subpgm.cbl", "copy/custrec.cpy"}
+	for _, args := range [][]string{add, {"commit", "-m", "add cobol fixture"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = root
 		cmd.Env = append(os.Environ(),
@@ -489,9 +513,10 @@ func TestCobolTracer_ParagraphFlow(t *testing.T) {
 	assert.Equal(t, true, meta["prov_range_exact"])
 
 	// Edge Meta is not part of the MCP JSON, so the persisted row is the proof.
+	// Only control-flow edges count: MAIN-PARA's CALL is a calls edge too.
 	var calls []*graph.Edge
 	for _, e := range repo.store.GetOutEdges(mainID) {
-		if e.Kind == graph.EdgeCalls {
+		if e.Kind == graph.EdgeCalls && e.Meta["cobol_flow"] != nil {
 			calls = append(calls, e)
 		}
 	}
@@ -505,4 +530,60 @@ func TestCobolTracer_ParagraphFlow(t *testing.T) {
 	startRow, ok := edge.Meta["prov_start_row"].(int)
 	require.True(t, ok, "prov_start_row = %#v", edge.Meta["prov_start_row"])
 	assert.Equal(t, startRow+1, edge.Line)
+}
+
+// TestCobolTracer_CallAndCopyBinding proves cross-file binding on the real
+// path (D-09, D-11): tracking runs the production resolver, which binds
+// MAIN-PARA's CALL 'SUBPGM' to the one SUBPGM program and COPY CUSTREC to the
+// one custrec copybook in the repository, and the unchanged MCP get_callers
+// tool returns MAIN-PARA as a caller of SUBPGM over the relay.
+func TestCobolTracer_CallAndCopyBinding(t *testing.T) {
+	repo, socket, _ := startCobolTracerDaemon(t)
+	mainID := repo.prefix + "/cobol/demopgm.cbl::DEMOPGM/@proc/MAIN-PARA"
+	subID := repo.prefix + "/cobol/subpgm.cbl::SUBPGM"
+	copybookID := repo.prefix + "/copy/custrec.cpy"
+
+	// Persisted rows first: get_callers' freshness check may reindex.
+	var call *graph.Edge
+	for _, e := range repo.store.GetOutEdges(mainID) {
+		if e.Kind == graph.EdgeCalls && e.Meta["cobol_call"] != nil {
+			require.Nil(t, call, "MAIN-PARA has more than one CALL edge")
+			call = e
+		}
+	}
+	require.NotNil(t, call, "MAIN-PARA has no CALL edge")
+	assert.Equal(t, subID, call.To)
+	assert.Equal(t, "literal", call.Meta["cobol_call"])
+	assert.Equal(t, "'SUBPGM'", call.Meta["cobol_target_raw"])
+	assert.NotContains(t, call.Meta, "cobol_unresolved_reason")
+
+	var copies []*graph.Edge
+	for _, e := range repo.store.GetOutEdges(repo.programID) {
+		if e.Kind == graph.EdgeImports {
+			copies = append(copies, e)
+		}
+	}
+	require.Len(t, copies, 1)
+	assert.Equal(t, copybookID, copies[0].To)
+	assert.Equal(t, "copy", copies[0].Meta["cobol_copy_form"])
+	assert.NotContains(t, copies[0].Meta, "cobol_unresolved_reason")
+
+	copybook := repo.store.GetNode(copybookID)
+	require.NotNil(t, copybook, "copybook file node missing")
+	assert.Equal(t, "copybook", copybook.Meta["cobol_kind"])
+	assert.Equal(t, "CUSTREC", copybook.Meta["cobol_name_key"])
+
+	text := callCobolTracerTool(t, socket, repo.root, "get_callers",
+		map[string]any{"id": subID, "format": "json"})
+	var callers struct {
+		Nodes []struct {
+			ID string `json:"id"`
+		} `json:"nodes"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &callers), "get_callers output: %s", text)
+	var callerIDs []string
+	for _, n := range callers.Nodes {
+		callerIDs = append(callerIDs, n.ID)
+	}
+	assert.Contains(t, callerIDs, mainID, "get_callers output: %s", text)
 }
