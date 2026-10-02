@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-10-PLAN.md
-last_updated: "2026-10-02T09:42:28.455Z"
+stopped_at: Completed 03-11-PLAN.md
+last_updated: "2026-10-02T10:06:01.004Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: ef0f5f1d3af87c9c42bba69d02212036da09ef10
+state_head: 5fb49d33b7884509a5dcc12b018d1fd69542ada3
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 23
+  completed_plans: 24
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
-Plan: 11 of 13
+Plan: 12 of 13
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 03 execution started
 
@@ -84,6 +84,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P08 | 11 min | 2 tasks | 5 files |
 | Phase 03 P09 | 17 min | 2 tasks | 4 files |
 | Phase 03 P10 | 25 min | 2 tasks | 7 files |
+| Phase 03 P11 | 8 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -149,6 +150,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-09: the pinned grammar admits no EXEC SQL statement in WORKING-STORAGE and leaves INSERT...SELECT sources in the unparsed tail; neither is guessed
 - [Phase 03]: COBOL embedded-SQL KindTable nodes (Language cobol) survive the default-off sql coverage gate like migration and ORM tables; without this every DB2 table and SQL edge was deleted before SQLite
 - [Phase 03]: serveCobolTestDaemon is the shared daemon-over-relay helper for COBOL tracer and breadth tests
+- [Phase 03]: 03-11: Local fork commit e64234cc493c487393c5e7867adfd7ca92d936ba (parent f9eaf99, NOT pushed) adds transform.RunCopybook/CopybookConfigurationID (rule copybook-wrapper/v1), grade.PolicyCopybookV1 (cobol-grade-policy-copybook-v1, AnchorsByConstruction), and Analyzer.AnalyzeCopybook; Plan 03-12 owns the push
+- [Phase 03]: 03-11: Copybook final-newline insert is a separate RuleCopybookWrapper occurrence; analyze() keeps its signature for quality_census and analyzeWith carries the transform parameter
 
 ### Pending Todos
 
@@ -177,6 +180,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T09:42:28.410Z
-Stopped at: Completed 03-10-PLAN.md
+Last session: 2026-10-02T10:06:00.957Z
+Stopped at: Completed 03-11-PLAN.md
 Resume file: None
