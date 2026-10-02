@@ -62,6 +62,10 @@ const cobolTracerCopybookFixture = "       01 CUST-REC.\n" +
 // which is unexported; the tracer asserts the persisted value equals it.
 const cobolTracerApprovedGrammarID = "f97452e11a2b80b92acb7edf776131470bc2e1ffd7c077f4ade4ce3c3a47503d"
 
+// cobolTracerApprovedPreprocessorModule mirrors
+// languages.cobolApprovedPreprocessorModule (D-16 re-pin).
+const cobolTracerApprovedPreprocessorModule = "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor@v0.0.0-20261002100409-e64234cc493c"
+
 // cobolAddBatchRecorder proves the direct SQLite write path (TRACE-04): it
 // records every node ID handed to AddBatch or AddBatchChecked and then
 // delegates. Embedding the concrete store keeps Catalog, BulkLoader, and
@@ -198,8 +202,7 @@ func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix, commit 
 	module, _ := meta["prov_parser_module"].(string)
 	assert.True(t, strings.HasPrefix(module, "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/forest-shim/cobol@v0.0.0-"),
 		"prov_parser_module = %q", module)
-	assert.Equal(t, "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor@v0.0.0-20260930215433-f9eaf99c34a9",
-		meta["prov_preprocessor_module"])
+	assert.Equal(t, cobolTracerApprovedPreprocessorModule, meta["prov_preprocessor_module"])
 	assert.Equal(t, "gortex-cobol-grammar/3", meta["prov_extractor_version"])
 	assert.Equal(t, "DETERMINISTIC", meta["prov_evidence_class"])
 	assert.Equal(t, "ast_resolved", meta["prov_origin"])
@@ -595,4 +598,52 @@ func TestCobolTracer_CallAndCopyBinding(t *testing.T) {
 		callerIDs = append(callerIDs, n.ID)
 	}
 	assert.Contains(t, callerIDs, mainID, "get_callers output: %s", text)
+}
+
+// TestCobolTracer_CopybookDataItems proves copybook-owned data items travel
+// the real path (D-16, D-07): CUST-REC and its fields persist under the
+// copybook, not the program that copies it, with the member's own
+// coordinates; MCP get_symbol serves CUST-REC; and COPY CUSTREC still binds
+// to the copybook file node.
+func TestCobolTracer_CopybookDataItems(t *testing.T) {
+	repo, socket, _ := startCobolTracerDaemon(t)
+	copybookID := repo.prefix + "/copy/custrec.cpy"
+	recID := copybookID + "::CUST-REC"
+
+	// Persisted rows first: get_symbol's freshness check may reindex.
+	rec := repo.store.GetNode(recID)
+	require.NotNil(t, rec, "copybook data item %s missing", recID)
+	assert.Equal(t, graph.KindVariable, rec.Kind)
+	for _, field := range []string{"CUST-ID", "CUST-NAME"} {
+		node := repo.store.GetNode(recID + "/" + field)
+		require.NotNil(t, node, "copybook field %s missing", field)
+		assert.Equal(t, graph.KindField, node.Kind)
+	}
+	copybook := repo.store.GetNode(copybookID)
+	require.NotNil(t, copybook, "copybook file node missing")
+	assert.Equal(t, "copybook", copybook.Meta["cobol_kind"])
+	assert.NotContains(t, copybook.Meta, "prov_analysis_absence")
+
+	var copies []string
+	for _, e := range repo.store.GetOutEdges(repo.programID) {
+		if e.Kind == graph.EdgeImports {
+			copies = append(copies, e.To)
+		}
+	}
+	assert.Equal(t, []string{copybookID}, copies)
+	program := repo.store.GetNode(repo.programID)
+	require.NotNil(t, program)
+	assert.Equal(t, cobolTracerApprovedPreprocessorModule, program.Meta["prov_preprocessor_module"])
+
+	var payload cobolTracerSymbol
+	text := callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": recID, "detail": "full", "format": "json"})
+	require.NoError(t, json.Unmarshal([]byte(text), &payload))
+	require.Equal(t, recID, payload.Node["id"])
+	meta, ok := payload.Node["meta"].(map[string]any)
+	require.True(t, ok, "data item has no meta: %v", payload.Node)
+	assert.Equal(t, "data_item", meta["cobol_kind"])
+	assert.Equal(t, "cobol-grade-policy-copybook-v1", meta["prov_grade_policy"])
+	assert.InDelta(t, 0, meta["prov_start_row"], 0)
+	assert.Equal(t, true, meta["prov_range_exact"])
 }
