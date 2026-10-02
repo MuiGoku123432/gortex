@@ -111,7 +111,51 @@ Plans:
   4. IDMS record/set and CICS program/transaction/map/mapset references retain exact source evidence.
   5. DB2 reads and writes retain statement-level evidence while aliases, CTEs, includes, and dynamic sources remain distinguishable from physical tables.
 
-**Plans**: TBD
+**Plans**: 13 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md -- Tracer: paragraphs and PERFORM through SQLite to get_callers; shared walk, ID grammar, edge provenance, dedupe, version /3
+- [ ] 03-02-PLAN.md -- CR-01 BOM byte offsets and VCS stamp on relationship edges in the indexer hook
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-03-PLAN.md -- Data/environment sections and all named statements (KindLocal) with statement provenance on edges
+- [ ] 03-04-PLAN.md -- Resolver: owned cobol:: namespace and same-repo exactly-one CALL/COPY binding pass
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 03-05-PLAN.md -- Data items: levels, FILLER/66/77/88, full-path IDs, REDEFINES/RENAMES, shared data lookup
+- [ ] 03-06-PLAN.md -- Control flow: qualified labels, PERFORM THRU expansion, GO TO and DEPENDING ON
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 03-07-PLAN.md -- Literal and dynamic CALL, COPY/-INC/COPY IDMS/SQL INCLUDE, binding keys, real-path binding test
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 03-08-PLAN.md -- IDMS record/set and CICS program/transaction/map/mapset references
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 03-09-PLAN.md -- DB2 SQL reads/writes, aliases, CTEs, cursors, dynamic SQL
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 03-10-PLAN.md -- Two-repository real-path acceptance, contract tests, Neo4j key check, language docs
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 03-11-PLAN.md -- Fork prerequisite (D-16): copybook analysis mode, committed locally
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 03-12-PLAN.md -- User-confirmed push of the copybook-mode fork commit
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 03-13-PLAN.md -- Preprocessor-only re-pin, copybook-owned data items, phase gate
 
 ### Phase 4: Stable Incremental and Cross-Repository Lifecycle
 

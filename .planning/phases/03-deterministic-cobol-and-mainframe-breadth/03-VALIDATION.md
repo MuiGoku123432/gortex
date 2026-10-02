@@ -44,18 +44,29 @@ Task IDs are assigned by the planner; this map is keyed by requirement and fille
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | — | DET-01 (structure) | — | N/A | unit | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_Structure -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-01 (data items) | — | N/A | unit | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_DataItems -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-02 | — | N/A | unit | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_ControlFlow -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-02 (real path) | — | N/A | integration | `go test -race ./cmd/gortex/ -run TestCobolTracer_ParagraphFlow -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-03/04 | ID injection | literal-derived ID segments encoded | unit + resolver | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_Calls -count=1` ; `go test -race ./internal/resolver/ -run TestCobolReferences -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-05/06 | false cross-repo binding | same-repo exactly-one only | unit + resolver | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_Copy -count=1` ; `go test -race ./internal/resolver/ -run TestCobolReferences_Copybook -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-07/08 | — | N/A | unit | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_IDMS -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-09/10 | — | N/A | unit | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_CICS -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | DET-11/12 | — | no physical table invented | unit | `go test -race ./internal/parser/languages/ -run TestCobolGrammar_SQL -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | CR-01 (PROV-03) | — | N/A | integration | `go test -race ./internal/indexer/ -run TestCobolBOMByteOffsets -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | D-16 copybook mode | — | N/A | unit (fork) + unit | fork `go test -race ./preprocessor/ -run Copybook` ; `go test -race ./internal/parser/languages/ -run TestCobolGrammar_Copybook -count=1` | ❌ W0 | ⬜ pending |
-| TBD | TBD | — | cross-cutting (degraded, version `/3`, prov keys) | secret-like keys | no meta key contains secret-like substrings | unit | `go test -race ./internal/parser/languages/ -run 'TestCobolGrammar_(Degraded|ProvKeys)' -count=1` | partial | ⬜ pending |
+| 03-01-T1 | 03-01 | 1 | DET-01, DET-02 (tracer, real path) | T-03-03 | labels bind only on exactly one same-program match | integration | `GOWORK=off go test -race -count=1 ./cmd/gortex -run '^TestCobolTracer_'` (includes `TestCobolTracer_ParagraphFlow`) | ❌ W0 | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | DET-01 (divisions, sections, paragraphs), DET-02 (PERFORM) | T-03-01 | name-derived ID segments percent-encoded | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_(Divisions|Paragraphs|PerformEdge|EdgeDedupe|NameNorm)$'` | ❌ W0 | ⬜ pending |
+| 03-02-T1 | 03-02 | 1 | CR-01 (PROV-03 residual), DET-01 | T-03-06 | unequal indexed bytes never claimed exact | unit | `GOWORK=off go test -race -count=1 ./internal/indexer/ -run '^TestSourceRevision'` | ❌ W0 | ⬜ pending |
+| 03-02-T2 | 03-02 | 1 | CR-01 (real extractor) | T-03-06 | N/A | integration | `GOWORK=off go test -race -count=1 ./internal/indexer/ -run '^TestCobolBOMByteOffsets$'` | ❌ W0 | ⬜ pending |
+| 03-03-T1 | 03-03 | 2 | DET-01 (sections, statements) | T-03-09 | no statement text in Meta | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_(Structure|Statements)$'` | ❌ W0 | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | DET-01 (statement occurrence on edges) | — | N/A | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_StatementSymbolOnEdges$'` | ❌ W0 | ⬜ pending |
+| 03-04-T1 | 03-04 | 2 | DET-03, DET-04 | T-03-13 | generic resolver passes never bind cobol:: targets | unit | `GOWORK=off go test -race -count=1 ./internal/resolver/ -run '^TestCobolNamespaceExclusions$'` | ❌ W0 | ⬜ pending |
+| 03-04-T2 | 03-04 | 2 | DET-06 (+DET-03) | T-03-12 | same-repo exactly-one binding only | unit | `GOWORK=off go test -race -count=1 ./internal/resolver/ -run '^TestCobolReferences_'` ; `GOWORK=off go test -race -count=1 ./internal/indexer/ -run '^TestReuseIdentifierSkipsCobolNamespace$'` | ❌ W0 | ⬜ pending |
+| 03-05-T1 | 03-05 | 3 | DET-01 (data items) | T-03-16 | data-item ID segments encoded | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_DataItems$'` | ❌ W0 | ⬜ pending |
+| 03-05-T2 | 03-05 | 3 | DET-01 (REDEFINES, RENAMES, COPY in group) | T-03-18 | N/A | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_Data(References|ContainsCopy)$'` | ❌ W0 | ⬜ pending |
+| 03-06-T1, T2 | 03-06 | 3 | DET-02 | T-03-19 | no partial THRU expansion, no cross-program labels | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_ControlFlow$'` | ❌ W0 | ⬜ pending |
+| 03-07-T1 | 03-07 | 4 | DET-03, DET-04, DET-05 | T-03-22 | literal-derived ID segments encoded | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_(Calls|Copy|CopybookKey)$'` | ❌ W0 | ⬜ pending |
+| 03-07-T2 | 03-07 | 4 | DET-05, DET-06 (real path) | T-03-23 | owned namespaces only | integration | `GOWORK=off go test -race -count=1 ./cmd/gortex -run '^TestCobolTracer_'` (includes `TestCobolTracer_CallAndCopyBinding`) | ❌ W0 | ⬜ pending |
+| 03-08-T1 | 03-08 | 5 | DET-07, DET-08 | T-03-25 | qualifiers only from source | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_IDMS$'` | ❌ W0 | ⬜ pending |
+| 03-08-T2 | 03-08 | 5 | DET-09, DET-10 | T-03-26 | data-named operands never bound | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_CICS$'` | ❌ W0 | ⬜ pending |
+| 03-09-T1, T2 | 03-09 | 6 | DET-11, DET-12 | T-03-29 | no physical table invented | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_SQL$'` | ❌ W0 | ⬜ pending |
+| 03-10-T1 | 03-10 | 7 | DET-01..DET-12 (real path, two repos) | T-03-33 | no cross-repo binding by name | integration | `GOWORK=off go test -race -count=1 ./cmd/gortex -run '^TestCobol(Breadth|Tracer)_'` | ❌ W0 | ⬜ pending |
+| 03-10-T2 | 03-10 | 7 | cross-cutting (prov keys, value types, degraded, version `/3`) | T-03-32 | no Meta key contains a secret-like substring | unit | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobolGrammar_(ProvKeys|DegradedBreadth)$'` ; `GOWORK=off go test -race -count=1 ./internal/neo4jprojection/ -run '^TestProjectNode_Cobol'` | partial | ⬜ pending |
+| 03-11-T1 | 03-11 | 8 | D-16 copybook mode (fork transform and grade) | T-03-34 | member coordinates kept; program mode unchanged | unit (fork) | fork: `go test -race -count=1 ./preprocessor/grade/ ./preprocessor/transform/ ./preprocessor/handoff/` | ❌ W0 | ⬜ pending |
+| 03-11-T2 | 03-11 | 8 | D-16 copybook mode (fork analyzer) | T-03-36 | invented members only | unit (fork) | fork: `go test -race -count=1 ./preprocessor/ -run '^(TestTracerAnalyzeDocument|TestNewEmbeddedAnalyzerMatchesCheckoutAnalyzer|TestNewContentIDMatchesHandoff|TestAnalyzeCopybookDataMember|TestAnalyzeCopybookProcedureMember|TestAnalyzeCopybookReplacingDegrades)$'` | ❌ W0 | ⬜ pending |
+| 03-12-T1, T2 | 03-12 | 9 | D-16 push | T-03-38 | user-confirmed fast-forward only | manual decision + check | `git -C "$FORK" ls-remote origin refs/heads/gsd/v0.26.0-estate-parse-recovery` equals HEAD with parent f9eaf99 | n/a | ⬜ pending |
+| 03-13-T1 | 03-13 | 10 | D-16 re-pin, DET-01 (copybook-owned data items, real path) | T-03-41 | copybooks pass the approved-grammar check | integration | re-pin `go list -m` checks ; `GOWORK=off go test -race -count=1 ./cmd/gortex -run '^TestCobol(Tracer|Breadth)_'` | ❌ W0 | ⬜ pending |
+| 03-13-T2 | 03-13 | 10 | D-16 copybook unit tests, phase gate | T-03-43 | wrapper never surfaces as nodes | unit + full | `GOWORK=off go test -race -count=1 ./internal/parser/languages/ -run '^TestCobol'` ; `GOWORK=off go test -race -count=1 ./...` | partial | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -74,7 +85,7 @@ Task IDs are assigned by the planner; this map is keyed by requirement and fille
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Fork copybook-mode commit pushed to origin | D-16 | Outward action needing user confirmation | Confirm at the checkpoint; then verify `git -C "$COBOL_UPGRADE_ROOT" ls-remote origin` matches local HEAD |
+| Fork copybook-mode commit pushed to origin | D-16 | Outward action needing user confirmation | Plan 03-12 Task 1 `checkpoint:decision` ("push" or "hold"); after "push", Task 2 verifies `git -C "$COBOL_UPGRADE_ROOT" ls-remote origin` matches local HEAD with parent f9eaf99 |
 | Aggregate-only corpus sanity (optional) | D-05 | Private estate not reachable from CI; privacy rule | If `PREPROCESSOR_CORPUS_ROOT` is set locally, run the probe and record aggregate counts only |
 
 ---
