@@ -3374,6 +3374,8 @@ func (r *Resolver) resolveEdge(e *graph.Edge, stats *ResolveStats) (oldTo string
 		// resolver can't see project-layout context. Leave untouched
 		// so the post-pass owns rewriting.
 		return oldTo, false
+	case strings.HasPrefix(target, "cobol::"): // owned by resolveCobolReferences (exactly-one, same repo)
+		return oldTo, false
 	case strings.HasPrefix(target, "import::"):
 		r.resolveImport(e, strings.TrimPrefix(target, "import::"), stats)
 	case strings.HasPrefix(target, "extern::"):

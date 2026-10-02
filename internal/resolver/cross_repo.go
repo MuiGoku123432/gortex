@@ -1118,6 +1118,8 @@ func (cr *CrossRepoResolver) resolveEdge(e *graph.Edge, stats *CrossRepoStats, b
 		// rather than let resolveFunctionCall match a coincidental
 		// cross-repo function of the same name.
 		stats.Unresolved++
+	case strings.HasPrefix(target, "cobol::"): // owned by resolveCobolReferences; never bound across repos by name
+		stats.Unresolved++
 	default:
 		cr.resolveFunctionCall(e, target, stats)
 		// Last-resort cross-daemon proxy-edge stitch: only when local
