@@ -50,6 +50,9 @@ type cobolWalk struct {
 	// statement maps an observation index to its statement node, or nil
 	// (filled by cobolStatements before any relationship edge is built).
 	statement []*graph.Node
+	// sections maps a data or environment section observation to its node
+	// (filled by cobolProcedure; cobolDataItems walks the data sections).
+	sections map[int]*graph.Node
 }
 
 // newCobolWalk builds the children index, subtree ends, and owning-program
@@ -67,6 +70,7 @@ func newCobolWalk(h handoff.Handoff, src []byte, filePath string, docMeta map[st
 		container: make([]string, len(obs)),
 		flowFrom:  make([]string, len(obs)),
 		statement: make([]*graph.Node, len(obs)),
+		sections:  make(map[int]*graph.Node),
 	}
 	for _, p := range programs {
 		w.programs[p.index] = p.symbol

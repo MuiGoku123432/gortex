@@ -74,6 +74,7 @@ func cobolProcedure(w *cobolWalk) {
 				cobolStampRange(sect, obs[c].Original)
 				w.defines(sect.ID, sect.StartLine)
 				w.memberOf(sect.ID, divNode.ID, sect.StartLine)
+				w.sections[c] = sect
 			}
 			continue
 		}

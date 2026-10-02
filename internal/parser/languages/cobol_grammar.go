@@ -249,7 +249,9 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	}
 	// Breadth runs before the document-level flags below are set, so they
 	// are not cloned into breadth node or edge Meta either.
-	cobolProcedure(newCobolWalk(h, src, filePath, docMeta, programs, result))
+	w := newCobolWalk(h, src, filePath, docMeta, programs, result)
+	cobolProcedure(w)
+	cobolDataItems(w) // later walkers take the returned data index
 	// Set after the loop so these document-level flags stay on the file
 	// node and are not cloned into program Meta.
 	if containmentUnresolved {
