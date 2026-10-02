@@ -19,11 +19,12 @@ import (
 )
 
 // stampSourceRevision completes the revision half of the provenance
-// contract (D-09, PROV-04). Every node whose Meta carries
-// prov_revision_content_id gains exactly one of prov_vcs_commit (the HEAD
-// commit, written only when src, the exact bytes that were extracted and
-// hashed, are the blob HEAD holds for the file) or prov_vcs_commit_absence
-// (why no commit can be claimed).
+// contract (D-09, PROV-04). Every node and relationship edge whose Meta
+// carries prov_revision_content_id gains exactly one of prov_vcs_commit
+// (the HEAD commit, written only when src, the exact bytes that were
+// extracted and hashed, are the blob HEAD holds for the file) or
+// prov_vcs_commit_absence (why no commit can be claimed). It then aligns
+// provenance byte offsets with the file (alignProvByteOffsets).
 //
 // PURPOSE — extractors see only a relative path, so only the indexer,
 // which knows rootPath, can relate a file to its git state. It is called
@@ -59,20 +60,91 @@ func (idx *Indexer) stampSourceRevision(relPath string, src []byte, result *pars
 	}
 
 	commit, absence := classifySourceRevision(idx.rootPath, relPath, src)
+	stamp := func(meta map[string]any) {
+		if _, ok := meta["prov_revision_content_id"]; !ok {
+			return
+		}
+		if commit != "" {
+			meta["prov_vcs_commit"] = commit
+			delete(meta, "prov_vcs_commit_absence")
+			return
+		}
+		meta["prov_vcs_commit_absence"] = absence
+		delete(meta, "prov_vcs_commit")
+	}
+	for _, n := range result.Nodes {
+		if n != nil {
+			stamp(n.Meta)
+		}
+	}
+	for _, e := range result.Edges {
+		if e != nil {
+			stamp(e.Meta)
+		}
+	}
+	idx.alignProvByteOffsets(relPath, src, result)
+}
+
+// alignProvByteOffsets makes prov_start_byte / prov_end_byte true file
+// offsets (PROV-03, the CR-01 residual). Extractors write them against
+// src, the bytes after the pre-ingestion transforms. When the file on
+// disk is exactly a UTF-8 BOM followed by src, every int byte offset on a
+// node or edge moves by 3; rows, columns, and line fields stay
+// BOM-excluded, as for every other language. Any other difference (a
+// command transform, a UTF-16 BOM, a concurrent edit) marks each
+// byte-bearing entry prov_range_exact=false with prov_range_absence
+// indexed_bytes_differ_from_file instead of presenting its bytes as file
+// offsets. Equal bytes, or a file that cannot be read, leave the ranges
+// as the extractor wrote them; the revision stamp already records why
+// unreadable bytes cannot be tied to the file.
+//
+// PURPOSE — the BOM strip runs before extraction, so only the indexer,
+// which knows rootPath and the indexed bytes, can relate the two.
+//
+// RATIONALE — offsets shift only on an exact BOM-plus-src match, so a
+// shift can never be applied to bytes it does not describe. The file is
+// read once, only for files that carry byte offsets, and its bytes are
+// never logged or returned.
+//
+// KEYWORDS — provenance, byte offset, bom, prov_start_byte, prov_range_exact
+func (idx *Indexer) alignProvByteOffsets(relPath string, src []byte, result *parser.ExtractionResult) {
+	var metas []map[string]any
 	for _, n := range result.Nodes {
 		if n == nil {
 			continue
 		}
-		if _, ok := n.Meta["prov_revision_content_id"]; !ok {
+		if _, ok := n.Meta["prov_start_byte"]; ok {
+			metas = append(metas, n.Meta)
+		}
+	}
+	for _, e := range result.Edges {
+		if e == nil {
 			continue
 		}
-		if commit != "" {
-			n.Meta["prov_vcs_commit"] = commit
-			delete(n.Meta, "prov_vcs_commit_absence")
-			continue
+		if _, ok := e.Meta["prov_start_byte"]; ok {
+			metas = append(metas, e.Meta)
 		}
-		n.Meta["prov_vcs_commit_absence"] = absence
-		delete(n.Meta, "prov_vcs_commit")
+	}
+	if len(metas) == 0 || idx.rootPath == "" {
+		return
+	}
+	disk, err := os.ReadFile(filepath.Join(idx.rootPath, filepath.FromSlash(relPath)))
+	if err != nil || bytes.Equal(disk, src) {
+		return
+	}
+	if bytes.HasPrefix(disk, []byte{0xEF, 0xBB, 0xBF}) && bytes.Equal(disk[3:], src) {
+		for _, meta := range metas {
+			for _, key := range []string{"prov_start_byte", "prov_end_byte"} {
+				if v, ok := meta[key].(int); ok {
+					meta[key] = v + 3
+				}
+			}
+		}
+		return
+	}
+	for _, meta := range metas {
+		meta["prov_range_exact"] = false
+		meta["prov_range_absence"] = "indexed_bytes_differ_from_file"
 	}
 }
 
