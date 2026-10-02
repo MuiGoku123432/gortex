@@ -52,6 +52,21 @@ const cobolThruFixture = `       IDENTIFICATION DIVISION.
            EXIT.
 `
 
+const cobolGoToFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOPGM.
+       PROCEDURE DIVISION.
+       P1.
+           GO TO P2.
+       P2.
+           GO TO P1 P2 P1 DEPENDING ON WS-IX.
+       P3.
+           GO TO NOPE.
+       P4.
+           GO TO.
+       P5.
+           EXIT.
+`
+
 // cobolStatementCalls returns the calls edges from from that point back to
 // the statement symbol stmt, in emission order.
 func cobolStatementCalls(result *parser.ExtractionResult, from, stmt string) []*graph.Edge {
@@ -156,5 +171,56 @@ func TestCobolGrammar_ControlFlow(t *testing.T) {
 		require.Len(t, edges, 1)
 		assert.Equal(t, "unresolved::cobol::label::src/nest.cbl::OUTERPGM/INNERPGM::OUTER-PARA", edges[0].To)
 		assert.Equal(t, "label_not_found", edges[0].Meta["cobol_unresolved_reason"])
+	})
+
+	gt := extractCobolGrammar(t, e, "src/goto.cbl", cobolGoToFixture)
+	const gotoProc = "src/goto.cbl::GOTOPGM/@proc/"
+
+	t.Run("goto", func(t *testing.T) {
+		edges := cobolEdges(gt, gotoProc+"P1", gotoProc+"P2", graph.EdgeCalls)
+		require.Len(t, edges, 1)
+		assert.Equal(t, "goto", edges[0].Meta["cobol_flow"])
+		assert.Equal(t, "goto_statement", edges[0].Meta["prov_observation_kind"])
+		assert.Equal(t, "GOTOPGM/@proc/P1/@goto_statement", edges[0].Meta["cobol_statement_symbol"])
+		assert.NotContains(t, edges[0].Meta, "cobol_goto_depending")
+		assert.NotContains(t, edges[0].Meta, "cobol_unresolved_reason")
+	})
+
+	t.Run("goto_depending", func(t *testing.T) {
+		edges := cobolStatementCalls(gt, gotoProc+"P2", "GOTOPGM/@proc/P2/@goto_statement")
+		require.Len(t, edges, 2)
+		for i, want := range []struct {
+			to        string
+			positions []string
+		}{{gotoProc + "P1", []string{"1", "3"}}, {gotoProc + "P2", []string{"2"}}} {
+			assert.Equal(t, want.to, edges[i].To)
+			assert.Equal(t, "goto", edges[i].Meta["cobol_flow"])
+			assert.Equal(t, true, edges[i].Meta["cobol_goto_depending"])
+			assert.Equal(t, want.positions, edges[i].Meta["cobol_depending_positions"])
+			assert.Equal(t, "WS-IX", edges[i].Meta["cobol_goto_depending_on"])
+			assert.NotContains(t, edges[i].Meta, "cobol_occurrence_count")
+		}
+	})
+
+	t.Run("goto_unresolved", func(t *testing.T) {
+		edges := cobolEdges(gt, gotoProc+"P3", "unresolved::cobol::label::src/goto.cbl::GOTOPGM::NOPE", graph.EdgeCalls)
+		require.Len(t, edges, 1)
+		assert.Equal(t, "goto", edges[0].Meta["cobol_flow"])
+		assert.Equal(t, "label_not_found", edges[0].Meta["cobol_unresolved_reason"])
+	})
+
+	t.Run("goto_alterable", func(t *testing.T) {
+		assert.Empty(t, cobolStatementCalls(gt, gotoProc+"P4", "GOTOPGM/@proc/P4/@goto_statement"))
+		stmt := cobolNodeByID(t, gt, gotoProc+"P4/@goto_statement")
+		assert.Equal(t, true, stmt.Meta["cobol_goto_alterable"])
+		assert.NotContains(t, cobolNodeByID(t, gt, gotoProc+"P1/@goto_statement").Meta, "cobol_goto_alterable")
+	})
+
+	t.Run("no_fallthrough", func(t *testing.T) {
+		for _, edge := range gt.Edges {
+			assert.False(t, edge.Kind == graph.EdgeCalls && edge.To == gotoProc+"P5", "fall-through edge %s", edge.From)
+		}
+		assert.Equal(t, 4, cobolNodeByID(t, gt, gotoProc+"P4").Meta["cobol_ordinal"])
+		assert.Equal(t, 5, cobolNodeByID(t, gt, gotoProc+"P5").Meta["cobol_ordinal"])
 	})
 }
