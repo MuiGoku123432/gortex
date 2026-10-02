@@ -60,6 +60,48 @@ const cobolNestedDataFixture = `       IDENTIFICATION DIVISION.
        END PROGRAM OUTERPGM.
 `
 
+const cobolDataRefsFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REFPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-REC.
+          05 WS-A PIC X.
+          05 WS-B PIC X.
+       66 WS-RN RENAMES WS-A THRU WS-B.
+       01 WS-ALT REDEFINES WS-REC PIC X(2).
+       01 WS-LOW REDEFINES ws-rec PIC X(2).
+       01 WS-BAD REDEFINES WS-NONE PIC X(2).
+       01 G1.
+          05 X PIC X.
+       01 G2.
+          05 X PIC X.
+          05 Y REDEFINES X PIC X.
+          05 Z REDEFINES X OF G2 PIC X.
+          05 Q REDEFINES X OF G9 PIC X.
+       PROCEDURE DIVISION.
+       P1.
+           EXIT.
+`
+
+const cobolDataCopyFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CPYPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CPYW.
+       01 WS-REC.
+          COPY CPYA.
+          05 WS-B PIC X.
+       01 WS-T.
+          05 WS-TA PIC X.
+       COPY CPYT.
+       LINKAGE SECTION.
+       01 LK-REC PIC X.
+       COPY CPYE.
+       PROCEDURE DIVISION.
+       P1.
+           EXIT.
+`
+
 // cobolDataItemIDs returns the IDs of every data-item node in emission order.
 func cobolDataItemIDs(result *parser.ExtractionResult) []string {
 	var ids []string
@@ -160,4 +202,80 @@ func TestCobolGrammar_DataItems(t *testing.T) {
 		np+"::OUTERPGM/@working_storage_section")
 	assertCobolDataItem(t, nested, np+"::OUTERPGM/INNERPGM/WS-I", graph.KindVariable, "WS-I", 1,
 		np+"::OUTERPGM/INNERPGM/@working_storage_section")
+}
+
+func TestCobolGrammar_DataReferences(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/ref.cbl"
+	result := extractCobolGrammar(t, e, path, cobolDataRefsFixture)
+	const p = path + "::REFPGM"
+	const unresolved = "unresolved::cobol::data::" + p + "::"
+
+	redefines := cobolEdges(result, p+"/WS-ALT", p+"/WS-REC", graph.EdgeReferences)
+	require.Len(t, redefines, 1)
+	edge := redefines[0]
+	for _, key := range append(append([]string{}, cobolDocumentKeys...),
+		"prov_observation_kind", "prov_affected", "prov_start_row", "prov_start_column",
+		"prov_end_row", "prov_end_column", "prov_start_byte", "prov_end_byte", "prov_range_exact") {
+		assert.Contains(t, edge.Meta, key)
+	}
+	assert.Equal(t, "redefines_clause", edge.Meta["prov_observation_kind"])
+	assert.Equal(t, "redefines", edge.Meta["cobol_ref_role"])
+	assert.Equal(t, cobolNameNormRule, edge.Meta["cobol_name_norm"])
+	assert.Equal(t, edge.Meta["prov_start_row"].(int)+1, edge.Line)
+	assert.Equal(t, graph.OriginASTResolved, edge.Origin)
+	assert.Equal(t, "EXTRACTED", edge.ConfidenceLabel)
+	assert.NotContains(t, edge.Meta, "cobol_unresolved_reason")
+
+	from := cobolEdges(result, p+"/WS-REC/WS-RN", p+"/WS-REC/WS-A", graph.EdgeReferences)
+	require.Len(t, from, 1)
+	assert.Equal(t, "renames_from", from[0].Meta["cobol_ref_role"])
+	thru := cobolEdges(result, p+"/WS-REC/WS-RN", p+"/WS-REC/WS-B", graph.EdgeReferences)
+	require.Len(t, thru, 1)
+	assert.Equal(t, "renames_thru", thru[0].Meta["cobol_ref_role"])
+
+	// Matching is case-insensitive under cobol-name-norm/1.
+	require.Len(t, cobolEdges(result, p+"/WS-LOW", p+"/WS-REC", graph.EdgeReferences), 1)
+
+	missing := cobolEdges(result, p+"/WS-BAD", unresolved+"WS-NONE", graph.EdgeReferences)
+	require.Len(t, missing, 1)
+	assert.Equal(t, "not_declared_in_program", missing[0].Meta["cobol_unresolved_reason"])
+	assert.Equal(t, "redefines", missing[0].Meta["cobol_ref_role"])
+
+	ambiguous := cobolEdges(result, p+"/G2/Y", unresolved+"X", graph.EdgeReferences)
+	require.Len(t, ambiguous, 1)
+	assert.Equal(t, "ambiguous", ambiguous[0].Meta["cobol_unresolved_reason"])
+	assert.Equal(t, []string{"REFPGM/G1/X", "REFPGM/G2/X"}, ambiguous[0].Meta["cobol_candidate_symbols"])
+
+	// An IN/OF qualifier narrows the match to the item under that group.
+	require.Len(t, cobolEdges(result, p+"/G2/Z", p+"/G2/X", graph.EdgeReferences), 1)
+	qualified := cobolEdges(result, p+"/G2/Q", unresolved+"X/G9", graph.EdgeReferences)
+	require.Len(t, qualified, 1)
+	assert.Equal(t, "not_declared_in_program", qualified[0].Meta["cobol_unresolved_reason"])
+}
+
+func TestCobolGrammar_DataContainsCopy(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/cpy.cbl"
+	result := extractCobolGrammar(t, e, path, cobolDataCopyFixture)
+	const p = path + "::CPYPGM"
+
+	// The copybook's items are absent, so the open item says so, and later
+	// entries still nest by level.
+	assert.Equal(t, true, cobolNodeByID(t, result, p+"/WS-REC").Meta["cobol_contains_copy"])
+	assertCobolDataItem(t, result, p+"/WS-REC/WS-B", graph.KindField, "WS-B", 5, p+"/WS-REC")
+	assert.NotContains(t, cobolNodeByID(t, result, p+"/WS-REC/WS-B").Meta, "cobol_contains_copy")
+
+	// A COPY before any record marks the section node.
+	assert.Equal(t, true, cobolNodeByID(t, result, p+"/@working_storage_section").Meta["cobol_contains_copy"])
+
+	// A COPY after a section's last entry lies outside the section's span
+	// but still marks the open item.
+	assert.Equal(t, true, cobolNodeByID(t, result, p+"/WS-T/WS-TA").Meta["cobol_contains_copy"])
+	assert.NotContains(t, cobolNodeByID(t, result, p+"/WS-T").Meta, "cobol_contains_copy")
+	assert.Equal(t, true, cobolNodeByID(t, result, p+"/LK-REC").Meta["cobol_contains_copy"])
+	assert.NotContains(t, cobolNodeByID(t, result, p+"/@linkage_section").Meta, "cobol_contains_copy")
+
+	assert.Equal(t, []string{p + "/WS-REC", p + "/WS-REC/WS-B", p + "/WS-T", p + "/WS-T/WS-TA", p + "/LK-REC"},
+		cobolDataItemIDs(result))
 }
