@@ -249,3 +249,180 @@ func TestCobolGrammar_IDMS(t *testing.T) {
 		assert.Equal(t, e1, e2)
 	})
 }
+
+const cobolCICSFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CICSPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-NEXT PIC X(8).
+       01 WS-TX PIC X(4).
+       01 WS-MS PIC X(8).
+       01 WS-MAP PIC X(8).
+       PROCEDURE DIVISION.
+       P1.
+           EXEC CICS LINK PROGRAM('SUBPGM') END-EXEC.
+           EXEC CICS XCTL PROGRAM('XPGM') END-EXEC.
+       P2.
+           EXEC CICS XCTL PROGRAM(WS-NEXT) END-EXEC.
+       P3.
+           EXEC CICS LOAD PROGRAM('TBLPGM') END-EXEC.
+       P4.
+           EXEC CICS RETURN TRANSID('TX01') END-EXEC.
+           EXEC CICS START TRANSID(WS-TX) END-EXEC.
+           EXEC CICS START TRANSID('tx01') END-EXEC.
+       P5.
+           EXEC CICS SEND MAP('MAP1') MAPSET('MSET1') END-EXEC.
+           EXEC CICS RECEIVE MAP('MAP1') MAPSET('MSET1') END-EXEC.
+           EXEC CICS SEND MAP('MAP2') END-EXEC.
+           EXEC CICS SEND MAP('MAP3') MAPSET(WS-MS) END-EXEC.
+           EXEC CICS SEND MAPSET('MSET1') MAP(WS-MAP) END-EXEC.
+           EXEC CICS INQUIRE MAP('MAP4') END-EXEC.
+       P6.
+           EXEC CICS RETURN END-EXEC.
+           exec cics link program('lowpgm') end-exec.
+           GOBACK.
+`
+
+func TestCobolGrammar_CICS(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/cics.cbl"
+	result := extractCobolGrammar(t, e, path, cobolCICSFixture)
+	const proc = "CICSPGM/@proc/"
+	const programID = path + "::CICSPGM"
+	stmtEdges := func(stmt string) []*graph.Edge {
+		edges := cobolStatementEdges(result, proc+stmt)
+		for _, e := range edges {
+			assert.Contains(t, e.Meta, "cics_command", "%s edge to %s", stmt, e.To)
+		}
+		return edges
+	}
+
+	t.Run("link_literal", func(t *testing.T) {
+		for _, s := range []struct{ stmt, command, target string }{
+			{"P1/@exec_cics_statement", "LINK", "SUBPGM"},
+			{"P1/@exec_cics_statement#2", "XCTL", "XPGM"},
+			{"P6/@exec_cics_statement#2", "link", "LOWPGM"},
+		} {
+			edges := stmtEdges(s.stmt)
+			require.Len(t, edges, 1, s.stmt)
+			edge := edges[0]
+			assert.Equal(t, "unresolved::cobol::program::"+s.target, edge.To, s.stmt)
+			assert.Equal(t, graph.EdgeCalls, edge.Kind, s.stmt)
+			assert.Equal(t, "literal", edge.Meta["cobol_call"], s.stmt)
+			assert.Equal(t, s.command, edge.Meta["cics_command"], s.stmt)
+			assertCobolRelationProvenance(t, edge, "exec_cics_statement")
+		}
+	})
+
+	t.Run("link_dynamic", func(t *testing.T) {
+		edges := stmtEdges("P2/@exec_cics_statement")
+		require.Len(t, edges, 2)
+		assert.Equal(t, "unresolved::cobol::dynamic::program::"+programID+"::WS-NEXT", edges[0].To)
+		assert.Equal(t, graph.EdgeCalls, edges[0].Kind)
+		assert.Equal(t, "dynamic", edges[0].Meta["cobol_unresolved_reason"])
+		assert.Equal(t, programID+"/WS-NEXT", edges[1].To)
+		assert.Equal(t, graph.EdgeReferences, edges[1].Kind)
+		assert.Equal(t, "cics_program", edges[1].Meta["cobol_ref_role"])
+		assert.Equal(t, "XCTL", edges[1].Meta["cics_command"])
+	})
+
+	t.Run("load", func(t *testing.T) {
+		edges := stmtEdges("P3/@exec_cics_statement")
+		require.Len(t, edges, 1)
+		assert.Equal(t, "unresolved::cobol::program::TBLPGM", edges[0].To)
+		assert.Equal(t, graph.EdgeReferences, edges[0].Kind)
+		assert.Equal(t, "LOAD", edges[0].Meta["cics_command"])
+	})
+
+	t.Run("transid", func(t *testing.T) {
+		edges := stmtEdges("P4/@exec_cics_statement")
+		require.Len(t, edges, 1)
+		assert.Equal(t, "cics::transaction/TX01", edges[0].To)
+		assert.Equal(t, graph.EdgeReferences, edges[0].Kind)
+		assert.Equal(t, "RETURN", edges[0].Meta["cics_command"])
+		assertCobolRelationProvenance(t, edges[0], "exec_cics_statement")
+		assertCobolResource(t, result, "cics::transaction/TX01", "TX01", "cics_transaction")
+
+		dynamic := stmtEdges("P4/@exec_cics_statement#2")
+		require.Len(t, dynamic, 2)
+		assert.Equal(t, "unresolved::cobol::dynamic::transaction::"+programID+"::WS-TX", dynamic[0].To)
+		assert.Equal(t, graph.EdgeReferences, dynamic[0].Kind)
+		assert.Equal(t, "dynamic", dynamic[0].Meta["cobol_unresolved_reason"])
+		assert.Equal(t, programID+"/WS-TX", dynamic[1].To)
+		assert.Equal(t, "cics_transaction", dynamic[1].Meta["cobol_ref_role"])
+
+		// A lower-case literal folds to the same node.
+		lower := stmtEdges("P4/@exec_cics_statement#3")
+		require.Len(t, lower, 1)
+		assert.Equal(t, "cics::transaction/TX01", lower[0].To)
+	})
+
+	t.Run("maps", func(t *testing.T) {
+		send := stmtEdges("P5/@exec_cics_statement")
+		require.Len(t, send, 2)
+		assert.Equal(t, "cics::map/MSET1/MAP1", send[0].To)
+		assert.Equal(t, graph.EdgeWrites, send[0].Kind)
+		assert.Equal(t, "cics::mapset/MSET1", send[1].To)
+		assert.Equal(t, graph.EdgeReferences, send[1].Kind)
+		assertCobolResource(t, result, "cics::map/MSET1/MAP1", "MAP1", "cics_map")
+		assertCobolResource(t, result, "cics::mapset/MSET1", "MSET1", "cics_mapset")
+
+		receive := stmtEdges("P5/@exec_cics_statement#2")
+		require.Len(t, receive, 2)
+		assert.Equal(t, "cics::map/MSET1/MAP1", receive[0].To)
+		assert.Equal(t, graph.EdgeReads, receive[0].Kind)
+		assert.Equal(t, "RECEIVE", receive[0].Meta["cics_command"])
+
+		bare := stmtEdges("P5/@exec_cics_statement#3")
+		require.Len(t, bare, 1)
+		assert.Equal(t, "cics::map/_unqualified/MAP2", bare[0].To)
+		assert.Equal(t, graph.EdgeWrites, bare[0].Kind)
+
+		dynamicSet := stmtEdges("P5/@exec_cics_statement#4")
+		require.Len(t, dynamicSet, 3)
+		assert.Equal(t, "cics::map/_unqualified/MAP3", dynamicSet[0].To)
+		assert.Equal(t, graph.EdgeWrites, dynamicSet[0].Kind)
+		assert.Equal(t, "unresolved::cobol::dynamic::mapset::"+programID+"::WS-MS", dynamicSet[1].To)
+		assert.Equal(t, graph.EdgeReferences, dynamicSet[1].Kind)
+		assert.Equal(t, "dynamic", dynamicSet[1].Meta["cobol_unresolved_reason"])
+		assert.Equal(t, programID+"/WS-MS", dynamicSet[2].To)
+		assert.Equal(t, "cics_mapset", dynamicSet[2].Meta["cobol_ref_role"])
+
+		dynamicMap := stmtEdges("P5/@exec_cics_statement#5")
+		require.Len(t, dynamicMap, 3)
+		assert.Equal(t, "cics::mapset/MSET1", dynamicMap[0].To)
+		assert.Equal(t, "unresolved::cobol::dynamic::map::"+programID+"::WS-MAP", dynamicMap[1].To)
+		assert.Equal(t, graph.EdgeWrites, dynamicMap[1].Kind)
+		assert.Equal(t, programID+"/WS-MAP", dynamicMap[2].To)
+		assert.Equal(t, "cics_map", dynamicMap[2].Meta["cobol_ref_role"])
+
+		other := stmtEdges("P5/@exec_cics_statement#6")
+		require.Len(t, other, 1)
+		assert.Equal(t, "cics::map/_unqualified/MAP4", other[0].To)
+		assert.Equal(t, graph.EdgeReferences, other[0].Kind)
+	})
+
+	t.Run("other", func(t *testing.T) {
+		ret := cobolNodeByID(t, result, path+"::"+proc+"P6/@exec_cics_statement")
+		assert.Equal(t, "RETURN", ret.Meta["cics_command"])
+		assert.Empty(t, cobolStatementEdges(result, proc+"P6/@exec_cics_statement"))
+		var stmts int
+		for _, n := range result.Nodes {
+			if n.Meta["cobol_statement_kind"] == "exec_cics_statement" {
+				stmts++
+				_, ok := n.Meta["cics_command"]
+				assert.True(t, ok, "%s has no cics_command", n.ID)
+			}
+		}
+		assert.Equal(t, 15, stmts)
+	})
+
+	t.Run("resources", func(t *testing.T) {
+		// Programs are call targets, never resources; each resource appears
+		// once, in first-sighting order.
+		assert.Equal(t, []string{
+			"cics::transaction/TX01", "cics::map/MSET1/MAP1", "cics::mapset/MSET1",
+			"cics::map/_unqualified/MAP2", "cics::map/_unqualified/MAP3", "cics::map/_unqualified/MAP4",
+		}, cobolResourceIDs(result))
+	})
+}
