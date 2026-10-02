@@ -37,7 +37,10 @@ const cobolTracerFixture = "       IDENTIFICATION DIVISION.\n" +
 	"       PROGRAM-ID. DEMOPGM.\n" +
 	"       PROCEDURE DIVISION.\n" +
 	"       MAIN-PARA.\n" +
-	"           STOP RUN.\n"
+	"           PERFORM WORK-PARA.\n" +
+	"           STOP RUN.\n" +
+	"       WORK-PARA.\n" +
+	"           EXIT.\n"
 
 // cobolTracerApprovedGrammarID mirrors languages.cobolApprovedGrammarID,
 // which is unexported; the tracer asserts the persisted value equals it.
@@ -173,7 +176,7 @@ func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix, commit 
 		"prov_parser_module = %q", module)
 	assert.Equal(t, "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor@v0.0.0-20260930215433-f9eaf99c34a9",
 		meta["prov_preprocessor_module"])
-	assert.Equal(t, "gortex-cobol-grammar/2", meta["prov_extractor_version"])
+	assert.Equal(t, "gortex-cobol-grammar/3", meta["prov_extractor_version"])
 	assert.Equal(t, "DETERMINISTIC", meta["prov_evidence_class"])
 	assert.Equal(t, "ast_resolved", meta["prov_origin"])
 	assert.InDelta(t, 1.0, meta["prov_confidence"], 0)
@@ -447,4 +450,59 @@ func TestCobolTracer_NoAINoNeo4j(t *testing.T) {
 		map[string]any{"id": repo.programID, "detail": "full", "format": "json"})
 	require.NoError(t, json.Unmarshal([]byte(text), &payload))
 	assert.Equal(t, repo.programID, payload.Node["id"])
+}
+
+// TestCobolTracer_ParagraphFlow proves paragraph control flow travels the
+// real path (D-01, D-02): MAIN-PARA's PERFORM WORK-PARA persists in SQLite as
+// a calls edge with the provenance contract, and the unchanged MCP
+// get_callers tool returns MAIN-PARA as a caller of WORK-PARA over the relay.
+func TestCobolTracer_ParagraphFlow(t *testing.T) {
+	repo, socket, _ := startCobolTracerDaemon(t)
+	mainID := repo.prefix + "/cobol/demopgm.cbl::DEMOPGM/@proc/MAIN-PARA"
+	workID := repo.prefix + "/cobol/demopgm.cbl::DEMOPGM/@proc/WORK-PARA"
+
+	text := callCobolTracerTool(t, socket, repo.root, "get_callers",
+		map[string]any{"id": workID, "format": "json"})
+	var callers struct {
+		Nodes []struct {
+			ID string `json:"id"`
+		} `json:"nodes"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &callers), "get_callers output: %s", text)
+	var callerIDs []string
+	for _, n := range callers.Nodes {
+		callerIDs = append(callerIDs, n.ID)
+	}
+	assert.Contains(t, callerIDs, mainID, "get_callers output: %s", text)
+
+	var payload cobolTracerSymbol
+	text = callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": mainID, "detail": "full", "format": "json"})
+	require.NoError(t, json.Unmarshal([]byte(text), &payload))
+	require.Equal(t, mainID, payload.Node["id"])
+	assert.Equal(t, "function", payload.Node["kind"])
+	meta, ok := payload.Node["meta"].(map[string]any)
+	require.True(t, ok, "paragraph has no meta: %v", payload.Node)
+	assert.Equal(t, "paragraph", meta["cobol_kind"])
+	assert.InDelta(t, 1, meta["cobol_ordinal"], 0)
+	assert.Equal(t, "gortex-cobol-grammar/3", meta["prov_extractor_version"])
+	assert.Equal(t, true, meta["prov_range_exact"])
+
+	// Edge Meta is not part of the MCP JSON, so the persisted row is the proof.
+	var calls []*graph.Edge
+	for _, e := range repo.store.GetOutEdges(mainID) {
+		if e.Kind == graph.EdgeCalls {
+			calls = append(calls, e)
+		}
+	}
+	require.Len(t, calls, 1)
+	edge := calls[0]
+	assert.Equal(t, workID, edge.To)
+	assert.Equal(t, graph.OriginASTResolved, edge.Origin)
+	assert.Equal(t, "perform", edge.Meta["cobol_flow"])
+	assert.Equal(t, "perform_statement_call_proc", edge.Meta["prov_observation_kind"])
+	assert.Equal(t, "gortex-cobol-grammar/3", edge.Meta["prov_extractor_version"])
+	startRow, ok := edge.Meta["prov_start_row"].(int)
+	require.True(t, ok, "prov_start_row = %#v", edge.Meta["prov_start_row"])
+	assert.Equal(t, startRow+1, edge.Line)
 }

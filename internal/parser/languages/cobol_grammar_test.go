@@ -174,9 +174,14 @@ func TestCobolGrammar_ProgramNode(t *testing.T) {
 	assert.Empty(t, program.ProjectID)
 	assertCobolRange(t, program)
 
-	require.Len(t, result.Edges, 1)
-	edge := findEdgeTo(result.Edges, program.ID)
-	require.NotNil(t, edge)
+	var defines []*graph.Edge
+	for _, e := range result.Edges {
+		if e.Kind == graph.EdgeDefines && e.To == program.ID {
+			defines = append(defines, e)
+		}
+	}
+	require.Len(t, defines, 1)
+	edge := defines[0]
 	assert.Equal(t, "src/demo.cbl", edge.From)
 	assert.Equal(t, graph.EdgeDefines, edge.Kind)
 	assert.Equal(t, graph.OriginASTResolved, edge.Origin)
@@ -214,7 +219,7 @@ func TestCobolGrammar_NestedIDs(t *testing.T) {
 
 	defines := 0
 	for _, edge := range result.Edges {
-		if edge.Kind == graph.EdgeDefines && edge.From == "src/nest.cbl" {
+		if edge.Kind == graph.EdgeDefines && edge.From == "src/nest.cbl" && (edge.To == outer.ID || edge.To == inner.ID) {
 			defines++
 		}
 	}

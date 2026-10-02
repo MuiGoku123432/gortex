@@ -39,7 +39,7 @@ const (
 	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20260930215433-f9eaf99c34a9"
 	// cobolGrammarExtractorVersion identifies this handoff-to-graph mapping.
 	// Bump it whenever the emitted nodes, edges, or prov_* keys change.
-	cobolGrammarExtractorVersion = "gortex-cobol-grammar/2"
+	cobolGrammarExtractorVersion = "gortex-cobol-grammar/3"
 	// cobolForestModulePath is the module path the enhanced grammar is
 	// linked under; go.mod replaces it with the fork's forest-shim.
 	cobolForestModulePath = "github.com/alexaandru/go-sitter-forest/cobol"
@@ -247,6 +247,9 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 			Origin: graph.OriginASTResolved, Confidence: 1.0, ConfidenceLabel: "EXTRACTED",
 		})
 	}
+	// Breadth runs before the document-level flags below are set, so they
+	// are not cloned into breadth node or edge Meta either.
+	cobolProcedure(newCobolWalk(h, src, filePath, docMeta, programs, result))
 	// Set after the loop so these document-level flags stay on the file
 	// node and are not cloned into program Meta.
 	if containmentUnresolved {
@@ -255,6 +258,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	if unnamed > 0 {
 		docMeta["prov_unnamed_program_count"] = unnamed
 	}
+	result.Edges = cobolDedupeEdges(result.Edges)
 	return result, nil
 }
 
@@ -265,28 +269,13 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 // bytes get prov_range_exact=false and a prov_range_absence reason instead:
 // their points are anchors, not where the program is in the file.
 func cobolStampRange(node *graph.Node, r *sourcemap.Projection) {
-	meta := node.Meta
-	switch {
-	case r == nil || r.NoImage:
-		meta["prov_range_exact"] = false
-		meta["prov_range_absence"] = "no_original_projection"
-		return
-	case r.Synthetic:
-		meta["prov_range_exact"] = false
-		meta["prov_range_absence"] = "synthetic_projection"
+	if cobolStampMeta(node.Meta, r) == 0 {
 		return
 	}
 	node.StartLine = int(r.Start.Row) + 1
 	node.EndLine = int(r.End.Row) + 1
 	node.StartColumn = int(r.Start.Column)
 	node.EndColumn = int(r.End.Column)
-	meta["prov_start_row"] = int(r.Start.Row)
-	meta["prov_start_column"] = int(r.Start.Column)
-	meta["prov_end_row"] = int(r.End.Row)
-	meta["prov_end_column"] = int(r.End.Column)
-	meta["prov_start_byte"] = int(r.Start.Byte)
-	meta["prov_end_byte"] = int(r.End.Byte)
-	meta["prov_range_exact"] = r.Exact
 }
 
 var _ parser.Extractor = (*CobolGrammarExtractor)(nil)
