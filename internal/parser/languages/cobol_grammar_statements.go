@@ -37,8 +37,8 @@ var cobolStatementKinds = map[string]bool{
 	"copy_statement":          true,
 }
 
-// cobolStatements emits one KindLocal node per named statement inside a
-// named program's procedure division (D-05, D-17).
+// cobolStatements emits and registers one KindLocal node per named
+// statement inside a named program's procedure division (D-05, D-17).
 //
 // PURPOSE: every statement occurrence is addressable, so relationship edges
 // can point back to the statement they came from.
@@ -53,6 +53,39 @@ var cobolStatementKinds = map[string]bool{
 // KEYWORDS: cobol, statement, KindLocal, member_of, cobol_statement_kind.
 func cobolStatements(w *cobolWalk) {
 	obs := w.h.Facts.Observations
+	var divisions []int // named programs' procedure divisions
+	for d, o := range obs {
+		if o.Kind == "procedure_division" && w.container[d] != "" {
+			divisions = append(divisions, d)
+		}
+	}
+	// A COPY is a grammar extra whose Parent is arbitrary (Pitfall 3), so it
+	// is placed by its generated start: in the procedure division whose span
+	// contains it, under the container of that division's last other child
+	// starting at or before it (else the division itself). Outside every
+	// procedure division it gets no statement node.
+	for i, o := range obs {
+		if o.Kind != "copy_statement" {
+			continue
+		}
+		start := o.Generated.Start
+		container, flow := "", ""
+		for _, d := range divisions {
+			if start < obs[d].Generated.Start || start >= obs[d].Generated.End {
+				continue
+			}
+			container, flow = w.container[d], w.flowFrom[d]
+			for _, c := range w.children[d] {
+				if c != i && obs[c].Generated.Start <= start {
+					container, flow = w.container[c], w.flowFrom[c]
+				}
+			}
+		}
+		for j := i; j <= w.last[i]; j++ {
+			w.container[j], w.flowFrom[j] = container, flow
+		}
+	}
+
 	var stmts []int
 	for i, o := range obs {
 		if cobolStatementKinds[o.Kind] && w.container[i] != "" {
@@ -74,5 +107,6 @@ func cobolStatements(w *cobolWalk) {
 		node.Meta["cobol_statement_kind"] = kind
 		cobolStampRange(node, obs[i].Original)
 		w.memberOf(node.ID, w.filePath+"::"+w.container[i], node.StartLine)
+		w.statement[i] = node
 	}
 }

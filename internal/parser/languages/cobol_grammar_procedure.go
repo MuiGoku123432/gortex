@@ -78,6 +78,7 @@ func cobolProcedure(w *cobolWalk) {
 			continue
 		}
 		divisions = append(divisions, div)
+		w.container[div], w.flowFrom[div] = divNode.QualName, prog
 
 		// An open section or paragraph: its node, header, and last division
 		// child so far (whose span covers its own descendants).

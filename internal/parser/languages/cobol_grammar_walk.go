@@ -4,7 +4,6 @@ package languages
 
 import (
 	"maps"
-	"strconv"
 	"strings"
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
@@ -40,12 +39,17 @@ type cobolWalk struct {
 	owner    []int          // observation index -> owning program_definition, or -1
 	programs map[int]string // program_definition index -> program symbol
 
-	// Filled by cobolProcedure for every observation inside a procedure
-	// division: the membership container symbol (paragraph, else section,
-	// else procedure division) and the flow source symbol (paragraph, else
-	// section, else program). Empty outside any procedure division.
+	// Filled by cobolProcedure for a named program's procedure division and
+	// every observation inside it: the membership container symbol
+	// (paragraph, else section, else procedure division) and the flow
+	// source symbol (paragraph, else section, else program). Empty outside
+	// any procedure division. cobolStatements re-places COPY by span.
 	container []string
 	flowFrom  []string
+
+	// statement maps an observation index to its statement node, or nil
+	// (filled by cobolStatements before any relationship edge is built).
+	statement []*graph.Node
 }
 
 // newCobolWalk builds the children index, subtree ends, and owning-program
@@ -62,6 +66,7 @@ func newCobolWalk(h handoff.Handoff, src []byte, filePath string, docMeta map[st
 		programs:  make(map[int]string, len(programs)),
 		container: make([]string, len(obs)),
 		flowFrom:  make([]string, len(obs)),
+		statement: make([]*graph.Node, len(obs)),
 	}
 	for _, p := range programs {
 		w.programs[p.index] = p.symbol
@@ -115,10 +120,31 @@ func (w *cobolWalk) programSymbol(i int) string {
 
 // statementSymbol returns the QualName of the innermost statement node
 // among observation i and its Parent ancestors, or "" when there is none.
-func (w *cobolWalk) statementSymbol(i int) string { return "" }
+// It is a QualName, never a repository-prefixed ID (Pitfall 5).
+func (w *cobolWalk) statementSymbol(i int) string {
+	if i < 0 || i >= len(w.statement) {
+		return ""
+	}
+	for {
+		if n := w.statement[i]; n != nil {
+			return n.QualName
+		}
+		p, ok := w.parent(i)
+		if !ok {
+			return ""
+		}
+		i = p
+	}
+}
 
-// statementNode returns the statement node of observation i, or nil.
-func (w *cobolWalk) statementNode(i int) *graph.Node { return nil }
+// statementNode returns the statement node of observation i, or nil. Later
+// walkers annotate statement Meta only through it.
+func (w *cobolWalk) statementNode(i int) *graph.Node {
+	if i < 0 || i >= len(w.statement) {
+		return nil
+	}
+	return w.statement[i]
+}
 
 // symbolNode appends a symbol node with ID <filePath>::<symbol>, the cloned
 // document provenance, cobol_kind, and the observation kind and Affected
@@ -156,14 +182,18 @@ func (w *cobolWalk) structural(from, to string, kind graph.EdgeKind, line int) {
 
 // relationEdge appends and returns a relationship edge for the statement
 // observation occurrence: the cloned document provenance, the observation
-// kind and Affected flag, and the occurrence's original range keys, with
-// Line the occurrence's 1-based start line (0 when it has no image). The
-// fact is deterministic even when to is an unresolved placeholder.
+// kind and Affected flag, the occurrence's original range keys, and
+// cobol_statement_symbol when the occurrence is or lies inside a statement,
+// with Line the occurrence's 1-based start line (0 when it has no image).
+// The fact is deterministic even when to is an unresolved placeholder.
 func (w *cobolWalk) relationEdge(from, to string, kind graph.EdgeKind, occurrence int) *graph.Edge {
 	o := w.h.Facts.Observations[occurrence]
 	meta := maps.Clone(w.docMeta)
 	meta["prov_observation_kind"] = o.Kind
 	meta["prov_affected"] = o.Affected
+	if sym := w.statementSymbol(occurrence); sym != "" {
+		meta["cobol_statement_symbol"] = sym
+	}
 	line := cobolStampMeta(meta, o.Original)
 	edge := &graph.Edge{
 		From: from, To: to, Kind: kind, FilePath: w.filePath, Line: line,
@@ -261,44 +291,4 @@ func cobolStampExtent(node *graph.Node, start, end *sourcemap.Projection) {
 	node.Meta["prov_end_row"] = int(end.End.Row)
 	node.Meta["prov_end_column"] = int(end.End.Column)
 	node.Meta["prov_end_byte"] = int(end.End.Byte)
-}
-
-// cobolDedupeEdges collapses relationship edges (those whose Meta carries
-// prov_observation_kind) that share From, To, Kind, and Line, so SQLite
-// (first insert wins) and the in-memory graph (last write wins) persist the
-// same edge (Pitfall 4). The survivor keeps the first occurrence's Meta and
-// gains int cobol_occurrence_count; when the duplicate carries
-// cobol_statement_symbol, both symbols are listed in source order in
-// cobol_statement_symbols. Structural edges pass through; order is kept.
-func cobolDedupeEdges(edges []*graph.Edge) []*graph.Edge {
-	first := make(map[string]*graph.Edge)
-	out := edges[:0:0]
-	for _, e := range edges {
-		if _, relation := e.Meta["prov_observation_kind"]; !relation {
-			out = append(out, e)
-			continue
-		}
-		key := e.From + "|" + e.To + "|" + string(e.Kind) + "|" + strconv.Itoa(e.Line)
-		survivor, dup := first[key]
-		if !dup {
-			first[key] = e
-			out = append(out, e)
-			continue
-		}
-		count, _ := survivor.Meta["cobol_occurrence_count"].(int)
-		if count == 0 {
-			count = 1
-		}
-		survivor.Meta["cobol_occurrence_count"] = count + 1
-		if sym, ok := e.Meta["cobol_statement_symbol"].(string); ok {
-			syms, _ := survivor.Meta["cobol_statement_symbols"].([]string)
-			if len(syms) == 0 {
-				if own, ok := survivor.Meta["cobol_statement_symbol"].(string); ok {
-					syms = append(syms, own)
-				}
-			}
-			survivor.Meta["cobol_statement_symbols"] = append(syms, sym)
-		}
-	}
-	return out
 }
