@@ -39,13 +39,16 @@ var cobolIDMSKinds = map[string][2]graph.EdgeKind{
 // KEYWORDS: cobol, idms, cics, KindResource, resource_type, reads, writes.
 func cobolMainframe(w *cobolWalk, data *cobolDataIndex) {
 	for i, o := range w.h.Facts.Observations {
-		if w.programSymbol(i) == "" || w.flowFrom[i] == "" || len(w.children[i]) == 0 {
+		prog := w.programSymbol(i)
+		if prog == "" || w.flowFrom[i] == "" || len(w.children[i]) == 0 {
 			continue
 		}
 		from := w.filePath + "::" + w.flowFrom[i]
 		switch o.Kind {
 		case "idms_navigation_statement", "idms_update_statement", "idms_session_statement", "idms_accept_statement":
 			cobolIDMS(w, from, i)
+		case "exec_cics_statement":
+			cobolCICS(w, data, from, w.filePath+"::"+prog, i)
 		}
 	}
 }
@@ -111,5 +114,90 @@ func cobolIDMS(w *cobolWalk, from string, stmt int) {
 	}
 	if scope != "" {
 		n.Meta["idms_erase_scope"] = scope
+	}
+}
+
+// cobolCICS appends the edges of EXEC CICS statement stmt, in option source
+// order, from node ID from in the program with ID programID. The command is
+// the first WORD after CICS, kept as written in cics_command on the
+// statement node and every edge. A PROGRAM operand goes through
+// cobolCallTarget (calls for LINK and XCTL, references otherwise), so a
+// CICS program is a call target and never a resource (D-10). TRANSID and
+// MAPSET operands are references; a MAP is written by SEND, read by
+// RECEIVE, and referenced by any other command (D-14).
+//
+// A literal TRANSID, MAP, or MAPSET is a shared cics::transaction/<key>,
+// cics::map/<qualifier>/<key>, or cics::mapset/<key> resource, where a
+// map's qualifier is the literal MAPSET key of the same statement, else
+// _unqualified: no mapset is defaulted (D-15). A data-name operand goes to
+// the per-program dynamic target
+// unresolved::cobol::dynamic::{transaction,map,mapset}::<programID>::<key>
+// with reason dynamic plus a cics_<role> data reference, and is never bound
+// (T-03-26).
+func cobolCICS(w *cobolWalk, data *cobolDataIndex, from, programID string, stmt int) {
+	obs := w.h.Facts.Observations
+	literal := func(c int) bool { k := obs[c].Kind; return k == "string" || k == "number" }
+	command, cics, mapset := "", false, "_unqualified"
+	for _, c := range w.children[stmt] {
+		switch k := obs[c].Kind; {
+		case k == "CICS":
+			cics = true
+		case k == "WORD" && cics && command == "":
+			command = w.text(c)
+		case k == "cics_mapset_name" && mapset == "_unqualified" && len(w.children[c]) > 0 && literal(w.children[c][0]):
+			mapset = cobolIDSegment(cobolNameNorm(w.text(w.children[c][0])))
+		}
+	}
+
+	norm := cobolNameNorm(command)
+	var edges []*graph.Edge
+	for _, c := range w.children[stmt] {
+		if len(w.children[c]) == 0 {
+			continue
+		}
+		operand := w.children[c][0]
+		role, prefix, kind := "", "", graph.EdgeReferences
+		switch obs[c].Kind {
+		case "cics_program_name":
+			if norm == "LINK" || norm == "XCTL" {
+				kind = graph.EdgeCalls
+			}
+			edges = append(edges, cobolCallTarget(w, data, from, stmt, programID, operand, kind, "cics_program")...)
+			continue
+		case "cics_transaction_name":
+			role, prefix = "transaction", "cics::transaction/"
+		case "cics_map_name":
+			role, prefix = "map", "cics::map/"+mapset+"/"
+			switch norm {
+			case "SEND":
+				kind = graph.EdgeWrites
+			case "RECEIVE":
+				kind = graph.EdgeReads
+			}
+		case "cics_mapset_name":
+			role, prefix = "mapset", "cics::mapset/"
+		default:
+			continue
+		}
+		raw := w.text(operand)
+		key := cobolIDSegment(cobolNameNorm(raw))
+		switch {
+		case literal(operand):
+			to := w.resourceNode(prefix+key, cobolUnquote(raw), graph.KindResource,
+				map[string]any{"resource_type": "cics_" + role, "cobol_name_norm": cobolNameNormRule})
+			edges = append(edges, w.relationEdge(from, to, kind, stmt))
+		case obs[operand].Kind == "WORD":
+			edge := w.relationEdge(from, "unresolved::cobol::dynamic::"+role+"::"+programID+"::"+key, kind, stmt)
+			edge.Meta["cobol_unresolved_reason"] = "dynamic"
+			edges = append(edges, edge, cobolDataReference(w, data, from, stmt, programID, raw, nil, "cics_"+role))
+		}
+	}
+
+	for _, e := range edges {
+		e.Meta["cics_command"] = command
+		e.Meta["cobol_name_norm"] = cobolNameNormRule
+	}
+	if n := w.statementNode(stmt); n != nil {
+		n.Meta["cics_command"] = command
 	}
 }

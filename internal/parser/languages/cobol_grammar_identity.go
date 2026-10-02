@@ -150,17 +150,24 @@ const cobolNameNormRule = "cobol-name-norm/1"
 // un-double the embedded quote; then upper-fold ASCII letters only, leaving
 // every other byte untouched. Node names and IDs keep the source spelling.
 func cobolNameNorm(raw string) string {
-	if n := len(raw); n >= 2 && (raw[0] == '\'' || raw[0] == '"') && raw[n-1] == raw[0] {
-		q := raw[:1]
-		raw = strings.ReplaceAll(raw[1:n-1], q+q, q)
-	}
-	b := []byte(raw)
+	b := []byte(cobolUnquote(raw))
 	for i, c := range b {
 		if c >= 'a' && c <= 'z' {
 			b[i] = c - ('a' - 'A')
 		}
 	}
 	return string(b)
+}
+
+// cobolUnquote drops one matching pair of quotes (' or ") around raw and
+// un-doubles the embedded quote, keeping every other byte and the case as
+// written; any other raw is returned unchanged.
+func cobolUnquote(raw string) string {
+	if n := len(raw); n >= 2 && (raw[0] == '\'' || raw[0] == '"') && raw[n-1] == raw[0] {
+		q := raw[:1]
+		return strings.ReplaceAll(raw[1:n-1], q+q, q)
+	}
+	return raw
 }
 
 // cobolIDSegment percent-encodes the ID metacharacters %, :, /, # and every
