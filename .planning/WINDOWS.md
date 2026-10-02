@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 5
 waived_count: 0
 fixed_count: 0
-total_count: 3
-last_updated: 2026-10-01T17:21:14.000Z
+total_count: 5
+last_updated: 2026-10-02T08:58:47.347Z
 ---
 
 # Broken Windows Ledger
@@ -18,6 +18,8 @@ last_updated: 2026-10-01T17:21:14.000Z
 | 1 | 01 | stub | internal/neo4jprojection/neo4j_integration_test.go | 27 | Real-server scenario bodies are registered for Plans 01-03 and 01-06 and fail in required-scenarios mode until implemented | open |  | 2026-09-21T20:54:43.978Z |  |
 | 2 | 02 | unrun-verify | internal/parser/languages/cobol_grammar_windows_test.go |  | TestCobolGrammarWindowsStub still unverified on Windows. First real runs happened in Plan 02-06 (CI run 36877578916 on 54ac27c9 and run 36889132850 on d4e0b3b7): the windows-latest test shard failed both times in step "Test (windows, no race detector)" (go test -v ./..., exit 1). The failing test and cause are unknown because the job log needs repo-admin access; the failure may be anywhere in the full suite, not necessarily this stub. See deferred-items From Plan 02-06 | open |  | 2026-09-30T23:24:38.722Z |  |
 | 3 | 02 | unrun-verify | .github/workflows/release.yml |  | 02-05 Task 2 human-check not run: goreleaser-cross reading the host module cache read-only with GOPROXY=off is unproven until a real (or throwaway) tag release. COBOL_PARSER_READ_PAT was provisioned in Plan 02-06 and the ci/security/init-smoke/skill-drift jobs got past the credential step on d4e0b3b7, but release.yml has not run yet | open |  | 2026-09-30T23:56:08.041Z |  |
+| 4 | 03 | unrun-verify | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: data-division EXEC SQL (DECLARE CURSOR in WORKING-STORAGE) program-node flow source is unreachable under the pinned grammar (parses as ERROR, grades red); the fallback is untested | open |  | 2026-10-02T08:58:47.249Z |  |
+| 5 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: INSERT INTO T1 SELECT ... FROM T2 reads of T2 are not emitted; the producer leaves the SELECT in sql_unparsed_tail (Phase 5 producer gap, no guess) | open |  | 2026-10-02T08:58:47.347Z |  |
 
 ````json
 [
@@ -56,6 +58,32 @@ last_updated: 2026-10-01T17:21:14.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-30T23:56:08.041Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 4,
+    "kind": "unrun-verify",
+    "phase": "03",
+    "file": "internal/parser/languages/cobol_grammar_sql.go",
+    "line": null,
+    "description": "03-09: data-division EXEC SQL (DECLARE CURSOR in WORKING-STORAGE) program-node flow source is unreachable under the pinned grammar (parses as ERROR, grades red); the fallback is untested",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-02T08:58:47.249Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 5,
+    "kind": "deviation",
+    "phase": "03",
+    "file": "internal/parser/languages/cobol_grammar_sql.go",
+    "line": null,
+    "description": "03-09: INSERT INTO T1 SELECT ... FROM T2 reads of T2 are not emitted; the producer leaves the SELECT in sql_unparsed_tail (Phase 5 producer gap, no guess)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-02T08:58:47.347Z",
     "resolved_at": null,
     "milestone": "v1.0"
   }
