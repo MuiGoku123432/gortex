@@ -16,9 +16,10 @@ type cobolLabel struct {
 	symbol string // QualName (program-relative node symbol)
 }
 
-// cobolProcedure emits each named program's divisions, its procedure
-// sections and paragraphs, and the calls edges of single-label
-// PERFORM statements (D-01, D-02).
+// cobolProcedure emits each named program's divisions, its data and
+// environment sections, its procedure sections and paragraphs, its
+// statements (cobolStatements), and the calls edges of single-label
+// PERFORM statements (D-01, D-02, D-05).
 //
 // PURPOSE: paragraph-level control flow that get_callers and get_call_chain
 // trace without any tool change.
@@ -62,6 +63,18 @@ func cobolProcedure(w *cobolWalk) {
 		w.defines(divNode.ID, divNode.StartLine)
 		w.memberOf(divNode.ID, w.filePath+"::"+prog, divNode.StartLine)
 		if o.Kind != "procedure_division" {
+			// Data and environment sections are containers (D-01).
+			for _, c := range w.children[div] {
+				kind := obs[c].Kind
+				if !strings.HasSuffix(kind, "_section") {
+					continue
+				}
+				sect := w.symbolNode(symbolFor(prog+"/@"+kind), kind, graph.KindPackage, "section", c)
+				sect.Meta["cobol_section_kind"] = strings.TrimSuffix(kind, "_section")
+				cobolStampRange(sect, obs[c].Original)
+				w.defines(sect.ID, sect.StartLine)
+				w.memberOf(sect.ID, divNode.ID, sect.StartLine)
+			}
 			continue
 		}
 		divisions = append(divisions, div)
@@ -137,6 +150,10 @@ func cobolProcedure(w *cobolWalk) {
 		finish(para, sectionID())
 		finish(sect, divNode.ID)
 	}
+
+	// Statements are registered before any relationship edge is built, so
+	// relationEdge can point each edge back to its statement.
+	cobolStatements(w)
 
 	// PERFORM targets are matched after every header is known, since a
 	// PERFORM may name a paragraph defined later in the program.
