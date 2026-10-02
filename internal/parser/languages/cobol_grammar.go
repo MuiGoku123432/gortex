@@ -175,6 +175,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		// was parsed. The revision is the producer-domain content ID (D-09).
 		// note: the file-node shape repeats the analyzed path's below; two
 		// uses, so it stays inline (rule of three).
+		base := filepath.Base(filePath)
 		return &parser.ExtractionResult{Nodes: []*graph.Node{{
 			ID: filePath, Kind: graph.KindFile, Name: filePath,
 			FilePath: filePath, StartLine: 1, EndLine: bytes.Count(src, []byte("\n")) + 1,
@@ -184,6 +185,10 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 				"prov_revision_content_id": string(preprocessor.NewContentID(src)),
 				"prov_extractor_version":   cobolGrammarExtractorVersion,
 				"prov_analysis_absence":    "copybook_standalone_analysis_unsupported",
+				// The binding keys resolveCobolReferences matches a COPY on.
+				"cobol_kind":      "copybook",
+				"cobol_name_key":  cobolIDSegment(cobolNameNorm(strings.TrimSuffix(base, filepath.Ext(base)))),
+				"cobol_name_norm": cobolNameNormRule,
 			},
 		}}}, nil
 	}
@@ -232,6 +237,8 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		o := h.Facts.Observations[p.index]
 		meta := maps.Clone(docMeta)
 		meta["cobol_kind"] = "program"
+		meta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(p.name))
+		meta["cobol_name_norm"] = cobolNameNormRule
 		meta["prov_observation_kind"] = o.Kind
 		meta["prov_affected"] = o.Affected
 		id := filePath + "::" + p.symbol
@@ -251,7 +258,8 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	// are not cloned into breadth node or edge Meta either.
 	w := newCobolWalk(h, src, filePath, docMeta, programs, result)
 	cobolProcedure(w)
-	cobolDataItems(w) // later walkers take the returned data index
+	data := cobolDataItems(w)
+	cobolReferences(w, data)
 	// Set after the loop so these document-level flags stay on the file
 	// node and are not cloned into program Meta.
 	if containmentUnresolved {

@@ -53,6 +53,7 @@ const cobolCopyFixture = `       COPY CPYF.
        COPY CPYA.
        COPY CPYB OF MYLIB.
        COPY 'cpyc.cpy'.
+       COPY 'cpé''x'.
 -INC CPYD
        COPY IDMS RECORD EMP-REC.
        COPY IDMS SUBSCHEMA-NAMES.
@@ -211,6 +212,12 @@ func TestCobolGrammar_Copy(t *testing.T) {
 
 		quoted := cobolOneEdge(t, result, program, book+"CPYC", graph.EdgeImports)
 		assert.Equal(t, "'cpyc.cpy'", quoted.Meta["cobol_copy_member_raw"])
+
+		// One quote level removed, the doubled quote un-doubled, ASCII
+		// upper-folded, non-ASCII bytes unchanged; the raw spelling is kept.
+		encoded := cobolOneEdge(t, result, program, book+"CPé'X", graph.EdgeImports)
+		assert.Equal(t, "'cpé''x'", encoded.Meta["cobol_copy_member_raw"])
+		assert.Equal(t, cobolNameNormRule, encoded.Meta["cobol_name_norm"])
 	})
 
 	t.Run("inc", func(t *testing.T) {
