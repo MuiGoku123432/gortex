@@ -657,13 +657,13 @@ func (r *Resolver) resolveCobolReferences() {
 | A8 | Level-66 belongs to the preceding 01 record, and 88 to the preceding non-88 entry | Data items | Wrong containment for 66/88. |
 | A9 | NIST suite ratios (×1.52) are representative of the estate | D-05 | The cost estimate is off. Rerun the aggregate probe locally to confirm. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Name normalization rule (`cobol-name-norm/1`).** Upper-folding is needed for shared resource IDs and for D-09/D-11 matching. CONTEXT locks "names as written" for node names and IDs and "qualifiers only from source". Recommendation: keep node names and IDs as written for definitions, and use folded canonical IDs only for shared resources and for matching. Record the rule version. Confirm before the resource plans.
-2. **Program-versus-data path collision** (`OUTER/INNER` nested program vs `01 INNER`). Recommendation: accept the `#k` fallback for Phase 3 and log it for Phase 4 ID-03. Alternatively, amend D-07 with a data marker such as `@data`, which is costly to reverse.
-3. **`COPY IDMS` binding.** D-11 records the qualifiers but does not say whether IDMS-form copies bind to `.cpy` files. Recommendation: use a separate unbound placeholder `unresolved::cobol::copybook::idms/<KIND|_>/<NAME>` with reason `idms_dictionary_member` (one more reason value). Confirm.
-4. **FETCH-via-cursor `reads`.** Recommended (deterministic and program-local). The simpler alternative attributes reads only at DECLARE, which loses the paragraph context when DECLARE sits in WORKING-STORAGE.
-5. **D-08 copybook contents.** See the USER DECISION section. It blocks only the copybook-contents plan.
+1. **Name normalization rule (`cobol-name-norm/1`).** Upper-folding is needed for shared resource IDs and for D-09/D-11 matching. CONTEXT locks "names as written" for node names and IDs and "qualifiers only from source". Recommendation: keep node names and IDs as written for definitions, and use folded canonical IDs only for shared resources and for matching. Record the rule version. Confirm before the resource plans. **RESOLVED:** CONTEXT D-18 (user-confirmed, `cobol-name-norm/1` = ASCII uppercase; display names as written).
+2. **Program-versus-data path collision** (`OUTER/INNER` nested program vs `01 INNER`). Recommendation: accept the `#k` fallback for Phase 3 and log it for Phase 4 ID-03. Alternatively, amend D-07 with a data marker such as `@data`, which is costly to reverse. **RESOLVED:** the `#k` fallback was adopted as a research default (CONTEXT post-research confirmations).
+3. **`COPY IDMS` binding.** D-11 records the qualifiers but does not say whether IDMS-form copies bind to `.cpy` files. Recommendation: use a separate unbound placeholder `unresolved::cobol::copybook::idms/<KIND|_>/<NAME>` with reason `idms_dictionary_member` (one more reason value). Confirm. **RESOLVED:** CONTEXT D-19 (user-confirmed, never bound, reason `idms_dictionary_member`).
+4. **FETCH-via-cursor `reads`.** Recommended (deterministic and program-local). The simpler alternative attributes reads only at DECLARE, which loses the paragraph context when DECLARE sits in WORKING-STORAGE. **RESOLVED:** adopted as a research default (CONTEXT post-research confirmations).
+5. **D-08 copybook contents.** See the USER DECISION section. It blocks only the copybook-contents plan. **RESOLVED:** CONTEXT D-16 (user chose Option A, a fork copybook mode).
 
 ## Environment Availability
 
