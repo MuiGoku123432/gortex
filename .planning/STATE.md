@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-06-PLAN.md
-last_updated: "2026-10-02T07:35:50.371Z"
+stopped_at: Completed 03-07-PLAN.md
+last_updated: "2026-10-02T08:02:46.892Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: 8a555feb41b75943559979f8ba49f99c59df9d2f
+state_head: 711f7ad4f5488acb4fd73a826aa1bde759cbed24
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 19
+  completed_plans: 20
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
-Plan: 7 of 13
+Plan: 8 of 13
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 03 execution started
 
@@ -80,6 +80,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P04 | 9 min | 2 tasks | 7 files |
 | Phase 03 P05 | 14 min | 2 tasks | 6 files |
 | Phase 03 P06 | 9 min | 2 tasks | 3 files |
+| Phase 03 P07 | 10 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -135,6 +136,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-05: A data section's COPY window runs to the next non-COPY observation, because the grammar parents a trailing COPY to the division or program
 - [Phase 03]: 03-05: Data names resolve only through cobolDataReference (owner-local, cobol-name-norm/1, IN/OF qualifiers as an inner-to-outer ancestor subsequence); item #k skips program-reserved symbols
 - [Phase 03]: 03-06: cobolFlow(w) rebuilds the per-division label table from header observations (w.container of a header is its node symbol) instead of adding a cobolWalk field; own section is tracked by label index; THRU unresolved edges report the first failing endpoint; qualified labels never fall back to a program-wide match
+- [Phase 03]: 03-07: COPY IDMS detection mirrors the grammar's _COPY_IDMS token (COPY [ \t]+ IDMS, ASCII fold); EXEC SQL INCLUDE member is read only from sql_include_name because INCLUDE is aliased as a WORD child
+- [Phase 03]: 03-07: cobolCallTarget returns every edge it emits; FUNCTION targets are dynamic, keyed by text, with no data reference; one span-based From rule covers all COPY-family forms
 
 ### Pending Todos
 
@@ -163,6 +166,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T07:35:50.319Z
-Stopped at: Completed 03-06-PLAN.md
+Last session: 2026-10-02T08:02:46.845Z
+Stopped at: Completed 03-07-PLAN.md
 Resume file: None
