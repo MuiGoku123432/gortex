@@ -302,31 +302,40 @@ func TestCobolTracer_PersistsThroughAddBatch(t *testing.T) {
 func startCobolTracerDaemon(t *testing.T) (repo cobolTracerRepo, socket string, srv *gortexmcp.Server) {
 	t.Helper()
 	repo = indexCobolTracerRepo(t)
+	socket, srv = serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+	return repo, socket, srv
+}
 
+// serveCobolTestDaemon serves an indexed SQLite store from an in-process
+// daemon over the real relay, with the socket and pidfile under dir. The
+// COBOL tracer and breadth tests share it.
+func serveCobolTestDaemon(t *testing.T, dir string, store *store_sqlite.Store, idx *indexer.Indexer,
+	mi *indexer.MultiIndexer, cm *config.ConfigManager) (socket string, srv *gortexmcp.Server) {
+	t.Helper()
 	// note: second occurrence of spinUpDaemonWithConfig's wiring; that helper
 	// hard-codes an in-memory graph and a Go fixture, so it cannot host this
 	// SQLite-backed COBOL repository.
-	socket = filepath.Join(repo.dir, "s")
+	socket = filepath.Join(dir, "s")
 	t.Setenv("GORTEX_DAEMON_SOCKET", socket)
-	t.Setenv("GORTEX_DAEMON_PIDFILE", filepath.Join(repo.dir, "p"))
-	srv = gortexmcp.NewServer(query.NewEngine(repo.store), repo.store, repo.idx, nil, zap.NewNop(), nil,
-		gortexmcp.MultiRepoOptions{MultiIndexer: repo.mi, ConfigManager: repo.cm})
+	t.Setenv("GORTEX_DAEMON_PIDFILE", filepath.Join(dir, "p"))
+	srv = gortexmcp.NewServer(query.NewEngine(store), store, idx, nil, zap.NewNop(), nil,
+		gortexmcp.MultiRepoOptions{MultiIndexer: mi, ConfigManager: cm})
 	lifecycle, err := indexer.NewCheckoutLifecycle(indexer.CheckoutLifecycleConfig{
-		MultiIndexer:  repo.mi,
-		ConfigManager: repo.cm,
-		Graph:         repo.store,
+		MultiIndexer:  mi,
+		ConfigManager: cm,
+		Graph:         store,
 		Logger:        zap.NewNop(),
 	})
 	require.NoError(t, err)
 	d := daemon.New(socket, "test", zap.NewNop())
 	d.Controller = &realController{
-		graph:         repo.store,
-		multiIndexer:  repo.mi,
-		configManager: repo.cm,
+		graph:         store,
+		multiIndexer:  mi,
+		configManager: cm,
 		lifecycle:     lifecycle,
 		logger:        zap.NewNop(),
 	}
-	d.MCPDispatcher = newMCPDispatcher(srv, repo.mi, zap.NewNop())
+	d.MCPDispatcher = newMCPDispatcher(srv, mi, zap.NewNop())
 	require.NoError(t, d.Listen())
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- d.Serve() }()
@@ -343,7 +352,7 @@ func startCobolTracerDaemon(t *testing.T) (repo cobolTracerRepo, socket string, 
 	})
 	require.Eventually(t, func() bool { return daemon.IsRunningAt(socket) },
 		2*time.Second, 10*time.Millisecond)
-	return repo, socket, srv
+	return socket, srv
 }
 
 // callCobolTracerTool runs one MCP tools/call over the daemon relay and
