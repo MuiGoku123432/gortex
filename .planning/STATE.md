@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-10-02T09:00:29.179Z"
+stopped_at: Completed 03-10-PLAN.md
+last_updated: "2026-10-02T09:42:28.455Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: 74007103f6a993f0930cbb511b11889778a00ef9
+state_head: ef0f5f1d3af87c9c42bba69d02212036da09ef10
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 22
+  completed_plans: 23
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 03 execution started
 
@@ -83,6 +83,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P07 | 10 min | 2 tasks | 4 files |
 | Phase 03 P08 | 11 min | 2 tasks | 5 files |
 | Phase 03 P09 | 17 min | 2 tasks | 4 files |
+| Phase 03 P10 | 25 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -146,6 +147,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-09: DB2 tables are KindTable db2::<schema|_unqualified>/<table> named by sql_source_candidate only; aliases, CTE names, derived tables, cursors, and dynamic sources never become tables
 - [Phase 03]: 03-09: SQL cursor names are read from statement text after the verb (underscore identifiers are hidden tokens), skipping orientation keywords, host variables, and numbers
 - [Phase 03]: 03-09: the pinned grammar admits no EXEC SQL statement in WORKING-STORAGE and leaves INSERT...SELECT sources in the unparsed tail; neither is guessed
+- [Phase 03]: COBOL embedded-SQL KindTable nodes (Language cobol) survive the default-off sql coverage gate like migration and ORM tables; without this every DB2 table and SQL edge was deleted before SQLite
+- [Phase 03]: serveCobolTestDaemon is the shared daemon-over-relay helper for COBOL tracer and breadth tests
 
 ### Pending Todos
 
@@ -174,6 +177,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T09:00:29.133Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-10-02T09:42:28.410Z
+Stopped at: Completed 03-10-PLAN.md
 Resume file: None
