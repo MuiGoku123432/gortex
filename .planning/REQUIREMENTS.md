@@ -58,7 +58,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Deterministic COBOL and Mainframe Breadth
 
-- [ ] **DET-01**: The extractor MUST emit source-positioned program, division, section, paragraph, statement, and data-item observations from named AST nodes.
+- [x] **DET-01**: The extractor MUST emit source-positioned program, division, section, paragraph, statement, and data-item observations from named AST nodes.
 - [x] **DET-02**: The extractor MUST emit paragraph control-flow relationships for `PERFORM`, `THRU`, and `GO TO` constructs supported by the parser baseline.
 - [x] **DET-03**: Literal program calls MUST be represented separately from dynamic call identifiers.
 - [x] **DET-04**: Dynamic call identifiers MUST remain unresolved unless deterministic value-flow or resolution evidence establishes a target.
@@ -236,7 +236,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | PROV-04 | Phase 2 | Complete |
 | PROV-05 | Phase 2 | Complete |
 | PROV-06 | Phase 2 | Complete |
-| DET-01 | Phase 3 | Pending |
+| DET-01 | Phase 3 | Complete |
 | DET-02 | Phase 3 | Complete |
 | DET-03 | Phase 3 | Complete |
 | DET-04 | Phase 3 | Complete |

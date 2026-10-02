@@ -111,7 +111,7 @@ Plans:
   4. IDMS record/set and CICS program/transaction/map/mapset references retain exact source evidence.
   5. DB2 reads and writes retain statement-level evidence while aliases, CTEs, includes, and dynamic sources remain distinguishable from physical tables.
 
-**Plans**: 12/13 plans executed
+**Plans**: 13/13 plans executed
 
 Plans:
 **Wave 1**
@@ -155,7 +155,7 @@ Plans:
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 03-13-PLAN.md -- Preprocessor-only re-pin, copybook-owned data items, phase gate
+- [x] 03-13-PLAN.md -- Preprocessor-only re-pin, copybook-owned data items, phase gate
 
 ### Phase 4: Stable Incremental and Cross-Repository Lifecycle
 
@@ -277,7 +277,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 |-------|----------------|--------|-----------|
 | 1. General Neo4j Projection Command | 7/7 | Complete    | 2026-09-22 |
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
-| 3. Deterministic COBOL and Mainframe Breadth | 12/13 | In Progress|  |
+| 3. Deterministic COBOL and Mainframe Breadth | 13/13 | In Progress|  |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 0/TBD | Deferred: Phase 3 | - |
 | 5. Explicit Unresolved Evidence | 0/TBD | Deferred: Phase 4 | - |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |

@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
-status: executing
-stopped_at: Completed 03-12-PLAN.md
-last_updated: "2026-10-02T13:07:10.828Z"
+status: verifying
+stopped_at: Completed 03-13-PLAN.md
+last_updated: "2026-10-02T13:34:17.228Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: dcc11e14022e6a92293e721c74dbe334597c92a1
+state_head: 0ffa8f5c078f99fa0858a0653b8530b805b86ac3
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 25
+  completed_plans: 26
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-02 — Phase 03 execution started
 
 Progress: [██░░░░░░░░] 20%
@@ -86,6 +86,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P10 | 25 min | 2 tasks | 7 files |
 | Phase 03 P11 | 8 min | 2 tasks | 7 files |
 | Phase 03 P12 | 1 min | 2 tasks | 0 files |
+| Phase 03 P13 | 24 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -154,6 +155,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-11: Local fork commit e64234cc493c487393c5e7867adfd7ca92d936ba (parent f9eaf99, NOT pushed) adds transform.RunCopybook/CopybookConfigurationID (rule copybook-wrapper/v1), grade.PolicyCopybookV1 (cobol-grade-policy-copybook-v1, AnchorsByConstruction), and Analyzer.AnalyzeCopybook; Plan 03-12 owns the push
 - [Phase 03]: 03-11: Copybook final-newline insert is a separate RuleCopybookWrapper occurrence; analyze() keeps its signature for quality_census and analyzeWith carries the transform parameter
 - [Phase 03]: Phase 03-12: User authorized the D-16 fork push (verbatim "push"); e64234cc493c487393c5e7867adfd7ca92d936ba is on origin gsd/v0.26.0-estate-parse-recovery as a fast-forward from f9eaf99, no force
+- [Phase 03]: 03-13: Gortex preprocessor re-pinned to v0.0.0-20261002100409-e64234cc493c (fork e64234c); forest-shim replace and cobolApprovedGrammarID unchanged; .cpy files run AnalyzeCopybook behind the same grammar check
+- [Phase 03]: 03-13: copybooks own their data items (<path>::<01>/<child>, member coordinates); the copybook walk uses a cloned docMeta so file-node COPY marks never leak; REDEFINES/RENAMES pass shared via cobolDataBind
 
 ### Pending Todos
 
@@ -182,6 +185,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T13:07:10.781Z
-Stopped at: Completed 03-12-PLAN.md
+Last session: 2026-10-02T13:34:17.181Z
+Stopped at: Completed 03-13-PLAN.md
 Resume file: None
