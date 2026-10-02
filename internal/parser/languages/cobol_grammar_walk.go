@@ -113,6 +113,13 @@ func (w *cobolWalk) programSymbol(i int) string {
 	return w.programs[w.owner[i]]
 }
 
+// statementSymbol returns the QualName of the innermost statement node
+// among observation i and its Parent ancestors, or "" when there is none.
+func (w *cobolWalk) statementSymbol(i int) string { return "" }
+
+// statementNode returns the statement node of observation i, or nil.
+func (w *cobolWalk) statementNode(i int) *graph.Node { return nil }
+
 // symbolNode appends a symbol node with ID <filePath>::<symbol>, the cloned
 // document provenance, cobol_kind, and the observation kind and Affected
 // flag of observation occurrence. The caller stamps its range.

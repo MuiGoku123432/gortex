@@ -238,3 +238,102 @@ func TestCobolGrammar_Statements(t *testing.T) {
 	require.Len(t, empty.Nodes, 1)
 	assert.Empty(t, empty.Edges)
 }
+
+const cobolStatementSymbolFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SYMPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CPYW.
+       01 WS-A PIC X.
+       PROCEDURE DIVISION.
+       P1.
+           PERFORM P2.
+           PERFORM P3. PERFORM P3.
+           COPY CPYA.
+       P2.
+           MOVE 'Y'
+           COPY CPYB.
+           TO WS-A.
+       P3.
+           EXIT.
+`
+
+// cobolCopyIndex returns the index of the copy_statement naming book.
+func cobolCopyIndex(t *testing.T, w *cobolWalk, book string) int {
+	t.Helper()
+	for i, o := range w.h.Facts.Observations {
+		if o.Kind == "copy_statement" && strings.Contains(w.text(i), book) {
+			return i
+		}
+	}
+	require.Failf(t, "no copy_statement", "book %s", book)
+	return -1
+}
+
+func TestCobolGrammar_StatementSymbolOnEdges(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/sym.cbl"
+	result := extractCobolGrammar(t, e, path, cobolStatementSymbolFixture)
+	const proc = "SYMPGM/@proc/"
+
+	// The symbol is a QualName, so FilePath + "::" + symbol is the statement
+	// node ID in single- and multi-repo modes (Pitfall 5).
+	toP2 := cobolEdges(result, path+"::"+proc+"P1", path+"::"+proc+"P2", graph.EdgeCalls)
+	require.Len(t, toP2, 1)
+	sym, _ := toP2[0].Meta["cobol_statement_symbol"].(string)
+	require.Equal(t, proc+"P1/@perform_statement_call_proc", sym)
+	assert.Equal(t, "perform_statement_call_proc", cobolNodeByID(t, result, toP2[0].FilePath+"::"+sym).Name)
+
+	// Two same-line PERFORMs collapse; both statements are listed in order.
+	toP3 := cobolEdges(result, path+"::"+proc+"P1", path+"::"+proc+"P3", graph.EdgeCalls)
+	require.Len(t, toP3, 1)
+	assert.Equal(t, 2, toP3[0].Meta["cobol_occurrence_count"])
+	assert.Equal(t, proc+"P1/@perform_statement_call_proc#2", toP3[0].Meta["cobol_statement_symbol"])
+	assert.Equal(t, []string{proc + "P1/@perform_statement_call_proc#2", proc + "P1/@perform_statement_call_proc#3"},
+		toP3[0].Meta["cobol_statement_symbols"])
+
+	// A header-free division: the program is the flow source, and the edge
+	// still points back to its statement.
+	flat := extractCobolGrammar(t, e, "src/flat.cbl", cobolFlatProcedureFixture)
+	calls := cobolEdges(flat, "src/flat.cbl::FLATPGM",
+		"unresolved::cobol::label::src/flat.cbl::FLATPGM::NOWHERE", graph.EdgeCalls)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "FLATPGM/@procedure_division/@perform_statement_call_proc", calls[0].Meta["cobol_statement_symbol"])
+
+	// COPY is a grammar extra with an arbitrary Parent (Pitfall 3): it is
+	// placed by its generated start, under the header that precedes it.
+	h := cobolTestHandoff(t, e, path, cobolStatementSymbolFixture)
+	programs, _, _ := cobolProgramSymbols(h)
+	w := newCobolWalk(h, []byte(cobolStatementSymbolFixture), path, map[string]any{}, programs, &parser.ExtractionResult{})
+	cobolProcedure(w)
+
+	copyA := cobolCopyIndex(t, w, "CPYA")
+	node := w.statementNode(copyA)
+	require.NotNil(t, node)
+	assert.Equal(t, path+"::"+proc+"P1/@copy_statement", node.ID)
+	assert.Equal(t, proc+"P1", w.container[copyA])
+	assert.Equal(t, proc+"P1", w.flowFrom[copyA])
+	assertCobolStatement(t, result, path+"::"+proc+"P1/@copy_statement", "copy_statement", path+"::"+proc+"P1", "CPYA")
+
+	// A COPY inside a statement is its own innermost statement.
+	copyB := cobolCopyIndex(t, w, "CPYB")
+	require.NotNil(t, w.statementNode(copyB))
+	assert.Equal(t, path+"::"+proc+"P2/@copy_statement", w.statementNode(copyB).ID)
+	assert.Equal(t, proc+"P2/@copy_statement", w.statementSymbol(w.children[copyB][0]))
+	parent, ok := w.parent(copyB)
+	require.True(t, ok)
+	assert.Equal(t, proc+"P2/@move_statement", w.statementSymbol(parent))
+
+	// A COPY outside every procedure division gets no statement node, and
+	// observations outside every statement have no statement symbol.
+	copyW := cobolCopyIndex(t, w, "CPYW")
+	assert.Nil(t, w.statementNode(copyW))
+	assert.Empty(t, w.statementSymbol(copyW))
+	assert.Nil(t, w.statementNode(-1))
+	assert.Empty(t, w.statementSymbol(len(h.Facts.Observations)))
+	for i, o := range h.Facts.Observations {
+		if o.Kind == "paragraph_header" {
+			assert.Empty(t, w.statementSymbol(i))
+		}
+	}
+}
