@@ -98,3 +98,164 @@ func TestCobolNamespaceExclusions(t *testing.T) {
 		assert.GreaterOrEqual(t, stats.Unresolved, 1, "owned COBOL target counts as unresolved")
 	})
 }
+
+func TestCobolReferences_ProgramBinding(t *testing.T) {
+	const caller = "a/main.cbl::MAINPGM"
+	const target = "unresolved::cobol::program::SUBPGM"
+
+	t.Run("exactly_one", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "a", "a/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		seedCobol(g, "b", "b/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		// Stale stamps from an earlier pass are cleared on binding.
+		cobolEdge(g, caller, 4, graph.EdgeCalls, target, map[string]any{
+			"cobol_call":              "literal",
+			"cobol_unresolved_reason": "ambiguous",
+			"cobol_candidate_ids":     []string{"x", "y"},
+		})
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, caller, 4)
+		assert.Equal(t, "a/sub.cbl::SUBPGM", e.To, "binds the single same-repo program")
+		assert.Equal(t, graph.OriginASTResolved, e.Origin)
+		assert.NotContains(t, e.Meta, "cobol_unresolved_reason")
+		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
+		assert.Equal(t, "literal", e.Meta["cobol_call"], "extractor Meta is kept")
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "b", "b/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		cobolEdge(g, caller, 4, graph.EdgeCalls, target, nil)
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, caller, 4)
+		assert.Equal(t, target, e.To, "never bound to another repository's program")
+		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
+		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
+	})
+
+	t.Run("ambiguous", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "a", "a/s2.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		seedCobol(g, "a", "a/s1.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		cobolEdge(g, caller, 4, graph.EdgeCalls, target, nil)
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, caller, 4)
+		assert.Equal(t, target, e.To, "nothing is picked among two candidates")
+		assert.Equal(t, "ambiguous", e.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, []string{"a/s1.cbl::SUBPGM", "a/s2.cbl::SUBPGM"}, e.Meta["cobol_candidate_ids"])
+	})
+
+	t.Run("same_file_first", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", "a/nest.cbl::OUTER", graph.KindFunction, "program", "OUTER")
+		seedCobol(g, "a", "a/nest.cbl::OUTER/INNER", graph.KindFunction, "program", "INNER")
+		seedCobol(g, "a", "a/other.cbl::INNER", graph.KindFunction, "program", "INNER")
+		cobolEdge(g, "a/nest.cbl::OUTER", 9, graph.EdgeCalls, "unresolved::cobol::program::INNER", nil)
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, "a/nest.cbl::OUTER", 9)
+		assert.Equal(t, "a/nest.cbl::OUTER/INNER", e.To, "contained program resolves within the file first")
+	})
+
+	t.Run("idempotent", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "a", "a/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		seedCobol(g, "a", "a/d1.cbl::DUP", graph.KindFunction, "program", "DUP")
+		seedCobol(g, "a", "a/d2.cbl::DUP", graph.KindFunction, "program", "DUP")
+		cobolEdge(g, caller, 1, graph.EdgeCalls, target, nil)
+		cobolEdge(g, caller, 2, graph.EdgeCalls, "unresolved::cobol::program::NOPE", nil)
+		cobolEdge(g, caller, 3, graph.EdgeCalls, "unresolved::cobol::program::DUP", nil)
+
+		type snap struct {
+			To   string
+			Meta map[string]any
+		}
+		capture := func() map[int]snap {
+			out := map[int]snap{}
+			for _, e := range g.GetOutEdges(caller) {
+				m := map[string]any{}
+				for k, v := range e.Meta {
+					m[k] = v
+				}
+				out[e.Line] = snap{To: e.To, Meta: m}
+			}
+			return out
+		}
+
+		New(g).ResolveAll()
+		first := capture()
+		New(g).ResolveAll()
+		second := capture()
+
+		assert.Equal(t, first, second, "a second resolve leaves every edge identical")
+		assert.Equal(t, "a/sub.cbl::SUBPGM", first[1].To)
+		assert.Equal(t, "missing", first[2].Meta["cobol_unresolved_reason"])
+		assert.Equal(t, "ambiguous", first[3].Meta["cobol_unresolved_reason"])
+	})
+}
+
+func TestCobolReferences_Copybook(t *testing.T) {
+	g := graph.New()
+	const caller = "a/main.cbl::MAINPGM"
+	seedCobol(g, "a", caller, graph.KindFunction, "program", "MAINPGM")
+	seedCobol(g, "a", "a/copy/custrec.cpy", graph.KindFile, "copybook", "CUSTREC")
+	seedCobol(g, "a", "a/c2/x.cpy", graph.KindFile, "copybook", "X")
+	seedCobol(g, "a", "a/c1/x.cpy", graph.KindFile, "copybook", "X")
+	seedCobol(g, "a", "a/copy/emp.cpy", graph.KindFile, "copybook", "EMP")
+	seedCobol(g, "b", "b/copy/onlyb.cpy", graph.KindFile, "copybook", "ONLYB")
+
+	cobolEdge(g, caller, 1, graph.EdgeImports, "unresolved::cobol::copybook::CUSTREC", nil)
+	cobolEdge(g, caller, 2, graph.EdgeImports, "unresolved::cobol::copybook::X", nil)
+	cobolEdge(g, caller, 3, graph.EdgeImports, "unresolved::cobol::copybook::ONLYB", nil)
+
+	// Owned targets the pass must never rebind or restamp, even where a
+	// same-named copybook or program exists.
+	untouched := map[int]string{
+		4: "unresolved::cobol::copybook::idms/RECORD/EMP",
+		5: "unresolved::cobol::dynamic::program::a/main.cbl::MAINPGM::EMP",
+		6: "unresolved::cobol::label::a/main.cbl::MAINPGM::EMP",
+		7: "unresolved::cobol::data::a/main.cbl::MAINPGM::CUSTREC",
+		8: "unresolved::cobol::idms_scope::_unqualified/EMP",
+	}
+	reasons := map[int]string{4: "idms_dictionary_member", 5: "dynamic", 6: "label_not_found", 7: "missing", 8: "scope_role_unknown"}
+	for line, to := range untouched {
+		kind := graph.EdgeReferences
+		if line == 4 {
+			kind = graph.EdgeImports
+		}
+		cobolEdge(g, caller, line, kind, to, map[string]any{"cobol_unresolved_reason": reasons[line]})
+	}
+
+	New(g).ResolveAll()
+
+	bound := cobolEdgeAt(t, g, caller, 1)
+	assert.Equal(t, "a/copy/custrec.cpy", bound.To, "binds the single same-repo copybook")
+	assert.Equal(t, graph.OriginASTResolved, bound.Origin)
+	assert.NotContains(t, bound.Meta, "cobol_unresolved_reason")
+
+	amb := cobolEdgeAt(t, g, caller, 2)
+	assert.Equal(t, "unresolved::cobol::copybook::X", amb.To)
+	assert.Equal(t, "ambiguous", amb.Meta["cobol_unresolved_reason"])
+	assert.Equal(t, []string{"a/c1/x.cpy", "a/c2/x.cpy"}, amb.Meta["cobol_candidate_ids"])
+
+	other := cobolEdgeAt(t, g, caller, 3)
+	assert.Equal(t, "unresolved::cobol::copybook::ONLYB", other.To, "no cross-repository copybook binding")
+	assert.Equal(t, "missing", other.Meta["cobol_unresolved_reason"])
+
+	for line, to := range untouched {
+		e := cobolEdgeAt(t, g, caller, line)
+		assert.Equal(t, to, e.To, "line %d stays unresolved", line)
+		assert.Equal(t, map[string]any{"cobol_unresolved_reason": reasons[line]}, e.Meta, "line %d Meta unchanged", line)
+	}
+}
