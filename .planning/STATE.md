@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-10-02T05:50:55.388Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-10-02T06:02:49.212Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: ccb58e2b8a7fc82199050aaf76301c3a1d3bac99
+state_head: 0cb7d88763ef7097cf7d99970053a3af9b94066c
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 14
+  completed_plans: 15
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 03 execution started
 
@@ -75,6 +75,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 02 P05 | 4min | 2 tasks | 7 files |
 | Phase 02 P06 | ~17h (checkpoint wait) | 3 tasks | 14 files |
 | Phase 03 P01 | 8 min | 2 tasks | 6 files |
+| Phase 03 P02 | 10min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Phase 3 breadth runs before the document-flag block so document-only flags stay on the file node
 - [Phase 03]: PERFORM edges record cobol_name_norm=cobol-name-norm/1; labels bind only on exactly one same-program match
 - [Phase 03]: Paragraph and section extents end at the last procedure-division child before the ending header
+- [Phase 03]: 03-02: alignProvByteOffsets corrects provenance byte offsets in the D-18 hook (+3 only on an exact UTF-8 BOM plus indexed bytes match; any other mismatch marks prov_range_exact=false with indexed_bytes_differ_from_file); rows and columns stay BOM-excluded
+- [Phase 03]: 03-02: stampSourceRevision stamps prov_vcs_commit or prov_vcs_commit_absence on relationship edges carrying prov_revision_content_id, same value as the file's nodes
 
 ### Pending Todos
 
@@ -147,6 +150,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T05:50:55.337Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-10-02T06:02:49.163Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
