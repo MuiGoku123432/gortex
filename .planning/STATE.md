@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-10-02T07:24:40.169Z"
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-10-02T07:35:50.371Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: 4dd6642f110933e6fa3f5b95e9030495be6ab86d
+state_head: 8a555feb41b75943559979f8ba49f99c59df9d2f
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 18
+  completed_plans: 19
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
-Plan: 6 of 13
+Plan: 7 of 13
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 03 execution started
 
@@ -79,6 +79,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P03 | 11 min | 2 tasks | 5 files |
 | Phase 03 P04 | 9 min | 2 tasks | 7 files |
 | Phase 03 P05 | 14 min | 2 tasks | 6 files |
+| Phase 03 P06 | 9 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -133,6 +134,7 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-05: Data levels outside D-06 (78, 50, ...) and CONSTANT entries are counted in cobol_unleveled_entry_count, never placed by guess
 - [Phase 03]: 03-05: A data section's COPY window runs to the next non-COPY observation, because the grammar parents a trailing COPY to the division or program
 - [Phase 03]: 03-05: Data names resolve only through cobolDataReference (owner-local, cobol-name-norm/1, IN/OF qualifiers as an inner-to-outer ancestor subsequence); item #k skips program-reserved symbols
+- [Phase 03]: 03-06: cobolFlow(w) rebuilds the per-division label table from header observations (w.container of a header is its node symbol) instead of adding a cobolWalk field; own section is tracked by label index; THRU unresolved edges report the first failing endpoint; qualified labels never fall back to a program-wide match
 
 ### Pending Todos
 
@@ -161,6 +163,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T07:24:40.123Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-10-02T07:35:50.319Z
+Stopped at: Completed 03-06-PLAN.md
 Resume file: None
