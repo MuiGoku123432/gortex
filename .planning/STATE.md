@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-10-02T06:40:52.966Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-10-02T06:52:06.678Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: 0123befc29ecbf4d244e938ddb97a15a1cb639fb
+state_head: ca650486d4ec5cf7ea51c88de3c7b342e465a47a
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 26
-  completed_plans: 16
+  completed_plans: 17
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-10-02 — Phase 03 execution started
 
@@ -77,6 +77,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P01 | 8 min | 2 tasks | 6 files |
 | Phase 03 P02 | 10min | 2 tasks | 3 files |
 | Phase 03 P03 | 11 min | 2 tasks | 5 files |
+| Phase 03 P04 | 9 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -126,6 +127,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-03: cobolDedupeEdges moved to cobol_grammar_dedupe.go to keep cobol_grammar_walk.go under 300 lines
 - [Phase 03]: 03-03: the procedure division observation carries container=division node and flowFrom=program, the fallback for span-placed COPY
 - [Phase 03]: 03-03: copy_statement is always placed by generated span; a COPY outside every procedure division span gets no statement node
+- [Phase 03]: 03-04: unresolved::cobol:: is an owned namespace; resolveCobolReferences binds program/copybook targets only to exactly one same-repo candidate (same-file first for programs), else stamps missing or ambiguous with sorted cobol_candidate_ids
+- [Phase 03]: 03-04: resolver compares cobol_name_key by exact string equality; extractor plans must emit keys already normalized under cobol-name-norm/1
 
 ### Pending Todos
 
@@ -154,6 +157,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T06:40:52.914Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-10-02T06:52:06.630Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
