@@ -4,7 +4,6 @@ package languages
 
 import (
 	"maps"
-	"strings"
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/sourcemap"
@@ -12,10 +11,6 @@ import (
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/parser"
 )
-
-// cobolNameNormRule identifies the versioned label and name matching rule
-// cobolNameNorm implements (D-18). Record it wherever a match depends on it.
-const cobolNameNormRule = "cobol-name-norm/1"
 
 // cobolWalk indexes one handoff's observations once and carries what every
 // breadth walker needs to turn them into nodes and edges.
@@ -53,6 +48,8 @@ type cobolWalk struct {
 	// sections maps a data or environment section observation to its node
 	// (filled by cobolProcedure; cobolDataItems walks the data sections).
 	sections map[int]*graph.Node
+	// resources holds the shared resource node IDs this document emitted.
+	resources map[string]bool
 }
 
 // newCobolWalk builds the children index, subtree ends, and owning-program
@@ -71,6 +68,7 @@ func newCobolWalk(h handoff.Handoff, src []byte, filePath string, docMeta map[st
 		flowFrom:  make([]string, len(obs)),
 		statement: make([]*graph.Node, len(obs)),
 		sections:  make(map[int]*graph.Node),
+		resources: make(map[string]bool),
 	}
 	for _, p := range programs {
 		w.programs[p.index] = p.symbol
@@ -208,42 +206,26 @@ func (w *cobolWalk) relationEdge(from, to string, kind graph.EdgeKind, occurrenc
 	return edge
 }
 
-// cobolNameNorm is the cobol-name-norm/1 matching key (D-18): when raw is
-// wrapped in one matching pair of quotes (' or "), drop that pair and
-// un-double the embedded quote; then upper-fold ASCII letters only, leaving
-// every other byte untouched. Node names and IDs keep the source spelling.
-func cobolNameNorm(raw string) string {
-	if n := len(raw); n >= 2 && (raw[0] == '\'' || raw[0] == '"') && raw[n-1] == raw[0] {
-		q := raw[:1]
-		raw = strings.ReplaceAll(raw[1:n-1], q+q, q)
+// resourceNode returns id after appending, at its first sighting in this
+// document only, a shared node (an IDMS or CICS resource, a DB2 table) with
+// Name as first written, the cloned document provenance, meta, and
+// prov_range_absence=shared_resource: the node is named by many statements
+// in many files, so no one range is its own. It gets no defines or
+// member_of edge, and its FilePath is a first sighting, not an owner
+// (Pitfall 7: shared-node ownership is Phase 4).
+func (w *cobolWalk) resourceNode(id, name string, kind graph.NodeKind, meta map[string]any) string {
+	if w.resources[id] {
+		return id
 	}
-	b := []byte(raw)
-	for i, c := range b {
-		if c >= 'a' && c <= 'z' {
-			b[i] = c - ('a' - 'A')
-		}
-	}
-	return string(b)
-}
-
-// cobolIDSegment percent-encodes the ID metacharacters %, :, /, # and every
-// control byte (below 0x20, or 0x7f) in a name-derived ID segment, so source
-// text cannot forge an ::unresolved:: marker, an extra path segment, or a
-// #k ordinal (Pitfall 9). Every other byte passes through.
-func cobolIDSegment(raw string) string {
-	const hex = "0123456789ABCDEF"
-	var b strings.Builder
-	for i := 0; i < len(raw); i++ {
-		c := raw[i]
-		if c == '%' || c == ':' || c == '/' || c == '#' || c < 0x20 || c == 0x7f {
-			b.WriteByte('%')
-			b.WriteByte(hex[c>>4])
-			b.WriteByte(hex[c&0x0f])
-			continue
-		}
-		b.WriteByte(c)
-	}
-	return b.String()
+	w.resources[id] = true
+	m := maps.Clone(w.docMeta)
+	maps.Copy(m, meta)
+	m["prov_range_exact"] = false
+	m["prov_range_absence"] = "shared_resource"
+	w.result.Nodes = append(w.result.Nodes, &graph.Node{
+		ID: id, Kind: kind, Name: name, FilePath: w.filePath, Language: "cobol", Meta: m,
+	})
+	return id
 }
 
 // cobolStampMeta writes the original-coordinate range keys of r into meta

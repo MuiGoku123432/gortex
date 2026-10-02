@@ -140,3 +140,45 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 	}
 	return programs, containmentUnresolved, unnamed
 }
+
+// cobolNameNormRule identifies the versioned label and name matching rule
+// cobolNameNorm implements (D-18). Record it wherever a match depends on it.
+const cobolNameNormRule = "cobol-name-norm/1"
+
+// cobolNameNorm is the cobol-name-norm/1 matching key (D-18): when raw is
+// wrapped in one matching pair of quotes (' or "), drop that pair and
+// un-double the embedded quote; then upper-fold ASCII letters only, leaving
+// every other byte untouched. Node names and IDs keep the source spelling.
+func cobolNameNorm(raw string) string {
+	if n := len(raw); n >= 2 && (raw[0] == '\'' || raw[0] == '"') && raw[n-1] == raw[0] {
+		q := raw[:1]
+		raw = strings.ReplaceAll(raw[1:n-1], q+q, q)
+	}
+	b := []byte(raw)
+	for i, c := range b {
+		if c >= 'a' && c <= 'z' {
+			b[i] = c - ('a' - 'A')
+		}
+	}
+	return string(b)
+}
+
+// cobolIDSegment percent-encodes the ID metacharacters %, :, /, # and every
+// control byte (below 0x20, or 0x7f) in a name-derived ID segment, so source
+// text cannot forge an ::unresolved:: marker, an extra path segment, or a
+// #k ordinal (Pitfall 9). Every other byte passes through.
+func cobolIDSegment(raw string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if c == '%' || c == ':' || c == '/' || c == '#' || c < 0x20 || c == 0x7f {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&0x0f])
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}

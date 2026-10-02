@@ -260,6 +260,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	cobolProcedure(w)
 	data := cobolDataItems(w)
 	cobolReferences(w, data)
+	cobolMainframe(w, data)
 	// Set after the loop so these document-level flags stay on the file
 	// node and are not cloned into program Meta.
 	if containmentUnresolved {
