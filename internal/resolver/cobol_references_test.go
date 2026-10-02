@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
 )
 
 // seedCobol adds a COBOL node carrying the repository prefix and the
@@ -165,6 +167,30 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 
 		e := cobolEdgeAt(t, g, "a/nest.cbl::OUTER", 9)
 		assert.Equal(t, "a/nest.cbl::OUTER/INNER", e.To, "contained program resolves within the file first")
+	})
+
+	t.Run("sqlite_persisted", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "cobol.sqlite")
+		store, err := store_sqlite.Open(path)
+		require.NoError(t, err)
+		seedCobol(store, "a", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(store, "a", "a/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		seedCobol(store, "a", "a/d1.cbl::DUP", graph.KindFunction, "program", "DUP")
+		seedCobol(store, "a", "a/d2.cbl::DUP", graph.KindFunction, "program", "DUP")
+		cobolEdge(store, caller, 1, graph.EdgeCalls, target, nil)
+		cobolEdge(store, caller, 2, graph.EdgeCalls, "unresolved::cobol::program::NOPE", nil)
+		cobolEdge(store, caller, 3, graph.EdgeCalls, "unresolved::cobol::program::DUP", nil)
+		New(store).ResolveAll()
+		require.NoError(t, store.Close())
+
+		reopened, err := store_sqlite.Open(path)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+		assert.Equal(t, "a/sub.cbl::SUBPGM", cobolEdgeAt(t, reopened, caller, 1).To, "rebind persisted")
+		assert.Equal(t, "missing", cobolEdgeAt(t, reopened, caller, 2).Meta["cobol_unresolved_reason"], "missing stamp persisted")
+		amb := cobolEdgeAt(t, reopened, caller, 3)
+		assert.Equal(t, "ambiguous", amb.Meta["cobol_unresolved_reason"], "ambiguous stamp persisted")
+		assert.Len(t, amb.Meta["cobol_candidate_ids"], 2)
 	})
 
 	t.Run("idempotent", func(t *testing.T) {

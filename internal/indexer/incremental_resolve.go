@@ -449,7 +449,8 @@ func reuseIdentifier(target string) string {
 		return ""
 	case strings.HasPrefix(target, "import::"),
 		strings.HasPrefix(target, "pyrel::"),
-		strings.HasPrefix(target, "grpc::"):
+		strings.HasPrefix(target, "grpc::"),
+		strings.HasPrefix(target, "cobol::"): // owned by resolver.resolveCobolReferences
 		return ""
 	}
 	return target
