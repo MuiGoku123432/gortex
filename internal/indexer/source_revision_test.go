@@ -17,12 +17,18 @@ import (
 // sourceRevisionResult builds the shape a COBOL extraction hands the
 // indexer: a file node and a program node that both carry a content
 // revision, plus one node without it that the stamp must leave alone.
+// Its edges mirror that: a relationship edge carrying the revision and a
+// structural edge without Meta.
 func sourceRevisionResult(relPath string) *parser.ExtractionResult {
 	return &parser.ExtractionResult{
 		Nodes: []*graph.Node{
 			{ID: relPath, Kind: graph.KindFile, FilePath: relPath, Meta: map[string]any{"prov_revision_content_id": "content"}},
 			{ID: relPath + "::DEMOPGM", Kind: graph.KindFunction, FilePath: relPath, Meta: map[string]any{"prov_revision_content_id": "content"}},
 			{ID: relPath + "::MAIN-PARA", Kind: graph.KindFunction, FilePath: relPath},
+		},
+		Edges: []*graph.Edge{
+			{From: relPath + "::DEMOPGM/@proc/MAIN-PARA", To: relPath + "::DEMOPGM/@proc/WORK-PARA", Kind: graph.EdgeCalls, FilePath: relPath, Meta: map[string]any{"prov_revision_content_id": "content"}},
+			{From: relPath, To: relPath + "::DEMOPGM", Kind: graph.EdgeDefines, FilePath: relPath},
 		},
 	}
 }
@@ -280,5 +286,128 @@ func TestSourceRevisionStamp(t *testing.T) {
 		assert.Equal(t, map[string]any{"lang": "go"}, result.Nodes[0].Meta)
 		assert.Nil(t, result.Nodes[1].Meta)
 		idx.stampSourceRevision("pkg/f.go", nil, nil)
+	})
+}
+
+// TestSourceRevisionStampEdges covers the carried-forward provenance
+// contract: a relationship edge that carries a content revision records
+// the same commit or absence reason as its file's nodes, never both.
+func TestSourceRevisionStampEdges(t *testing.T) {
+	const rel = "cobol/a.cbl"
+
+	t.Run("clean_committed", func(t *testing.T) {
+		requireGit(t)
+		root := committedRepo(t)
+		result := stampAt(t, root, rel)
+		e := result.Edges[0]
+		assert.Equal(t, headCommit(t, root), e.Meta["prov_vcs_commit"])
+		assert.NotContains(t, e.Meta, "prov_vcs_commit_absence", "an edge must not carry both keys")
+		assert.Equal(t, "content", e.Meta["prov_revision_content_id"])
+		assert.Nil(t, result.Edges[1].Meta, "an edge without prov_revision_content_id is untouched")
+	})
+
+	t.Run("modified", func(t *testing.T) {
+		requireGit(t)
+		root := committedRepo(t)
+		writeRepoFile(t, root, rel, "       PROGRAM-ID. B.\n")
+		result := stampAt(t, root, rel)
+		e := result.Edges[0]
+		assert.Equal(t, "working_tree_differs_from_head", e.Meta["prov_vcs_commit_absence"])
+		assert.NotContains(t, e.Meta, "prov_vcs_commit", "an edge must not carry both keys")
+		assert.Nil(t, result.Edges[1].Meta, "an edge without prov_revision_content_id is untouched")
+	})
+}
+
+// byteRangeResult builds a node and an edge that carry a content revision
+// and an extractor-written range: bytes 10..40 of the indexed bytes, row 1.
+func byteRangeResult(relPath string) *parser.ExtractionResult {
+	meta := func() map[string]any {
+		return map[string]any{
+			"prov_revision_content_id": "content",
+			"prov_start_byte":          10,
+			"prov_end_byte":            40,
+			"prov_start_row":           1,
+			"prov_end_row":             1,
+			"prov_start_column":        7,
+			"prov_end_column":          37,
+			"prov_range_exact":         true,
+		}
+	}
+	return &parser.ExtractionResult{
+		Nodes: []*graph.Node{{ID: relPath + "::DEMOPGM", Kind: graph.KindFunction, FilePath: relPath, StartLine: 2, EndLine: 2, Meta: meta()}},
+		Edges: []*graph.Edge{{From: relPath + "::DEMOPGM/@proc/MAIN-PARA", To: relPath + "::DEMOPGM/@proc/WORK-PARA", Kind: graph.EdgeCalls, FilePath: relPath, Line: 2, Meta: meta()}},
+	}
+}
+
+// TestSourceRevisionBOMShift covers the CR-01 residual (PROV-03): byte
+// offsets written against the BOM-stripped bytes become file offsets
+// when the file is exactly a UTF-8 BOM plus those bytes, any other
+// difference marks the range inexact, and rows and columns never move.
+func TestSourceRevisionBOMShift(t *testing.T) {
+	const rel = "cobol/a.cbl"
+	src := []byte("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEMOPGM.\n")
+
+	stamp := func(t *testing.T, disk []byte) *parser.ExtractionResult {
+		t.Helper()
+		root := t.TempDir()
+		if disk != nil {
+			writeRepoFile(t, root, rel, string(disk))
+		}
+		idx := newTestIndexer(graph.New())
+		idx.rootPath = root
+		result := byteRangeResult(rel)
+		idx.stampSourceRevision(rel, src, result)
+		return result
+	}
+	metas := func(result *parser.ExtractionResult) []map[string]any {
+		return []map[string]any{result.Nodes[0].Meta, result.Edges[0].Meta}
+	}
+	assertUnmoved := func(t *testing.T, result *parser.ExtractionResult, start, end int) {
+		t.Helper()
+		for _, m := range metas(result) {
+			assert.Equal(t, start, m["prov_start_byte"])
+			assert.Equal(t, end, m["prov_end_byte"])
+			assert.Equal(t, 1, m["prov_start_row"])
+			assert.Equal(t, 1, m["prov_end_row"])
+			assert.Equal(t, 7, m["prov_start_column"])
+			assert.Equal(t, 37, m["prov_end_column"])
+		}
+		assert.Equal(t, 2, result.Nodes[0].StartLine)
+		assert.Equal(t, 2, result.Nodes[0].EndLine)
+		assert.Equal(t, 2, result.Edges[0].Line)
+	}
+	assertExact := func(t *testing.T, result *parser.ExtractionResult) {
+		t.Helper()
+		for _, m := range metas(result) {
+			assert.Equal(t, true, m["prov_range_exact"])
+			assert.NotContains(t, m, "prov_range_absence")
+		}
+	}
+
+	t.Run("bom", func(t *testing.T) {
+		result := stamp(t, append([]byte{0xEF, 0xBB, 0xBF}, src...))
+		assertUnmoved(t, result, 13, 43)
+		assertExact(t, result)
+	})
+
+	t.Run("equal", func(t *testing.T) {
+		result := stamp(t, src)
+		assertUnmoved(t, result, 10, 40)
+		assertExact(t, result)
+	})
+
+	t.Run("differ", func(t *testing.T) {
+		result := stamp(t, []byte("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OTHER.\n"))
+		assertUnmoved(t, result, 10, 40)
+		for _, m := range metas(result) {
+			assert.Equal(t, false, m["prov_range_exact"])
+			assert.Equal(t, "indexed_bytes_differ_from_file", m["prov_range_absence"])
+		}
+	})
+
+	t.Run("unreadable", func(t *testing.T) {
+		result := stamp(t, nil)
+		assertUnmoved(t, result, 10, 40)
+		assertExact(t, result)
 	})
 }
