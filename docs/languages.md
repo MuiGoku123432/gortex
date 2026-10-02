@@ -276,7 +276,7 @@ What is **not** covered:
 | SAS | `.sas` | `proc` / `%macro` as function, `data` as variable, `%include` / `libname` |
 | Stata | `.do`, `.ado` | `program define`, `local` / `global`, `use` / `do` / `include` |
 | Fortran | `.f`, `.f90`, `.f95`, `.f03`, `.f08` | `subroutine` / `function` / `module`, `use X` |
-| COBOL | `.cob`, `.cbl`, `.cpy` | Programs from the enhanced COBOL grammar, with exact source ranges and provenance; paragraphs, sections, `COPY`, and `CALL` are temporarily not extracted; COBOL extraction is unavailable on Windows |
+| COBOL | `.cob`, `.cbl`, `.cpy` | From the enhanced COBOL grammar, with exact source ranges and provenance: programs, divisions, sections, paragraphs, statements, and data items (level hierarchy, PIC/USAGE/OCCURS/VALUE, REDEFINES, RENAMES); `PERFORM`, `PERFORM … THRU`, and `GO TO` (including `DEPENDING ON`) paragraph flow; literal and dynamic `CALL`; `COPY`, `-INC`, and `EXEC SQL INCLUDE` references, bound only when exactly one copybook or program in the same repository matches; IDMS record and set, CICS program, transaction, map, and mapset, and DB2 table references. Copybooks are file nodes; their data items are not yet extracted. COBOL extraction is unavailable on Windows |
 | Ada | `.ada`, `.adb`, `.ads` | Packages, procedures, functions, `with` |
 | Pascal / Delphi | `.pas`, `.pp`, `.dpr` | Units, procedures, functions, classes |
 | ABAP (SAP) | `.abap` | `FORM` / `FUNCTION` / `METHOD` / `CLASS…DEFINITION`, `INCLUDE` |

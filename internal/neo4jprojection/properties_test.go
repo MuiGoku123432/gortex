@@ -318,6 +318,84 @@ func TestProjectNode_CobolProvenance(t *testing.T) {
 	}
 }
 
+// TestProjectNode_CobolBreadthMeta proves every Phase 3 node Meta key (the
+// 03-01 contract list) projects unchanged as a meta_ property with an equal
+// value, across statement, data item, IDMS resource, and DB2 table nodes.
+func TestProjectNode_CobolBreadthMeta(t *testing.T) {
+	nodes := []*graph.Node{
+		{ID: "repo/cobol/ordpgm.cbl::ORDPGM/@proc/P1/@goto_statement", Kind: graph.KindLocal, Name: "goto_statement",
+			FilePath: "repo/cobol/ordpgm.cbl", RepoPrefix: "repo",
+			Meta: map[string]any{
+				"cobol_kind": "statement", "cobol_statement_kind": "goto_statement", "cobol_goto_alterable": true,
+				"cobol_division": "procedure_division", "cobol_section_kind": "working_storage", "cobol_ordinal": 3,
+				"idms_verb": "ERASE", "idms_area": "DEPT-AREA", "idms_erase_scope": "PERMANENT MEMBERS",
+				"cics_command": "SEND", "sql_verb": "SELECT", "sql_ctes": []string{"RECENT", "OLD"},
+				"sql_cte_refs": []string{"RECENT"}, "sql_derived_aliases": []string{"D1"}, "sql_cursor": "C1",
+				"sql_dynamic": true, "cobol_unresolved_reason": "cursor_not_declared",
+			}},
+		{ID: "repo/cobol/ordpgm.cbl::ORDPGM/WS-REC/WS-ID", Kind: graph.KindField, Name: "WS-ID",
+			FilePath: "repo/cobol/ordpgm.cbl", RepoPrefix: "repo",
+			Meta: map[string]any{
+				"cobol_kind": "data_item", "cobol_level": 5, "cobol_name_raw": "ws-id", "cobol_pic": "X(8)",
+				"cobol_usage": "COMP-3", "cobol_occurs_min": 1, "cobol_occurs_max": 10, "cobol_occurs_depending": "WS-N",
+				"cobol_value": []string{"'A'", "'B'"}, "cobol_redefines": "WS-OLD", "cobol_renames": "WS-A",
+				"cobol_contains_copy": true, "cobol_unleveled_entry_count": 2,
+				"cobol_name_key": "WS-ID", "cobol_name_norm": "cobol-name-norm/1",
+			}},
+		{ID: "repo/idms::_unqualified/record/EMP-REC", Kind: graph.KindResource, Name: "EMP-REC",
+			FilePath: "repo/cobol/ordpgm.cbl", RepoPrefix: "repo",
+			Meta: map[string]any{
+				"resource_type": "idms_record", "cobol_name_norm": "cobol-name-norm/1",
+				"prov_range_exact": false, "prov_range_absence": "shared_resource",
+			}},
+		{ID: "repo/db2::MYSCH/ORDERS", Kind: graph.KindTable, Name: "ORDERS",
+			FilePath: "repo/cobol/ordpgm.cbl", RepoPrefix: "repo",
+			Meta: map[string]any{
+				"table": "ORDERS", "dialect": "db2", "schema": "MYSCH", "cobol_name_norm": "cobol-name-norm/1",
+				"prov_confidence": 1.0,
+			}},
+	}
+
+	for _, node := range nodes {
+		projected, warnings, err := projectNode("owner", "generation", node)
+		if err != nil {
+			t.Fatalf("%s: %v", node.ID, err)
+		}
+		if warnings.Secret != 0 || warnings.Unsupported != 0 {
+			t.Fatalf("%s: warnings = %+v, want no secret and no unsupported", node.ID, warnings)
+		}
+		// note: second occurrence of TestProjectNode_CobolProvenance's
+		// key-by-key comparison.
+		for key, want := range node.Meta {
+			if encoded := encodeMetadataKey(key); encoded != key {
+				t.Fatalf("%s: key %q encoded as %q, want it unchanged", node.ID, key, encoded)
+			}
+			got, ok := projected.Properties["meta_"+key]
+			if !ok {
+				t.Fatalf("%s: missing property meta_%s", node.ID, key)
+			}
+			switch typed := want.(type) {
+			case int:
+				want = int64(typed)
+			case []string:
+				list, isList := got.([]any)
+				if !isList || len(list) != len(typed) {
+					t.Fatalf("%s: meta_%s = %#v, want %v", node.ID, key, got, typed)
+				}
+				for i := range typed {
+					if list[i] != typed[i] {
+						t.Fatalf("%s: meta_%s[%d] = %#v, want %q", node.ID, key, i, list[i], typed[i])
+					}
+				}
+				continue
+			}
+			if got != want {
+				t.Fatalf("%s: meta_%s = %#v, want %#v", node.ID, key, got, want)
+			}
+		}
+	}
+}
+
 func completeProjectionNode() *graph.Node {
 	return &graph.Node{
 		ID: "repo/a.go::A", Kind: graph.KindFunction, Name: "A", QualName: "pkg.A",
