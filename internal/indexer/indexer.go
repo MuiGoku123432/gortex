@@ -1866,20 +1866,22 @@ func applyMigrationExtraction(relPath string, src []byte, result *parser.Extract
 // db.Get / db.Query / db.Exec produces false positives when
 // domain code shares method names (cache.Get, etc.).
 //
-// Two table-node origins survive the gate, because neither is the
+// Three table-node origins survive the gate, because none is the
 // noisy code-side matching the gate exists for: migration-origin DDL
-// (unambiguous CREATE TABLE — see applyMigrationExtraction), and
+// (unambiguous CREATE TABLE — see applyMigrationExtraction),
 // ORM-origin model attribution (declaration-anchored: @Entity/@Table
 // annotations, [Table] attributes, ActiveRecord bases, DbSet
-// properties). Stripping the ORM nodes would leave the models_table
-// layer silently empty for every ORM ecosystem under the default
-// config.
+// properties), and COBOL embedded-SQL tables (parsed EXEC SQL
+// statements, not string literals). Stripping the ORM nodes would leave
+// the models_table layer silently empty for every ORM ecosystem under
+// the default config; stripping the COBOL ones would drop every DB2
+// read and write a program makes.
 func stripSQLArtifacts(result *parser.ExtractionResult) {
 	stripped := make(map[string]struct{})
 	keptNodes := result.Nodes[:0]
 	for _, n := range result.Nodes {
 		if (n.Kind == graph.KindTable || n.Kind == graph.KindMigration) &&
-			!isMigrationOriginNode(n) && !isORMOriginTableNode(n) {
+			!isMigrationOriginNode(n) && !isORMOriginTableNode(n) && !isCobolSQLTableNode(n) {
 			stripped[n.ID] = struct{}{}
 			continue
 		}
@@ -1970,6 +1972,13 @@ func isORMOriginTableNode(n *graph.Node) bool {
 	}
 	d, _ := n.Meta["dialect"].(string)
 	return d == "orm"
+}
+
+// isCobolSQLTableNode reports whether a KindTable node was minted by the
+// COBOL grammar extractor from a parsed EXEC SQL statement. Those nodes
+// are the only KindTable nodes with Language "cobol".
+func isCobolSQLTableNode(n *graph.Node) bool {
+	return n != nil && n.Kind == graph.KindTable && n.Language == "cobol"
 }
 
 // isInfraOriginConfigKey reports whether a KindConfigKey node was
