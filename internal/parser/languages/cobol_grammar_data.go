@@ -17,11 +17,11 @@ type cobolDataItem struct {
 	key       string   // cobolNameNorm of the name; "" for a filler
 	symbol    string   // QualName (owner-relative node symbol)
 	ancestors []string // name keys of the non-filler ancestor items, innermost first
+	entry     int      // data_description observation index
 }
 
-// cobolDataIndex holds every data item of one document, so the data,
-// reference, mainframe, and SQL walkers resolve data names against the same
-// items.
+// cobolDataIndex holds every data item of one document, so every walker
+// resolves data names against the same items.
 type cobolDataIndex struct {
 	items []cobolDataItem
 	seen  map[string]int  // full symbol path without ordinal -> items seen
@@ -32,13 +32,12 @@ type cobolDataIndex struct {
 // sections and returns the document's data index (D-06, D-07).
 //
 // PURPOSE: dynamic CALL identifiers, CICS operands, SQL host variables, and
-// REDEFINES/RENAMES point at these items, so they are emitted once and
-// indexed once per document.
+// REDEFINES/RENAMES point at these items, so they are emitted and indexed
+// once per document.
 // RATIONALE: data_description observations are flat under their section,
-// so the hierarchy comes from level numbers (cobolDataSection). Item IDs are
-// the full group path from the 01 level under the program symbol; program
-// symbols are reserved first so an 01 record named like a nested program
-// takes the next free #k instead of the program's ID.
+// so nesting comes from level numbers (cobolDataSection). Program symbols
+// are reserved first, so an 01 record named like a nested program takes the
+// next free #k instead of the program's ID.
 // KEYWORDS: cobol, data item, level number, FILLER, working-storage, linkage.
 func cobolDataItems(w *cobolWalk) *cobolDataIndex {
 	obs := w.h.Facts.Observations
@@ -55,7 +54,101 @@ func cobolDataItems(w *cobolWalk) *cobolDataIndex {
 		prog := w.programSymbol(s)
 		cobolDataSection(w, idx, w.filePath+"::"+prog, prog+"/", sect.ID, s)
 	}
+	// REDEFINES and RENAMES bind once every item of the owner is known.
+	for _, it := range idx.items {
+		for _, c := range w.children[it.entry] {
+			var role string
+			switch obs[c].Kind {
+			case "redefines_clause":
+				role = "redefines"
+			case "renames_clause":
+				role = "renames_from"
+			default:
+				continue
+			}
+			for _, k := range w.children[c] {
+				if obs[k].Kind != "qualified_word" {
+					continue
+				}
+				if name, qualifiers := w.qualifiedName(k); name != "" {
+					cobolDataReference(w, idx, w.filePath+"::"+it.symbol, c, it.owner, name, qualifiers, role)
+				}
+				if role == "renames_from" {
+					role = "renames_thru" // RENAMES A THRU B: the second operand
+				}
+			}
+		}
+	}
 	return idx
+}
+
+// qualifiedName returns the data name and IN/OF qualifiers (innermost
+// first, as written) of qualified_word observation i: its first WORD child
+// and the remaining WORD children. IN and OF are anonymous, never observed.
+func (w *cobolWalk) qualifiedName(i int) (name string, qualifiers []string) {
+	var words []string
+	for _, c := range w.children[i] {
+		if w.h.Facts.Observations[c].Kind == "WORD" {
+			words = append(words, w.text(c))
+		}
+	}
+	if len(words) == 0 {
+		return "", nil
+	}
+	return words[0], words[1:]
+}
+
+// lookup returns the sorted symbols of owner's non-filler items named name
+// under cobol-name-norm/1 whose ancestors include every qualifier, in the
+// written order from inner to outer.
+func (idx *cobolDataIndex) lookup(owner, name string, qualifiers []string) []string {
+	key := cobolNameNorm(name)
+	var matches []string
+items:
+	for _, it := range idx.items {
+		if it.owner != owner || it.key == "" || it.key != key {
+			continue
+		}
+		rest := it.ancestors
+		for _, q := range qualifiers {
+			j := slices.Index(rest, cobolNameNorm(q))
+			if j < 0 {
+				continue items
+			}
+			rest = rest[j+1:]
+		}
+		matches = append(matches, it.symbol)
+	}
+	slices.Sort(matches)
+	return matches
+}
+
+// cobolDataReference appends and returns the references edge (cobol_ref_role
+// role, built for observation occurrence) from node ID from to owner's item
+// that name and its IN/OF qualifiers match. Zero or several matches go to
+// unresolved::cobol::data::<owner>::<key>[/<qualifier key>...] with reason
+// not_declared_in_program or ambiguous plus cobol_candidate_symbols (D-12).
+// It is the one data-name path the reference, mainframe, and SQL walkers use.
+func cobolDataReference(w *cobolWalk, idx *cobolDataIndex, from string, occurrence int, owner, name string, qualifiers []string, role string) *graph.Edge {
+	matches := idx.lookup(owner, name, qualifiers)
+	target := "unresolved::cobol::data::" + owner + "::" + cobolIDSegment(cobolNameNorm(name))
+	for _, q := range qualifiers {
+		target += "/" + cobolIDSegment(cobolNameNorm(q))
+	}
+	if len(matches) == 1 {
+		target = w.filePath + "::" + matches[0]
+	}
+	edge := w.relationEdge(from, target, graph.EdgeReferences, occurrence)
+	edge.Meta["cobol_ref_role"] = role
+	edge.Meta["cobol_name_norm"] = cobolNameNormRule
+	switch {
+	case len(matches) == 0:
+		edge.Meta["cobol_unresolved_reason"] = "not_declared_in_program"
+	case len(matches) > 1:
+		edge.Meta["cobol_unresolved_reason"] = "ambiguous"
+		edge.Meta["cobol_candidate_symbols"] = matches
+	}
+	return edge
 }
 
 // cobolDataFrame is an emitted item a later entry can attach to.
@@ -70,21 +163,19 @@ type cobolDataFrame struct {
 // prefix of 01 and 77 items (such as "PROG/"), and parentID their member_of
 // target ("" for none).
 //
-// Nesting compares levels numerically: 01 and 77 reset the stack (77 is
-// standalone), 02-49 pop while the top level is >= the new level and attach
-// to the new top, 66 attaches to the current 01 record, and 88 to the
-// preceding non-88 entry without popping (A8). An item with no parent
-// attaches to parentID. An entry whose level is not 01-49, 66, 77, or 88
-// (or that has none, such as a CONSTANT entry) gets no node and is counted
-// in cobol_unleveled_entry_count on the section node: no level is guessed.
-// A COPY in the section marks the innermost open item, else the section
+// Levels compare numerically: 01 and 77 reset the stack (77 is standalone),
+// 02-49 pop while the top level is >= the new level and attach to the new
+// top, 66 attaches to the current 01 record, and 88 to the preceding non-88
+// entry without popping (A8); an item with no parent attaches to parentID.
+// An entry with no level in 01-49, 66, 77, or 88 (a CONSTANT entry has
+// none) gets no node and is counted in cobol_unleveled_entry_count on the
+// section node. A COPY marks the innermost open item, else the section
 // node, with cobol_contains_copy, since its items are absent.
 func cobolDataSection(w *cobolWalk, idx *cobolDataIndex, owner, idPrefix, parentID string, section int) {
 	obs := w.h.Facts.Observations
 	sect := w.sections[section]
-	// COPY is a grammar extra (Pitfall 3), and one after a section's last
-	// entry falls outside its span, so the section reaches to the first
-	// later observation that is not a COPY.
+	// COPY is a grammar extra (Pitfall 3): one after the last entry falls
+	// outside the section span, so the span runs to the next non-COPY.
 	start, end, open := obs[section].Generated.Start, obs[section].Generated.End, true
 	for j := w.last[section] + 1; j < len(obs) && open; j = w.last[j] + 1 {
 		if obs[j].Kind != "copy_statement" {
@@ -153,19 +244,17 @@ func cobolDataSection(w *cobolWalk, idx *cobolDataIndex, owner, idPrefix, parent
 			}
 		}
 
-		name, filler := raw, !named || strings.EqualFold(raw, "FILLER")
+		name, seg, filler := raw, cobolIDSegment(raw), !named || strings.EqualFold(raw, "FILLER")
 		if !named {
 			name = "FILLER"
 		}
-		base, memberOf, keys := idPrefix, parentID, []string(nil)
-		if parent.node != nil {
-			base, memberOf, keys = parent.node.QualName+"/", parent.node.ID, parent.keys
-		}
-		seg := cobolIDSegment(name)
 		if filler {
 			seg = "FILLER"
 		}
-		base += seg
+		base, memberOf, keys := idPrefix+seg, parentID, []string(nil)
+		if parent.node != nil {
+			base, memberOf, keys = parent.node.QualName+"/"+seg, parent.node.ID, parent.keys
+		}
 		// FILLER is always FILLER#k; any other repeated path gets #k, k >= 2.
 		// The loop skips a #k already taken by a program symbol.
 		var symbol string
@@ -192,15 +281,12 @@ func cobolDataSection(w *cobolWalk, idx *cobolDataIndex, owner, idPrefix, parent
 			w.memberOf(node.ID, memberOf, node.StartLine)
 		}
 
-		key := ""
+		key, frame := "", cobolDataFrame{level: level, node: node, keys: keys}
 		if !filler {
 			key = cobolNameNorm(name)
-		}
-		idx.items = append(idx.items, cobolDataItem{owner: owner, key: key, symbol: symbol, ancestors: keys})
-		frame := cobolDataFrame{level: level, node: node, keys: keys}
-		if !filler {
 			frame.keys = append([]string{key}, keys...)
 		}
+		idx.items = append(idx.items, cobolDataItem{owner: owner, key: key, symbol: symbol, ancestors: keys, entry: i})
 		if level != 88 {
 			prev = frame
 		}
@@ -210,64 +296,5 @@ func cobolDataSection(w *cobolWalk, idx *cobolDataIndex, owner, idPrefix, parent
 	}
 	if unleveled > 0 && sect != nil {
 		sect.Meta["cobol_unleveled_entry_count"] = unleveled
-	}
-}
-
-// cobolDataClauses records the raw clause text of data_description entry on
-// node: the PIC string and USAGE value (not their keywords), the OCCURS
-// bounds (one integer sets both) and DEPENDING ON name, each VALUE item, and
-// the REDEFINES and RENAMES operands.
-func cobolDataClauses(w *cobolWalk, node *graph.Node, entry int) {
-	obs := w.h.Facts.Observations
-	for _, c := range w.children[entry] {
-		kids := w.children[c]
-		if len(kids) == 0 {
-			continue
-		}
-		switch obs[c].Kind {
-		case "picture_clause":
-			node.Meta["cobol_pic"] = w.text(kids[0])
-		case "usage_clause":
-			first, last := obs[kids[0]].Generated, obs[kids[len(kids)-1]].Generated
-			node.Meta["cobol_usage"] = string(w.h.Generated[first.Start:last.End])
-		case "occurs_clause":
-			var bounds []int
-			for _, k := range kids {
-				switch obs[k].Kind {
-				case "integer":
-					if n, err := strconv.Atoi(w.text(k)); err == nil {
-						bounds = append(bounds, n)
-					}
-				case "qualified_word":
-					node.Meta["cobol_occurs_depending"] = w.text(k)
-				}
-			}
-			if len(bounds) > 0 {
-				node.Meta["cobol_occurs_min"] = bounds[0]
-				node.Meta["cobol_occurs_max"] = bounds[min(1, len(bounds)-1)]
-			}
-		case "value_clause":
-			values, _ := node.Meta["cobol_value"].([]string)
-			for _, k := range kids {
-				if obs[k].Kind == "value_item" {
-					values = append(values, w.text(k))
-				}
-			}
-			if len(values) > 0 {
-				node.Meta["cobol_value"] = values
-			}
-		case "redefines_clause":
-			node.Meta["cobol_redefines"] = w.text(kids[0])
-		case "renames_clause":
-			var names []string
-			for _, k := range kids {
-				if obs[k].Kind == "qualified_word" {
-					names = append(names, w.text(k))
-				}
-			}
-			if len(names) > 0 {
-				node.Meta["cobol_renames"] = names
-			}
-		}
 	}
 }
