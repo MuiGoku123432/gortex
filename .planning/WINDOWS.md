@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 5
+open_count: 6
 waived_count: 0
 fixed_count: 0
-total_count: 5
-last_updated: 2026-10-02T08:58:47.347Z
+total_count: 6
+last_updated: 2026-10-02T09:29:09.876Z
 ---
 
 # Broken Windows Ledger
@@ -20,6 +20,7 @@ last_updated: 2026-10-02T08:58:47.347Z
 | 3 | 02 | unrun-verify | .github/workflows/release.yml |  | 02-05 Task 2 human-check not run: goreleaser-cross reading the host module cache read-only with GOPROXY=off is unproven until a real (or throwaway) tag release. COBOL_PARSER_READ_PAT was provisioned in Plan 02-06 and the ci/security/init-smoke/skill-drift jobs got past the credential step on d4e0b3b7, but release.yml has not run yet | open |  | 2026-09-30T23:56:08.041Z |  |
 | 4 | 03 | unrun-verify | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: data-division EXEC SQL (DECLARE CURSOR in WORKING-STORAGE) program-node flow source is unreachable under the pinned grammar (parses as ERROR, grades red); the fallback is untested | open |  | 2026-10-02T08:58:47.249Z |  |
 | 5 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: INSERT INTO T1 SELECT ... FROM T2 reads of T2 are not emitted; the producer leaves the SELECT in sql_unparsed_tail (Phase 5 producer gap, no guess) | open |  | 2026-10-02T08:58:47.347Z |  |
+| 6 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-10: every EXEC SQL statement leaves an sql_unparsed_tail under the pinned producer, so any SQL-bearing COBOL document grades amber (unparsed-tail); the 03-10 acceptance program is amber, not green. Phase 5 producer gap | open |  | 2026-10-02T09:29:09.876Z |  |
 
 ````json
 [
@@ -84,6 +85,19 @@ last_updated: 2026-10-02T08:58:47.347Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-02T08:58:47.347Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 6,
+    "kind": "deviation",
+    "phase": "03",
+    "file": "internal/parser/languages/cobol_grammar_sql.go",
+    "line": null,
+    "description": "03-10: every EXEC SQL statement leaves an sql_unparsed_tail under the pinned producer, so any SQL-bearing COBOL document grades amber (unparsed-tail); the 03-10 acceptance program is amber, not green. Phase 5 producer gap",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-02T09:29:09.876Z",
     "resolved_at": null,
     "milestone": "v1.0"
   }
