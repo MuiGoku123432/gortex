@@ -4,6 +4,7 @@ package languages
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zzet/gortex/internal/graph"
@@ -33,8 +34,8 @@ func (r cobolLabelRef) id() string {
 	return cobolIDSegment(r.key)
 }
 
-// cobolFlow emits the calls edges of every PERFORM in a named program's
-// procedure division (D-02, D-03).
+// cobolFlow emits the calls edges of every PERFORM and GO TO in a named
+// program's procedure division (D-02, D-03, D-04).
 //
 // PURPOSE: paragraph execution paths that get_callers and get_call_chain
 // trace without any tool change.
@@ -43,8 +44,10 @@ func (r cobolLabelRef) id() string {
 // paragraph X of section S; an unqualified X prefers the statement's own
 // section, else the unique section or paragraph X in the program. Zero or
 // several matches go to an unresolved label target with a reason (D-12).
-// A THRU range expands exactly, or not at all (T-03-19).
-// KEYWORDS: cobol, perform, thru, cobol_flow, label, unresolved.
+// A THRU range expands exactly, or not at all (T-03-19). Only explicit
+// transfers become edges: no fall-through, ALTER, STOP RUN, GOBACK, or
+// EXIT edge is ever emitted (deferred by CONTEXT).
+// KEYWORDS: cobol, perform, thru, goto, depending, cobol_flow, label.
 func cobolFlow(w *cobolWalk) {
 	obs := w.h.Facts.Observations
 	for div, o := range obs {
@@ -54,7 +57,8 @@ func cobolFlow(w *cobolWalk) {
 		}
 		labels := cobolProcedureLabels(w, div)
 		for i := div + 1; i <= w.last[div]; i++ {
-			if w.owner[i] != w.owner[div] || obs[i].Kind != "perform_statement_call_proc" {
+			kind := obs[i].Kind
+			if w.owner[i] != w.owner[div] || (kind != "perform_statement_call_proc" && kind != "goto_statement") {
 				continue
 			}
 			own := -1 // the statement's own section label
@@ -65,6 +69,10 @@ func cobolFlow(w *cobolWalk) {
 						own = l.in
 					}
 				}
+			}
+			if kind == "goto_statement" {
+				cobolGoTo(w, i, prog, labels, own)
+				continue
 			}
 			cobolPerform(w, i, prog, labels, own)
 		}
@@ -195,6 +203,7 @@ func cobolPerform(w *cobolWalk, stmt int, prog string, labels []cobolLabel, own 
 	unresolved := "unresolved::cobol::label::" + w.filePath + "::" + prog + "::"
 	switch len(refs) {
 	case 1:
+		// note: same single-label target rule as cobolGoTo (two uses).
 		hit, reason, candidates := cobolResolve(labels, refs[0], own)
 		to := unresolved + refs[0].id()
 		if hit >= 0 {
@@ -225,6 +234,54 @@ func cobolPerform(w *cobolWalk, stmt int, prog string, labels []cobolLabel, own 
 		for _, e := range edges {
 			e.Meta["cobol_thru_start"] = start.raw
 			e.Meta["cobol_thru_end"] = end.raw
+		}
+	}
+}
+
+// cobolGoTo emits one cobol_flow=goto calls edge per distinct target listed
+// in a GO TO, in order of first listing (D-04). With DEPENDING ON (a direct
+// qualified_word child, not wrapped in label) each edge also carries
+// cobol_goto_depending, cobol_depending_positions (the 1-based positions
+// where its target is listed), and cobol_goto_depending_on (the identifier
+// as written). An alterable GO TO, with no label, emits no edge and marks
+// its statement node cobol_goto_alterable.
+func cobolGoTo(w *cobolWalk, stmt int, prog string, labels []cobolLabel, own int) {
+	obs := w.h.Facts.Observations
+	var refs []cobolLabelRef
+	depending := ""
+	for _, c := range w.children[stmt] {
+		switch obs[c].Kind {
+		case "label":
+			refs = append(refs, cobolLabelOf(w, c))
+		case "qualified_word":
+			depending = w.text(c)
+		}
+	}
+	if len(refs) == 0 {
+		if n := w.statementNode(stmt); n != nil {
+			n.Meta["cobol_goto_alterable"] = true
+		}
+		return
+	}
+	from := w.filePath + "::" + w.flowFrom[stmt]
+	byTarget := make(map[string]*graph.Edge)
+	for pos, ref := range refs {
+		// note: same single-label target rule as cobolPerform (two uses).
+		hit, reason, candidates := cobolResolve(labels, ref, own)
+		to := "unresolved::cobol::label::" + w.filePath + "::" + prog + "::" + ref.id()
+		if hit >= 0 {
+			to = w.filePath + "::" + labels[hit].symbol
+		}
+		edge := byTarget[to]
+		if edge == nil {
+			edge = cobolFlowEdge(w, from, to, stmt, "goto", reason, candidates)
+			byTarget[to] = edge
+		}
+		if depending != "" {
+			positions, _ := edge.Meta["cobol_depending_positions"].([]string)
+			edge.Meta["cobol_depending_positions"] = append(positions, strconv.Itoa(pos+1))
+			edge.Meta["cobol_goto_depending"] = true
+			edge.Meta["cobol_goto_depending_on"] = depending
 		}
 	}
 }
