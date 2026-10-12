@@ -14,6 +14,12 @@ import (
 // statements (cobolStatements), and then its control-flow calls edges
 // (cobolFlow; D-01, D-02, D-05).
 //
+// In a copybook the walk root (the producer's wrapper program) has only its
+// procedure division read, and no division node is emitted (D-16): the
+// copybook file node is the container, so its top-level sections and
+// paragraphs carry only the file defines edge and their IDs start with the
+// root, as <path>::@proc/<NAME>.
+//
 // PURPOSE: paragraph-level control flow that get_callers and get_call_chain
 // trace without any tool change.
 // RATIONALE: the procedure division is flat in this grammar (Pitfall 1):
@@ -41,14 +47,21 @@ func cobolProcedure(w *cobolWalk) {
 			continue
 		}
 		prog := w.programs[p]
-		if prog == "" {
+		root := w.root != "" && prog == w.root
+		if prog == "" || (root && o.Kind != "procedure_division") {
 			continue
 		}
-		divNode := w.symbolNode(symbolFor(prog+"/@"+o.Kind), o.Kind, graph.KindPackage, "division", div)
-		divNode.Meta["cobol_division"] = strings.TrimSuffix(o.Kind, "_division")
-		cobolStampRange(divNode, o.Original)
-		w.defines(divNode.ID, divNode.StartLine)
-		w.memberOf(divNode.ID, w.filePath+"::"+prog, divNode.StartLine)
+		// The procedure container: the division node, else (root) the file
+		// node, whose symbol is prog (w.id).
+		divID, divSymbol, labelBase := w.filePath, prog, prog+"/"
+		if !root {
+			divNode := w.symbolNode(symbolFor(prog+"/@"+o.Kind), o.Kind, graph.KindPackage, "division", div)
+			divNode.Meta["cobol_division"] = strings.TrimSuffix(o.Kind, "_division")
+			cobolStampRange(divNode, o.Original)
+			w.defines(divNode.ID, divNode.StartLine)
+			w.memberOf(divNode.ID, w.filePath+"::"+prog, divNode.StartLine)
+			divID, divSymbol, labelBase = divNode.ID, divNode.QualName, prog+"/@proc/"
+		}
 		if o.Kind != "procedure_division" {
 			// Data and environment sections are containers (D-01).
 			for _, c := range w.children[div] {
@@ -60,12 +73,12 @@ func cobolProcedure(w *cobolWalk) {
 				sect.Meta["cobol_section_kind"] = strings.TrimSuffix(kind, "_section")
 				cobolStampRange(sect, obs[c].Original)
 				w.defines(sect.ID, sect.StartLine)
-				w.memberOf(sect.ID, divNode.ID, sect.StartLine)
+				w.memberOf(sect.ID, divID, sect.StartLine)
 				w.sections[c] = sect
 			}
 			continue
 		}
-		w.container[div], w.flowFrom[div] = divNode.QualName, prog
+		w.container[div], w.flowFrom[div] = divSymbol, prog
 
 		// An open section or paragraph: its node, header, and last division
 		// child so far (whose span covers its own descendants).
@@ -80,13 +93,15 @@ func cobolProcedure(w *cobolWalk) {
 			}
 			cobolStampExtent(c.node, obs[c.header].Original, obs[c.last].Original)
 			w.defines(c.node.ID, c.node.StartLine)
-			w.memberOf(c.node.ID, parentID, c.node.StartLine)
+			if parentID != w.filePath {
+				w.memberOf(c.node.ID, parentID, c.node.StartLine)
+			}
 		}
 		sectionID := func() string {
 			if sect != nil {
 				return sect.node.ID
 			}
-			return divNode.ID
+			return divID
 		}
 		for _, c := range w.children[div] {
 			kind := obs[c].Kind
@@ -98,10 +113,10 @@ func cobolProcedure(w *cobolWalk) {
 				name := strings.TrimSuffix(fields[0], ".")
 				finish(para, sectionID())
 				para = nil
-				base := prog + "/@proc/" + cobolIDSegment(name)
+				base := labelBase + cobolIDSegment(name)
 				cobolKind := "paragraph"
 				if kind == "section_header" {
-					finish(sect, divNode.ID)
+					finish(sect, divID)
 					sect = nil
 					cobolKind = "section"
 				} else if sect != nil {
@@ -123,7 +138,7 @@ func cobolProcedure(w *cobolWalk) {
 			if para != nil {
 				para.last = c
 			}
-			container, flow := divNode.QualName, prog
+			container, flow := divSymbol, prog
 			if sect != nil {
 				container, flow = sect.node.QualName, sect.node.QualName
 			}
@@ -135,7 +150,7 @@ func cobolProcedure(w *cobolWalk) {
 			}
 		}
 		finish(para, sectionID())
-		finish(sect, divNode.ID)
+		finish(sect, divID)
 	}
 
 	// Statements are registered before any relationship edge is built, so

@@ -46,7 +46,8 @@ var cobolStatementKinds = map[string]bool{
 // same-kind statement in that container in source order, so no source text
 // enters an ID (T-03-11). The only structural edge is member_of to the
 // header container that governs the statement (paragraph, else section,
-// else procedure division), never an enclosing statement; there is no
+// else procedure division, which is the file node in a copybook), never an
+// enclosing statement; there is no
 // defines edge, and KindLocal keeps statements out of BM25 search
 // (T-03-10). Meta carries identities, kinds, and coordinates, never
 // statement text (T-03-09).
@@ -106,7 +107,7 @@ func cobolStatements(w *cobolWalk) {
 		node := w.symbolNode(symbol, kind, graph.KindLocal, "statement", i)
 		node.Meta["cobol_statement_kind"] = kind
 		cobolStampRange(node, obs[i].Original)
-		w.memberOf(node.ID, w.filePath+"::"+w.container[i], node.StartLine)
+		w.memberOf(node.ID, w.id(w.container[i]), node.StartLine)
 		w.statement[i] = node
 	}
 }

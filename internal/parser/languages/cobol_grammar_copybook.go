@@ -22,9 +22,10 @@ const cobolCopybookRoot = "@proc"
 // cobolCopybook maps a standalone copybook's handoff onto result, whose only
 // node so far is the copybook file node with docMeta.
 //
-// PURPOSE: the copybook file node owns the member's data items (D-07) and
-// every COPY, -INC, COPY IDMS, and EXEC SQL INCLUDE written in the member
-// (D-11, D-19), so impact queries can follow nested COPY chains.
+// PURPOSE: the copybook file node owns the member's data items (D-07), its
+// procedure sections, paragraphs, statements, and PERFORM/GO TO/CALL edges
+// (D-01, D-02, D-05), and every COPY, -INC, COPY IDMS, and EXEC SQL INCLUDE
+// written in the member (D-11, D-19), so impact queries reach them.
 // RATIONALE: the producer's copybook mode wraps the member in a synthetic
 // header (D-16). Its first program_definition is that wrapper, registered as
 // the walk root so cobolReferences and cobolCopy name the file node instead.
@@ -42,6 +43,9 @@ func cobolCopybook(h handoff.Handoff, src []byte, filePath string, docMeta map[s
 	}
 	w := newCobolWalk(h, src, filePath, maps.Clone(docMeta), programs, result)
 	w.root = cobolCopybookRoot
+	// Procedure members: sections, paragraphs, statements, and flow (no-op
+	// for a data member, whose wrapper has no procedure division).
+	cobolProcedure(w)
 	idx := &cobolDataIndex{seen: make(map[string]int), taken: make(map[string]bool)}
 	for s, o := range h.Facts.Observations {
 		if p, ok := w.parent(s); ok && h.Facts.Observations[p].Kind == "data_division" && strings.HasSuffix(o.Kind, "_section") {

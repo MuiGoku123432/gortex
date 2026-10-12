@@ -44,6 +44,7 @@ func (r cobolLabelRef) id() string {
 // paragraph X of section S; an unqualified X prefers the statement's own
 // section, else the unique section or paragraph X in the program. Zero or
 // several matches go to an unresolved label target with a reason (D-12).
+// A copybook's labels resolve over its own headers only, the same way.
 // A THRU range expands exactly, or not at all (T-03-19). Only explicit
 // transfers become edges: no fall-through, ALTER, STOP RUN, GOBACK, or
 // EXIT edge is ever emitted (deferred by CONTEXT).
@@ -161,11 +162,16 @@ func cobolResolve(labels []cobolLabel, ref cobolLabelRef, own int) (int, string,
 }
 
 // cobolFlowEdge appends one calls edge for statement stmt with cobol_flow
-// flow, plus the unresolved reason and candidates when reason is set.
+// flow, plus the unresolved reason and candidates when reason is set. In a
+// copybook a missing label is label_not_in_copybook (D-12).
 func cobolFlowEdge(w *cobolWalk, from, to string, stmt int, flow, reason string, candidates []string) *graph.Edge {
 	edge := w.relationEdge(from, to, graph.EdgeCalls, stmt)
 	edge.Meta["cobol_flow"] = flow
 	edge.Meta["cobol_name_norm"] = cobolNameNormRule
+	if reason == "label_not_found" && w.root != "" {
+		// A copybook does not define the label; an including program may.
+		reason = "label_not_in_copybook"
+	}
 	if reason != "" {
 		edge.Meta["cobol_unresolved_reason"] = reason
 	}
@@ -181,7 +187,8 @@ func cobolFlowEdge(w *cobolWalk, from, to string, stmt int, flow, reason string,
 // perform_thru edge per procedure of the endpoints' kind from A through C
 // in source order (D-03); a missing or ambiguous endpoint, mixed kinds, or
 // C before A instead yields exactly one edge to
-// unresolved::cobol::label::<program ID>::<start>::thru::<end>.
+// unresolved::cobol::label::<program ID>::<start>::thru::<end> (the program
+// ID is the copybook path in a copybook).
 func cobolPerform(w *cobolWalk, stmt int, prog string, labels []cobolLabel, own int) {
 	obs := w.h.Facts.Observations
 	var procs []int
@@ -199,8 +206,8 @@ func cobolPerform(w *cobolWalk, stmt int, prog string, labels []cobolLabel, own 
 			refs = append(refs, cobolLabelOf(w, c))
 		}
 	}
-	from := w.filePath + "::" + w.flowFrom[stmt]
-	unresolved := "unresolved::cobol::label::" + w.filePath + "::" + prog + "::"
+	from := w.id(w.flowFrom[stmt])
+	unresolved := "unresolved::cobol::label::" + w.id(prog) + "::"
 	switch len(refs) {
 	case 1:
 		// note: same single-label target rule as cobolGoTo (two uses).
@@ -263,12 +270,12 @@ func cobolGoTo(w *cobolWalk, stmt int, prog string, labels []cobolLabel, own int
 		}
 		return
 	}
-	from := w.filePath + "::" + w.flowFrom[stmt]
+	from := w.id(w.flowFrom[stmt])
 	byTarget := make(map[string]*graph.Edge)
 	for pos, ref := range refs {
 		// note: same single-label target rule as cobolPerform (two uses).
 		hit, reason, candidates := cobolResolve(labels, ref, own)
-		to := "unresolved::cobol::label::" + w.filePath + "::" + prog + "::" + ref.id()
+		to := "unresolved::cobol::label::" + w.id(prog) + "::" + ref.id()
 		if hit >= 0 {
 			to = w.filePath + "::" + labels[hit].symbol
 		}
