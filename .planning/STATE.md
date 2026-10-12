@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
 status: executing
-stopped_at: Completed 03-14-PLAN.md
-last_updated: "2026-10-12T14:28:41.320Z"
+stopped_at: Completed 03-15-PLAN.md
+last_updated: "2026-10-12T14:53:14.025Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: 8555d7b5098e7e9366b72d8a6f749eb414658f09
+state_head: 452fc1bd9bead2dcb9def2a18d735e06bbd838f1
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 30
-  completed_plans: 27
+  completed_plans: 28
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -88,6 +88,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P12 | 1 min | 2 tasks | 0 files |
 | Phase 03 P13 | 24 min | 2 tasks | 7 files |
 | Phase 03 P14 | 9 min | 2 tasks | 6 files |
+| Phase 03 P15 | 7 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,7 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-13: Gortex preprocessor re-pinned to v0.0.0-20261002100409-e64234cc493c (fork e64234c); forest-shim replace and cobolApprovedGrammarID unchanged; .cpy files run AnalyzeCopybook behind the same grammar check
 - [Phase 03]: 03-13: copybooks own their data items (<path>::<01>/<child>, member coordinates); the copybook walk uses a cloned docMeta so file-node COPY marks never leak; REDEFINES/RENAMES pass shared via cobolDataBind
 - [Phase 03]: 03-14: COBOL nested-ness is an explicit cobol_nested Meta stamp from END PROGRAM containment; resolveCobolReferences offers nested programs only to same-file callers and never infers nesting from ID/QualName shape
+- [Phase 03]: A copybook walk registers the producer's wrapper program as its root (cobolCopybookRoot "@proc"); cobolWalk.id maps it to the file node, so cobolReferences/cobolCopy emit COPY edges from the copybook file node unchanged
 
 ### Pending Todos
 
@@ -187,6 +189,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T14:28:41.273Z
-Stopped at: Completed 03-14-PLAN.md
+Last session: 2026-10-12T14:53:13.976Z
+Stopped at: Completed 03-15-PLAN.md
 Resume file: None

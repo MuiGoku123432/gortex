@@ -63,7 +63,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - [ ] **DET-03**: Literal program calls MUST be represented separately from dynamic call identifiers.
 - [ ] **DET-04**: Dynamic call identifiers MUST remain unresolved unless deterministic value-flow or resolution evidence establishes a target.
 - [ ] **DET-05**: Copybook and include references MUST retain the referenced member name and source occurrence.
-- [ ] **DET-06**: Copybook resolution MUST preserve ambiguity when available library, repository, or search-order evidence does not identify one target.
+- [x] **DET-06**: Copybook resolution MUST preserve ambiguity when available library, repository, or search-order evidence does not identify one target.
 - [ ] **DET-07**: IDMS statements MUST emit source-positioned record references exposed by the parser baseline.
 - [ ] **DET-08**: IDMS statements MUST emit source-positioned set references exposed by the parser baseline.
 - [ ] **DET-09**: CICS statements MUST emit source-positioned program and transaction references exposed by the parser baseline.
@@ -241,7 +241,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | DET-03 | Phase 3 | Gaps Found |
 | DET-04 | Phase 3 | Gaps Found |
 | DET-05 | Phase 3 | Gaps Found |
-| DET-06 | Phase 3 | Gaps Found |
+| DET-06 | Phase 3 | Complete |
 | DET-07 | Phase 3 | Gaps Found |
 | DET-08 | Phase 3 | Gaps Found |
 | DET-09 | Phase 3 | Gaps Found |
