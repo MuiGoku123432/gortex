@@ -60,7 +60,9 @@ func cobolCopybookImports(t *testing.T, result *parser.ExtractionResult, path st
 
 // assertCobolCopybookFile checks the copybook file node of result: the full
 // document provenance under the copybook grade policy, the COPY binding
-// keys, the member's own content ID, and no analysis-absence marker (D-16).
+// keys, and the member's own content ID (D-16). Callers assert
+// prov_analysis_absence themselves, since a degraded member that mapped
+// nothing carries it (review WR-04).
 func assertCobolCopybookFile(t *testing.T, result *parser.ExtractionResult, path, src string) *graph.Node {
 	t.Helper()
 	file := cobolFileNode(t, result, path)
@@ -71,7 +73,6 @@ func assertCobolCopybookFile(t *testing.T, result *parser.ExtractionResult, path
 	assert.Equal(t, cobolNameNormRule, file.Meta["cobol_name_norm"])
 	assert.Equal(t, "cobol-grade-policy-copybook-v1", file.Meta["prov_grade_policy"])
 	assert.Equal(t, string(preprocessor.NewContentID([]byte(src))), file.Meta["prov_revision_content_id"])
-	assert.NotContains(t, file.Meta, "prov_analysis_absence")
 	return file
 }
 
@@ -83,6 +84,7 @@ func TestCobolGrammar_CopybookDataItems(t *testing.T) {
 			file := assertCobolCopybookFile(t, result, path, cobolCopybookFixture)
 			assert.Equal(t, "CUSTREC", file.Meta["cobol_name_key"])
 			assert.Equal(t, "green", file.Meta["prov_document_grade"])
+			assert.NotContains(t, file.Meta, "prov_analysis_absence")
 
 			// The wrapper's program, divisions, and sections never surface.
 			nodes := map[string]*graph.Node{}
@@ -151,6 +153,7 @@ func TestCobolGrammar_CopybookNestedCopy(t *testing.T) {
 	result := extractCobolGrammar(t, e, path, cobolCopybookNestedCopyFixture)
 	file := assertCobolCopybookFile(t, result, path, cobolCopybookNestedCopyFixture)
 	assert.Equal(t, true, file.Meta["cobol_contains_copy"])
+	assert.NotContains(t, file.Meta, "prov_analysis_absence")
 	marked := map[string]bool{}
 	for _, n := range result.Nodes {
 		if n.Kind != graph.KindFile && n.Meta["cobol_contains_copy"] == true {
@@ -188,7 +191,8 @@ func TestCobolGrammar_CopybookIncludeForms(t *testing.T) {
 	t.Run("data_member", func(t *testing.T) {
 		const path = "copy/increc.cpy"
 		result := extractCobolGrammar(t, e, path, cobolCopybookIncludeFormsFixture)
-		assertCobolCopybookFile(t, result, path, cobolCopybookIncludeFormsFixture)
+		file := assertCobolCopybookFile(t, result, path, cobolCopybookIncludeFormsFixture)
+		assert.NotContains(t, file.Meta, "prov_analysis_absence")
 		imports := cobolCopybookImports(t, result, path)
 		require.Len(t, imports, 4)
 
@@ -271,6 +275,7 @@ func TestCobolGrammar_CopybookProcedureFragment(t *testing.T) {
 	result := extractCobolGrammar(t, e, path, cobolCopybookProcedureFixture)
 	file := assertCobolCopybookFile(t, result, path, cobolCopybookProcedureFixture)
 	assert.Equal(t, "VALPARA", file.Meta["cobol_name_key"])
+	assert.NotContains(t, file.Meta, "prov_analysis_absence")
 	assertCobolNoWrapper(t, result)
 	require.Len(t, result.Nodes, 3)
 
@@ -559,4 +564,56 @@ func TestCobolGrammar_CopybookReplacingDegrades(t *testing.T) {
 	file := assertCobolCopybookFile(t, result, "copy/tagrec.cpy", cobolCopybookPseudoTextFixture)
 	assert.NotEqual(t, "green", file.Meta["prov_document_grade"])
 	assert.NotEmpty(t, file.Meta["prov_document_grade_reasons"])
+	assert.Equal(t, "copybook_content_unmapped", file.Meta["prov_analysis_absence"])
+}
+
+// cobolCopybookExecCICSFixture is an invented procedure member that opens
+// with EXEC CICS, which the producer wraps with its data header (WR-04).
+const cobolCopybookExecCICSFixture = "           EXEC CICS RETURN TRANSID('T1') END-EXEC.\n"
+
+// cobolCopybookFDFixture is an invented FILE SECTION member, which the
+// producer wraps with its procedure header (WR-04).
+const cobolCopybookFDFixture = "       FD CUST-FILE.\n" +
+	"       01 CUST-LINE PIC X(80).\n"
+
+// The producer picks a member's wrapper from its first code line and
+// misclassifies some members (review WR-04). Gortex cannot re-wrap them, so
+// the file node records the producer's choice in cobol_copybook_wrapper and,
+// when a degraded analysis mapped nothing, prov_analysis_absence
+// copybook_content_unmapped; a member that mapped something, or graded
+// green, carries no absence.
+func TestCobolGrammar_CopybookWrapperWindow(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	// grade "" means any non-green grade; imports is the imports edge count.
+	for _, tc := range []struct {
+		name, path, src, wrapper, grade string
+		unmapped                        bool
+		imports                         int
+	}{
+		{"exec_cics_member", "copy/cicsret.cpy", cobolCopybookExecCICSFixture, "data", "red", true, 0},
+		{"fd_member", "copy/custfd.cpy", cobolCopybookFDFixture, "procedure", "red", true, 0},
+		{"leading_copy_member", "copy/leadcpy.cpy", cobolCopybookLeadingCopyFixture, "procedure", "", false, 1},
+		{"pseudo_text_member", "copy/tagrec.cpy", cobolCopybookPseudoTextFixture, "data", "", true, 0},
+		{"data_member", "copy/custrec.cpy", cobolCopybookFixture, "data", "green", false, 0},
+		{"procedure_member", "copy/valpara.cpy", cobolCopybookProcedureFixture, "procedure", "green", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractCobolGrammar(t, e, tc.path, tc.src)
+			file := assertCobolCopybookFile(t, result, tc.path, tc.src)
+			assert.Equal(t, tc.wrapper, file.Meta["cobol_copybook_wrapper"])
+			if tc.grade == "" {
+				assert.NotEqual(t, "green", file.Meta["prov_document_grade"])
+			} else {
+				assert.Equal(t, tc.grade, file.Meta["prov_document_grade"])
+			}
+			assert.Len(t, cobolCopybookImports(t, result, tc.path), tc.imports)
+			if !tc.unmapped {
+				assert.NotContains(t, file.Meta, "prov_analysis_absence")
+				return
+			}
+			assert.Equal(t, "copybook_content_unmapped", file.Meta["prov_analysis_absence"])
+			assert.Len(t, result.Nodes, 1)
+			assert.Empty(t, result.Edges)
+		})
+	}
 }
