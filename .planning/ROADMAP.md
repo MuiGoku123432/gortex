@@ -186,7 +186,53 @@ Plans:
   4. Incremental reconciliation and a clean rebuild produce the same canonical active deterministic subgraph for identical final inputs.
   5. Resolution and all downstream surfaces fail closed on missing scope, reject unsupported same-name cross-repository binding, and report zero unowned or misprefixed active nodes for the acceptance corpus.
 
-**Plans**: TBD
+**Plans**: 16 plans
+
+Plans 04-11 to 04-16 are the second halves of 04-01, 04-03, 04-05, 04-06, 04-08, and 04-09, split so every plan fits the 100k smart-zone budget; run them in wave order, not number order.
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md -- Tracer: canonical dump + BLAKE3 digest, real-path harness, deterministic clean builds (CR-02 shared resources)
+- [ ] 04-02-PLAN.md -- Extractor identity: encoded program IDs (IN-03), cobol_placeholder and library key, occurrence provenance proof
+- [ ] 04-03-PLAN.md -- One scope type (graph.Scope) for projection and export (D-16)
+- [ ] 04-04-PLAN.md -- Generic cross-repository ambiguity refusal in function and method fallbacks (D-12)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-11-PLAN.md -- Extractor /5 bump; shared-resource and canonical-dump contract tests
+- [ ] 04-12-PLAN.md -- Fail-closed source read/write gate for multi-repository sessions (D-13, D-20)
+- [ ] 04-06-PLAN.md -- One COBOL reconcile pass: re-decided bindings, caller-scoped through graph.Scope, idempotent
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-05-PLAN.md -- Strict ownership audit, enumerated exemptions, index_health status, v22 purge
+- [ ] 04-14-PLAN.md -- Reconcile policy: directed allowlist with union ambiguity, library order, qualifier links, orphan GC
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-07-PLAN.md -- index.cobol config, validation, policy lookup wiring, live reload, cross-repository clean builds
+- [ ] 04-13-PLAN.md -- Embedded gortex mcp --index as a workspace of one through MultiIndexer
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-08-PLAN.md -- Incremental tracer: CR-01 restub, reconcile at every mutation tail, rerun/edit/delete/restore sequences
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 04-15-PLAN.md -- Warm-restart reconcile, affected-by escalation (D-08), cross-file, cross-repository, interrupted, and over-cap sequences
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 04-09-PLAN.md -- Material fingerprint (D-06/D-07) in RepoIndexState, config-change sequences
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 04-16-PLAN.md -- Merkle salt, extractor-identity change sequence, VCS re-stamp on HEAD move (D-17)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 04-10-PLAN.md -- Cross-surface scope proof, ownership acceptance, D-04 completeness, Meta-key screen, docs, full race suite
 
 ### Phase 5: Explicit Unresolved Evidence
 

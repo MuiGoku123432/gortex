@@ -557,15 +557,26 @@ var phase4Volatile = graphdump.Volatile{
 | A8 | The D-11 alias edge is emitted only when the qualified node exists, and never creates a node | Pattern 3 | The alternative invents nodes, which DET rules forbid. |
 | A9 | Resource Name becomes the normalized key, with the as-written spelling moved to the edge | Pattern 3 | Touches P2 D-20 "names as written". Needs user confirmation. |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All seven questions were closed after research. Three were closed by the user-confirmed decisions D-17, D-18, and D-20 in 04-CONTEXT.md (D-19 closed Assumption A4). One was closed by D-12's "for all languages" wording. Three were closed by adopting the recommendation under CONTEXT "Claude's Discretion". Each item keeps its original text and adds where it was decided and which plan implements it.
 
 1. **HEAD movement vs. `prov_vcs_commit`.** What we know: a clean rebuild after a commit stamps the new HEAD on unchanged files, and incremental does not. What is unclear: whether HEAD is a "final input" for ID-09. Recommendation: either re-stamp revision Meta on HEAD move in `reconcileRepoIndexState`, or allowlist `prov_vcs_commit` and `prov_vcs_commit_absence` with the justification "derived from repository HEAD, not file content". Ask the user. In the meantime the harness keeps HEAD fixed.
+   **RESOLVED by D-17 (user-confirmed):** HEAD is a final input. A HEAD move with unchanged bytes re-stamps `prov_vcs_commit` as a metadata-only refresh. `prov_vcs_commit` stays compared in the canonical dump and is not on the volatile allowlist. Implemented by 04-16 Task 2 (`restampSourceRevisions`, `TestCobolLifecycle_HeadMove`). The other harness sequences keep HEAD fixed (04-08, 04-15).
 2. **Shared resource Name (A9).** Recommendation: use the normalized key, and keep the raw spelling on edges.
+   **RESOLVED by D-18 (user-confirmed):** a shared DB2, IDMS, or CICS resource node is named by its `cobol-name-norm/1` key, and each referencing edge keeps the as-written spelling in `cobol_resource_raw`. Implemented by 04-01 Task 1 and locked by 04-11 (`TestCobolGrammar_SharedResource`).
 3. **IN-04 in scope?** Recommendation: prove ID-05 with the current behavior. Fix IN-04 only if a test shows two semantic occurrences become indistinguishable.
+   **RESOLVED (recommendation adopted, CONTEXT "Claude's Discretion"):** ID-05 is proven with the current dedupe behavior, and IN-04 stays unchanged unless that proof fails. Implemented by 04-02 Task 2 (`TestCobolGrammar_Occurrences`, see its flagged assumptions).
 4. **Generic-language incremental equivalence.** D-12 makes the decision deterministic per pass, but bound generic cross-repo edges are not re-checked when a new candidate appears. Recommendation: scope the ID-09 acceptance corpus to COBOL (plus the D-12 unit tests) and record the generic gap for Phase 6.
+   **RESOLVED (recommendation adopted, CONTEXT "Claude's Discretion"):** the ID-09 equivalence corpus is COBOL only, and already-bound generic cross-repo edges are not re-checked incrementally. The D-12 per-pass determinism is proven by 04-04. The generic gap is recorded as a flagged assumption in 04-08 and 04-15, for Phase 6.
 5. **`resolveMethodCall`.** Should it get the same D-12 edit? Recommendation: yes, because it has the identical first-match pattern and D-12 says "for all languages".
+   **RESOLVED (D-12 "for all languages"; recommendation adopted):** all three cross-repo loops of `resolveMethodCall` get the same refuse-on-ambiguity edit. Implemented by 04-04 Task 2 (`TestCrossRepoResolveAll_AmbiguousMethod`).
 6. **Source gate on write tools** (`resolveFilePath` is shared with `edit_file`/`write_file`). Recommendation: gate them too (fail closed), and confirm with the user.
+   **RESOLVED by D-20 (user-confirmed):** any tool that reads or writes source bytes, including `edit_file`, `write_file`, and every other `resolveFilePath` caller, requires a resolved scope when more than one repo is tracked. Implemented by 04-12 (`TestSourceScope_WriteToolsGated`).
 7. **Embedded single-repo via `MultiIndexer`** vs. `SetRepoPrefix` on the bare Indexer. Recommendation: `MultiIndexer` (one code path). Measure the `internal/mcp` test blast radius first: 64 test files construct `indexer.New(`.
+   **RESOLVED (recommendation adopted, CONTEXT "Claude's Discretion": embedded single-repo mode goes through MultiIndexer after its blast radius is measured):** implemented by 04-13, which records the before and after blast-radius counts in its SUMMARY.
+
+Assumptions A4 and A9 in the Assumptions Log were confirmed by the same post-research decisions: A4 by D-19 (union semantics), A9 by D-18 (normalized resource Name).
 
 ## Environment Availability
 
