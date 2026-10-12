@@ -4,6 +4,7 @@ package languages
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
@@ -246,13 +247,194 @@ func TestCobolGrammar_CopybookGrammarPinned(t *testing.T) {
 	assert.True(t, errors.Is(err, errCobolGrammarNotApproved), "err = %v", err)
 }
 
-// A procedure-fragment member still yields its copybook file node with the
-// COPY binding keys (D-16). Plan 03-16 asserts its procedure structure.
+// assertCobolNoWrapper checks that no node of result is a program or
+// division and that no node or edge names the producer's synthetic wrapper
+// program CPYWRAP (D-16).
+func assertCobolNoWrapper(t *testing.T, result *parser.ExtractionResult) {
+	t.Helper()
+	for _, n := range result.Nodes {
+		assert.NotContains(t, []any{"program", "division"}, n.Meta["cobol_kind"], n.ID)
+		assert.NotContains(t, n.ID, "CPYWRAP")
+	}
+	for _, e := range result.Edges {
+		assert.NotContains(t, e.From+" "+e.To, "CPYWRAP")
+	}
+}
+
+// A procedure member's paragraph and statement are first-class, owned by the
+// copybook at the member's own rows (D-16, D-01, D-05, D-17): the file
+// defines the paragraph, which is member_of nothing, and the statement is
+// member_of the paragraph.
 func TestCobolGrammar_CopybookProcedureFragment(t *testing.T) {
 	e := NewCobolGrammarExtractor()
-	result := extractCobolGrammar(t, e, "copy/valpara.cpy", cobolCopybookProcedureFixture)
-	file := assertCobolCopybookFile(t, result, "copy/valpara.cpy", cobolCopybookProcedureFixture)
+	const path = "copy/valpara.cpy"
+	result := extractCobolGrammar(t, e, path, cobolCopybookProcedureFixture)
+	file := assertCobolCopybookFile(t, result, path, cobolCopybookProcedureFixture)
 	assert.Equal(t, "VALPARA", file.Meta["cobol_name_key"])
+	assertCobolNoWrapper(t, result)
+	require.Len(t, result.Nodes, 3)
+
+	const para = path + "::@proc/VALIDATE-PARA"
+	const stmt = para + "/@move_statement"
+	p := cobolNodeByID(t, result, para)
+	assert.Equal(t, graph.KindFunction, p.Kind)
+	assert.Equal(t, "paragraph", p.Meta["cobol_kind"])
+	assert.Equal(t, 1, p.Meta["cobol_ordinal"])
+	assert.Equal(t, 0, p.Meta["prov_start_row"])
+	assert.Equal(t, 1, p.Meta["prov_end_row"])
+	assert.Equal(t, true, p.Meta["prov_range_exact"])
+	s := cobolNodeByID(t, result, stmt)
+	assert.Equal(t, graph.KindLocal, s.Kind)
+	assert.Equal(t, "move_statement", s.Meta["cobol_statement_kind"])
+	for _, n := range []*graph.Node{p, s} {
+		for _, key := range cobolDocumentKeys {
+			assert.Contains(t, n.Meta, key, n.ID)
+		}
+		assert.Equal(t, "cobol-grade-policy-copybook-v1", n.Meta["prov_grade_policy"], n.ID)
+	}
+
+	assert.Len(t, cobolEdges(result, path, para, graph.EdgeDefines), 1)
+	for _, edge := range result.Edges {
+		if edge.Kind == graph.EdgeMemberOf {
+			assert.Equal(t, stmt+" -> "+para, edge.From+" -> "+edge.To, "the only member_of edge")
+		}
+	}
+	assert.Len(t, cobolEdges(result, stmt, para, graph.EdgeMemberOf), 1)
+}
+
+// cobolCopybookRootFixture is an invented procedure member whose first
+// statements come before any paragraph header.
+const cobolCopybookRootFixture = "           MOVE 1 TO WS-X.\n" +
+	"           PERFORM CHECK-PARA.\n" +
+	"       CHECK-PARA.\n" +
+	"           EXIT.\n"
+
+// A statement before any header is <path>::@proc/@<kind>, member_of the
+// copybook file node, and a transfer from there flows From the file node
+// (D-16, D-17).
+func TestCobolGrammar_CopybookProcedureRoot(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "copy/root.cpy"
+	result := extractCobolGrammar(t, e, path, cobolCopybookRootFixture)
+	assertCobolCopybookFile(t, result, path, cobolCopybookRootFixture)
+	assertCobolNoWrapper(t, result)
+
+	for _, kind := range []string{"move_statement", "perform_statement_call_proc"} {
+		id := path + "::@proc/@" + kind
+		assert.Equal(t, graph.KindLocal, cobolNodeByID(t, result, id).Kind, id)
+		assert.Len(t, cobolEdges(result, id, path, graph.EdgeMemberOf), 1, id)
+	}
+	perform := cobolOneEdge(t, result, path, path+"::@proc/CHECK-PARA", graph.EdgeCalls)
+	assertCobolRelationProvenance(t, perform, "perform_statement_call_proc")
+	assert.Equal(t, "perform", perform.Meta["cobol_flow"])
+	assert.Equal(t, "@proc/@perform_statement_call_proc", perform.Meta["cobol_statement_symbol"])
+	assert.Equal(t, 1, perform.Meta["prov_start_row"])
+}
+
+// cobolCopybookFlowFixture is an invented procedure member with a section,
+// a THRU range, a GO TO, and labels the member does not define.
+const cobolCopybookFlowFixture = "       MAIN-SECT SECTION.\n" +
+	"       P1.\n" +
+	"           PERFORM P2 THRU P3.\n" +
+	"           GO TO P3.\n" +
+	"           PERFORM OTHER-PARA.\n" +
+	"           PERFORM P2 THRU NOPE.\n" +
+	"       P2.\n" +
+	"           EXIT.\n" +
+	"       P3.\n" +
+	"           EXIT.\n"
+
+// PERFORM, PERFORM THRU, and GO TO in a copybook resolve over the member's
+// own headers only (D-02, D-03, D-04); a label the member does not define
+// is an owned unresolved target with label_not_in_copybook (D-12).
+func TestCobolGrammar_CopybookProcedureFlow(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "copy/flow.cpy"
+	result := extractCobolGrammar(t, e, path, cobolCopybookFlowFixture)
+	assertCobolCopybookFile(t, result, path, cobolCopybookFlowFixture)
+	assertCobolNoWrapper(t, result)
+
+	const sect = path + "::@proc/MAIN-SECT"
+	s := cobolNodeByID(t, result, sect)
+	assert.Equal(t, graph.KindFunction, s.Kind)
+	assert.Equal(t, "section", s.Meta["cobol_kind"])
+	assert.Equal(t, "procedure", s.Meta["cobol_section_kind"])
+	for _, edge := range result.Edges {
+		assert.False(t, edge.Kind == graph.EdgeMemberOf && edge.From == sect, "section member_of %s", edge.To)
+	}
+	for _, name := range []string{"P1", "P2", "P3"} {
+		id := sect + "/" + name
+		assert.Equal(t, "paragraph", cobolNodeByID(t, result, id).Meta["cobol_kind"], id)
+		assert.Len(t, cobolEdges(result, id, sect, graph.EdgeMemberOf), 1, id)
+	}
+
+	p1 := sect + "/P1"
+	flows := func(to, flow string) []*graph.Edge {
+		var out []*graph.Edge
+		for _, edge := range cobolEdges(result, p1, to, graph.EdgeCalls) {
+			if edge.Meta["cobol_flow"] == flow {
+				out = append(out, edge)
+			}
+		}
+		return out
+	}
+	for _, to := range []string{sect + "/P2", sect + "/P3"} {
+		require.Len(t, flows(to, "perform_thru"), 1, to)
+		assert.NotContains(t, flows(to, "perform_thru")[0].Meta, "cobol_unresolved_reason", to)
+	}
+	require.Len(t, flows(sect+"/P3", "goto"), 1)
+
+	const label = "unresolved::cobol::label::" + path + "::"
+	other := flows(label+"OTHER-PARA", "perform")
+	require.Len(t, other, 1)
+	assert.Equal(t, "label_not_in_copybook", other[0].Meta["cobol_unresolved_reason"])
+	thru := flows(label+"P2::thru::NOPE", "perform_thru")
+	require.Len(t, thru, 1)
+	assert.Equal(t, "label_not_in_copybook", thru[0].Meta["cobol_unresolved_reason"])
+	assert.Equal(t, "P2", thru[0].Meta["cobol_thru_start"])
+	assert.Equal(t, "NOPE", thru[0].Meta["cobol_thru_end"])
+
+	for _, edge := range result.Edges {
+		if edge.Kind == graph.EdgeCalls {
+			inside := strings.HasPrefix(edge.To, path+"::") || strings.HasPrefix(edge.To, label)
+			assert.True(t, inside, "calls edge leaves the member: %s", edge.To)
+		}
+	}
+}
+
+// cobolCopybookCallsFixture is an invented procedure member with a literal
+// CALL, a dynamic CALL, and a COPY.
+const cobolCopybookCallsFixture = "       CALL-PARA.\n" +
+	"           CALL 'SUBPGM'.\n" +
+	"           CALL WS-PGM.\n" +
+	"           COPY INNERP.\n" +
+	"           GOBACK.\n"
+
+// CALL and COPY in a copybook paragraph come From the paragraph (D-09, D-10,
+// D-11); dynamic targets are keyed under the copybook path.
+func TestCobolGrammar_CopybookProcedureCalls(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "copy/calls.cpy"
+	result := extractCobolGrammar(t, e, path, cobolCopybookCallsFixture)
+	assertCobolCopybookFile(t, result, path, cobolCopybookCallsFixture)
+	assertCobolNoWrapper(t, result)
+	const para = path + "::@proc/CALL-PARA"
+
+	literal := cobolOneEdge(t, result, para, "unresolved::cobol::program::SUBPGM", graph.EdgeCalls)
+	assertCobolRelationProvenance(t, literal, "call_statement")
+	assert.Equal(t, "literal", literal.Meta["cobol_call"])
+	assert.NotContains(t, literal.Meta, "cobol_unresolved_reason")
+
+	dynamic := cobolOneEdge(t, result, para, "unresolved::cobol::dynamic::program::"+path+"::WS-PGM", graph.EdgeCalls)
+	assert.Equal(t, "dynamic", dynamic.Meta["cobol_call"])
+	assert.Equal(t, "dynamic", dynamic.Meta["cobol_unresolved_reason"])
+	data := cobolOneEdge(t, result, para, "unresolved::cobol::data::"+path+"::WS-PGM", graph.EdgeReferences)
+	assert.Equal(t, "call_target", data.Meta["cobol_ref_role"])
+	assert.NotEmpty(t, data.Meta["cobol_unresolved_reason"])
+
+	include := cobolOneEdge(t, result, para, "unresolved::cobol::copybook::INNERP", graph.EdgeImports)
+	assertCobolRelationProvenance(t, include, "copy_statement")
+	assert.Equal(t, "@proc/CALL-PARA/@copy_statement", include.Meta["cobol_statement_symbol"])
 }
 
 func TestCobolGrammar_CopybookReplacingDegrades(t *testing.T) {
