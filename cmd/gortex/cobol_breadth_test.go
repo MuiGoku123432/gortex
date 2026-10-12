@@ -102,6 +102,11 @@ const cobolBreadthCopybookFixture = `       01 CUST-REC.
           05 CUST-ID PIC X(8).
 `
 
+// cobolBreadthCustAllFixture is a copybook that copies another copybook.
+const cobolBreadthCustAllFixture = `       01 CUST-ALL.
+           COPY CUSTREC.
+`
+
 // cobolBreadthOnlyBFixture lives only in the second repository.
 const cobolBreadthOnlyBFixture = `       IDENTIFICATION DIVISION.
        PROGRAM-ID. ONLYB.
@@ -185,6 +190,7 @@ func indexCobolBreadthRepos(t *testing.T) cobolBreadthRepos {
 		"cobol/twin2.cbl":    cobolBreadthTwinFixture,
 		"cobol/bompgm.cbl":   "\xEF\xBB\xBF" + cobolBreadthBOMFixture,
 		"copy/custrec.cpy":   cobolBreadthCopybookFixture,
+		"copy/custall.cpy":   cobolBreadthCustAllFixture,
 		"cobol/nest.cbl":     cobolBreadthNestFixture,
 		"cobol/nestcall.cbl": cobolBreadthNestCallFixture,
 	})
@@ -382,6 +388,26 @@ func TestCobolBreadth_CallsAndCopy(t *testing.T) {
 	for _, e := range []*graph.Edge{sub, twin, onlyB, dynamic, copybook, idms} {
 		assertCobolBreadthLine(t, e)
 	}
+}
+
+// TestCobolBreadth_CopybookNestedCopy proves a COPY inside a copybook
+// persists as one imports edge from the copybook file node, bound to the
+// copied copybook under the unchanged exactly-one same-repository rule
+// (D-11, DET-06), while ORDPGM's COPY of the same member still binds.
+func TestCobolBreadth_CopybookNestedCopy(t *testing.T) {
+	repos := indexCobolBreadthRepos(t)
+	custrec := repos.prefixA + "/copy/custrec.cpy"
+	nested := cobolBreadthOutEdge(t, repos.store, repos.prefixA+"/copy/custall.cpy", custrec, graph.EdgeImports)
+	assert.Equal(t, "copy", nested.Meta["cobol_copy_form"])
+	assert.Equal(t, "CUSTREC", nested.Meta["cobol_copy_member_raw"])
+	assert.Equal(t, 1, nested.Meta["prov_start_row"])
+	assert.Equal(t, true, nested.Meta["prov_range_exact"])
+	assert.Equal(t, "copy_statement", nested.Meta["prov_observation_kind"])
+	assert.NotContains(t, nested.Meta, "cobol_unresolved_reason")
+	assertCobolBreadthLine(t, nested)
+
+	program := cobolBreadthOutEdge(t, repos.store, repos.prefixA+"/cobol/ordpgm.cbl::ORDPGM", custrec, graph.EdgeImports)
+	assert.NotContains(t, program.Meta, "cobol_unresolved_reason")
 }
 
 // TestCobolBreadth_NestedProgramScope proves on the persisted graph that a
