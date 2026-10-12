@@ -19,6 +19,10 @@ const (
 	// Edge Meta written by this pass (D-12 reason vocabulary).
 	metaCobolUnresolvedReason = "cobol_unresolved_reason"
 	metaCobolCandidateIDs     = "cobol_candidate_ids"
+
+	// Program node Meta read by this pass: true on a program contained in
+	// another program, stamped by the extractor from END PROGRAM nesting.
+	metaCobolNested = "cobol_nested"
 )
 
 // resolveCobolReferences binds literal COBOL program calls and copybook
@@ -31,7 +35,9 @@ const (
 // program (Meta cobol_kind=program) or KindFile copybook (cobol_kind=copybook)
 // whose cobol_name_key equals <key> and whose RepoPrefix is the caller's.
 // Program candidates sharing the edge's file win first, so nested and
-// contained programs resolve within the file. Zero candidates stamps
+// contained programs resolve within the file. Otherwise only top-level
+// programs (cobol_nested not true) in other files are candidates: a
+// contained program is never bound from another file. Zero candidates stamps
 // cobol_unresolved_reason=missing; two or more stamps ambiguous plus the
 // sorted candidate IDs in cobol_candidate_ids, and nothing is picked.
 //
@@ -39,8 +45,13 @@ const (
 // names across repositories, which would be false deterministic resolution
 // (D-09, D-11). The cobol:: namespace is therefore excluded from every generic
 // path and owned here. Keys compare by exact string equality, so the resolver
-// carries no second normalization rule (D-18). Dynamic, label, data,
-// idms_scope, and COPY IDMS targets are never touched (D-19, DET-04).
+// carries no second normalization rule (D-18). COBOL scoping makes a
+// contained program callable only from inside its container, so a separately
+// compiled caller cannot reach it; the pass reads the extractor's
+// cobol_nested flag for this and never infers nesting from the shape of a
+// node ID or QualName (a literal PROGRAM-ID may itself contain '/'). Dynamic,
+// label, data, idms_scope, and COPY IDMS targets are never touched (D-19,
+// DET-04).
 //
 // Runs serially in ResolveAll's relative-import settle window, after
 // resolveLuaRequires. Re-running it is idempotent: a rebind clears any stale
@@ -79,15 +90,18 @@ func (r *Resolver) resolveCobolReferences() {
 		}
 
 		candidates := index[r.callerRepoPrefix(e)+"\x00"+key]
-		if isProgram && e.FilePath != "" {
-			var sameFile []*graph.Node
+		if isProgram {
+			var sameFile, topLevel []*graph.Node
 			for _, c := range candidates {
-				if c.FilePath == e.FilePath {
+				if e.FilePath != "" && c.FilePath == e.FilePath {
 					sameFile = append(sameFile, c)
+				} else if nested, _ := c.Meta[metaCobolNested].(bool); !nested {
+					topLevel = append(topLevel, c)
 				}
 			}
-			if len(sameFile) > 0 {
-				candidates = sameFile
+			candidates = sameFile
+			if len(candidates) == 0 {
+				candidates = topLevel
 			}
 		}
 

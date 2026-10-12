@@ -247,6 +247,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		meta["cobol_kind"] = "program"
 		meta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(p.name))
 		meta["cobol_name_norm"] = cobolNameNormRule
+		meta["cobol_nested"] = p.nested
 		meta["prov_observation_kind"] = o.Kind
 		meta["prov_affected"] = o.Affected
 		id := filePath + "::" + p.symbol
