@@ -487,6 +487,22 @@ func TestCobolBreadth_CopybookProcedure(t *testing.T) {
 	}
 }
 
+// TestCobolBreadth_CopybookProcedureReferences proves a procedure
+// copybook's EXEC SQL persists a statement-positioned DB2 edge From its
+// paragraph to the shared table ORDPGM also uses (DET-11, D-13), without
+// adding a table to repository A.
+func TestCobolBreadth_CopybookProcedureReferences(t *testing.T) {
+	repos := indexCobolBreadthRepos(t)
+	validate := repos.prefixA + "/copy/valpara.cpy::@proc/VALIDATE-PARA"
+
+	orders := cobolBreadthOutEdge(t, repos.store, validate, repos.prefixA+"/db2::MYSCH/ORDERS", graph.EdgeReads)
+	assert.Equal(t, "SELECT", orders.Meta["sql_verb"])
+	assert.Equal(t, "@proc/VALIDATE-PARA/@exec_sql_statement", orders.Meta["cobol_statement_symbol"])
+	assert.Equal(t, graph.OriginASTResolved, orders.Origin)
+	assert.Equal(t, 4, orders.Meta["prov_start_row"])
+	assertCobolBreadthLine(t, orders)
+}
+
 // TestCobolBreadth_NestedProgramScope proves on the persisted graph that a
 // contained program is a CALL candidate only in its own file (D-09): OUTER's
 // CALL 'INNER' binds to OUTER/INNER, while NESTCALL's CALL 'INNER' from
