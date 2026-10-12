@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 03
 current_phase_name: Deterministic COBOL and Mainframe Breadth
-status: executing
-stopped_at: Completed 03-16-PLAN.md
-last_updated: "2026-10-12T15:18:52.441Z"
+status: verifying
+stopped_at: Completed 03-17-PLAN.md
+last_updated: "2026-10-12T16:02:09.601Z"
 last_activity: 2026-10-02
 last_activity_desc: Phase 03 execution started
-state_head: eaf3fb128d4a77796b46484877ef09b00ef0091c
+state_head: 6bf20d47c246035a0f7ce3c844d57b439051f240
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 30
-  completed_plans: 29
+  completed_plans: 30
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 Phase: 03 (Deterministic COBOL and Mainframe Breadth) — READY TO EXECUTE
 Plan: 13 of 13
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-02 — Phase 03 execution started
 
 Progress: [██░░░░░░░░] 20%
@@ -90,6 +90,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P14 | 9 min | 2 tasks | 6 files |
 | Phase 03 P15 | 7 min | 2 tasks | 7 files |
 | Phase 03 P16 | 9 min | 2 tasks | 6 files |
+| Phase 03 P17 | 26 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,9 @@ Recent decisions affecting current work:
 - [Phase 03]: A copybook walk registers the producer's wrapper program as its root (cobolCopybookRoot "@proc"); cobolWalk.id maps it to the file node, so cobolReferences/cobolCopy emit COPY edges from the copybook file node unchanged
 - [Phase 03]: 03-16: Copybook procedure IDs are rooted at @proc (<path>::@proc/<PARA>); cobolProcedure root mode emits no wrapper division and the copybook file node is the procedure container
 - [Phase 03]: 03-16: A label a copybook does not define goes to unresolved::cobol::label::<path>::<key> with label_not_in_copybook (only label_not_found is rewritten), never bound across files
+- [Phase 03]: 03-17: IDMS, CICS, and DB2 walkers build From/owner IDs through w.id; cobolCopybook runs cobolMainframe and cobolSQL, so copybook statements emit edges From the paragraph or the copybook file node
+- [Phase 03]: 03-17: a data name a copybook does not declare is not_declared_in_copybook (keyed on w.root); program documents keep not_declared_in_program
+- [Phase 03]: 03-17: WR-04 stays a producer window; the copybook file node records cobol_copybook_wrapper and, when a non-green analysis mapped nothing, prov_analysis_absence=copybook_content_unmapped
 
 ### Pending Todos
 
@@ -192,6 +196,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T15:18:52.386Z
-Stopped at: Completed 03-16-PLAN.md
+Last session: 2026-10-12T16:02:09.552Z
+Stopped at: Completed 03-17-PLAN.md
 Resume file: None
