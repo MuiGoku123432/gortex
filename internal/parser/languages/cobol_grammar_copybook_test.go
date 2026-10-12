@@ -430,11 +430,127 @@ func TestCobolGrammar_CopybookProcedureCalls(t *testing.T) {
 	assert.Equal(t, "dynamic", dynamic.Meta["cobol_unresolved_reason"])
 	data := cobolOneEdge(t, result, para, "unresolved::cobol::data::"+path+"::WS-PGM", graph.EdgeReferences)
 	assert.Equal(t, "call_target", data.Meta["cobol_ref_role"])
-	assert.NotEmpty(t, data.Meta["cobol_unresolved_reason"])
+	assert.Equal(t, "not_declared_in_copybook", data.Meta["cobol_unresolved_reason"])
 
 	include := cobolOneEdge(t, result, para, "unresolved::cobol::copybook::INNERP", graph.EdgeImports)
 	assertCobolRelationProvenance(t, include, "copy_statement")
 	assert.Equal(t, "@proc/CALL-PARA/@copy_statement", include.Meta["cobol_statement_symbol"])
+}
+
+// cobolCopybookMainframeFixture is an invented procedure member with IDMS,
+// CICS, and DB2 statements.
+const cobolCopybookMainframeFixture = "       MAIN-PARA.\n" +
+	"           OBTAIN CALC EMP-REC.\n" +
+	"           EXEC CICS LINK PROGRAM('LNKPGM') END-EXEC.\n" +
+	"           EXEC CICS RETURN TRANSID(WS-TRN) END-EXEC.\n" +
+	"           EXEC SQL SELECT A INTO :WS-A FROM MYSCH.ORDERS AS O\n" +
+	"           END-EXEC.\n" +
+	"           EXEC SQL PREPARE S1 FROM :WS-SQLTXT END-EXEC.\n"
+
+// cobolCopybookRootSQLFixture is an invented procedure member whose IDMS
+// and SQL statements come before any paragraph header.
+const cobolCopybookRootSQLFixture = "           MOVE 1 TO WS-X.\n" +
+	"           OBTAIN CALC EMP-REC.\n" +
+	"           EXEC SQL DELETE FROM AUDIT_LOG END-EXEC.\n"
+
+// IDMS, CICS, and EXEC SQL in a procedure copybook emit the same edges as
+// in a program (D-13, D-14, D-15, DET-07..DET-12), From the paragraph or,
+// before any header, the copybook file node; dynamic operands are keyed
+// under the copybook path, and no alias, statement name, host variable, or
+// include becomes a table.
+func TestCobolGrammar_CopybookProcedureMainframe(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+
+	t.Run("member", func(t *testing.T) {
+		const path = "copy/mf.cpy"
+		result := extractCobolGrammar(t, e, path, cobolCopybookMainframeFixture)
+		assertCobolCopybookFile(t, result, path, cobolCopybookMainframeFixture)
+		assertCobolNoWrapper(t, result)
+		const para = path + "::@proc/MAIN-PARA"
+
+		record := cobolOneEdge(t, result, para, "idms::_unqualified/record/EMP-REC", graph.EdgeReads)
+		assert.Equal(t, "OBTAIN", record.Meta["idms_verb"])
+		assertCobolResource(t, result, "idms::_unqualified/record/EMP-REC", "EMP-REC", "idms_record")
+
+		link := cobolOneEdge(t, result, para, "unresolved::cobol::program::LNKPGM", graph.EdgeCalls)
+		assert.Equal(t, "literal", link.Meta["cobol_call"])
+		assert.Equal(t, "LINK", link.Meta["cics_command"])
+
+		trn := cobolOneEdge(t, result, para, "unresolved::cobol::dynamic::transaction::"+path+"::WS-TRN", graph.EdgeReferences)
+		assert.Equal(t, "dynamic", trn.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, "RETURN", trn.Meta["cics_command"])
+
+		orders := cobolOneEdge(t, result, para, "db2::MYSCH/ORDERS", graph.EdgeReads)
+		assert.Equal(t, "SELECT", orders.Meta["sql_verb"])
+		assert.Equal(t, []string{"O"}, orders.Meta["sql_aliases"])
+		assertCobolTable(t, result, "db2::MYSCH/ORDERS", "ORDERS", "MYSCH")
+
+		prepare := cobolOneEdge(t, result, para, "unresolved::cobol::dynamic::sql::"+path+"::WS-SQLTXT", graph.EdgeReferences)
+		assert.Equal(t, "dynamic", prepare.Meta["cobol_unresolved_reason"])
+
+		assert.Equal(t, []string{"db2::MYSCH/ORDERS"}, cobolTableIDs(result))
+		for _, n := range result.Nodes {
+			assert.NotContains(t, []string{"O", "S1", "WS-SQLTXT", "SQLCA"}, n.Name, n.ID)
+			assertCobolMetaContract(t, n.ID, n.Meta)
+		}
+		for _, edge := range result.Edges {
+			if edge.Meta != nil {
+				assertCobolMetaContract(t, edge.From+" -> "+edge.To, edge.Meta)
+			}
+		}
+	})
+
+	t.Run("root_sql", func(t *testing.T) {
+		const path = "copy/rootsql.cpy"
+		result := extractCobolGrammar(t, e, path, cobolCopybookRootSQLFixture)
+		assertCobolCopybookFile(t, result, path, cobolCopybookRootSQLFixture)
+		assertCobolNoWrapper(t, result)
+
+		audit := cobolOneEdge(t, result, path, "db2::_unqualified/AUDIT_LOG", graph.EdgeWrites)
+		assert.Equal(t, "DELETE", audit.Meta["sql_verb"])
+		assert.Equal(t, "@proc/@exec_sql_statement", audit.Meta["cobol_statement_symbol"])
+
+		record := cobolOneEdge(t, result, path, "idms::_unqualified/record/EMP-REC", graph.EdgeReads)
+		assert.Equal(t, "OBTAIN", record.Meta["idms_verb"])
+	})
+}
+
+// cobolCopybookRedefinesFixture is an invented data member whose REDEFINES
+// names one item it declares and one it does not.
+const cobolCopybookRedefinesFixture = "       01 CPY-A PIC X.\n" +
+	"       01 CPY-B REDEFINES NOPE PIC X.\n" +
+	"       01 CPY-C REDEFINES CPY-A PIC X.\n"
+
+// A data name a copybook references but does not declare stays unresolved
+// under the copybook path with not_declared_in_copybook, since an including
+// program may declare it (D-06, D-12); a name the member declares binds.
+func TestCobolGrammar_CopybookDataNames(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+
+	t.Run("procedure_member", func(t *testing.T) {
+		const path = "copy/mf.cpy"
+		result := extractCobolGrammar(t, e, path, cobolCopybookMainframeFixture)
+		const para = path + "::@proc/MAIN-PARA"
+		for name, role := range map[string]string{"WS-TRN": "cics_transaction", "WS-SQLTXT": "sql_dynamic_source"} {
+			ref := cobolOneEdge(t, result, para, "unresolved::cobol::data::"+path+"::"+name, graph.EdgeReferences)
+			assert.Equal(t, role, ref.Meta["cobol_ref_role"], name)
+			assert.Equal(t, "not_declared_in_copybook", ref.Meta["cobol_unresolved_reason"], name)
+		}
+	})
+
+	t.Run("data_member", func(t *testing.T) {
+		const path = "copy/redef.cpy"
+		result := extractCobolGrammar(t, e, path, cobolCopybookRedefinesFixture)
+		assertCobolCopybookFile(t, result, path, cobolCopybookRedefinesFixture)
+
+		missing := cobolOneEdge(t, result, path+"::CPY-B", "unresolved::cobol::data::"+path+"::NOPE", graph.EdgeReferences)
+		assert.Equal(t, "redefines", missing.Meta["cobol_ref_role"])
+		assert.Equal(t, "not_declared_in_copybook", missing.Meta["cobol_unresolved_reason"])
+
+		bound := cobolOneEdge(t, result, path+"::CPY-C", path+"::CPY-A", graph.EdgeReferences)
+		assert.Equal(t, "redefines", bound.Meta["cobol_ref_role"])
+		assert.NotContains(t, bound.Meta, "cobol_unresolved_reason")
+	})
 }
 
 func TestCobolGrammar_CopybookReplacingDegrades(t *testing.T) {
