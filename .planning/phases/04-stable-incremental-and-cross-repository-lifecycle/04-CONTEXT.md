@@ -76,7 +76,25 @@ Depends on Phase 3, which is currently in verification (03-17 complete).
 - **D-15:** **SEC-08 enforcement is a test gate plus health status.** The acceptance test fails on any ownership violation. `index_health` reports an unhealthy status with counts but does not block normal queries. Phases 6 and 7 may make export or AI refuse when unhealthy.
 - **D-16:** **One shared scope check.** Generalize the Phase 1 `OpenScopedProjectionSnapshot` fail-closed validation into one scope type and validator used by projection, resolution, and source reads. The rule of three is now met. A cross-surface test asserts that the same repo allow-set yields identical node sets on each surface.
 
+### Post-research confirmations (2026-10-12, user-confirmed after 04-RESEARCH.md)
+- **D-17:** **When git HEAD moves with unchanged bytes, re-stamp `prov_vcs_commit`.** Treat it as a metadata-only refresh, with no re-extraction. `prov_vcs_commit` stays deterministic provenance and **is compared** in the canonical dump. It is not on the volatile allowlist.
+- **D-18:** **A shared DB2/IDMS/CICS resource node's Name is the normalized key** under `cobol-name-norm/1`, so it doesn't depend on which file wrote it. Each referencing edge keeps the as-written spelling in meta. This narrows the P2 D-20 "names as written" rule for shared resources only. — **Reversibility:** costly. Names are persisted and projected.
+- **D-19:** **D-09 candidates are the union of same-repo and allowed-repo candidates.** More than one candidate across that union means `ambiguous` with candidate IDs, and nothing binds. A same-repo candidate never silently shadows one in an allowed repo.
+- **D-20:** **The D-13 scope gate also covers write tools** (`edit_file` / `write_file` and any tool sharing `resolveFilePath`). Any tool that reads or writes source bytes requires a resolved scope when more than one repo is tracked.
+
 ### Claude's Discretion
+- Research recommendations adopted by default, unless the planner finds a blocker:
+  - Fix CR-02 shared-resource ownership first.
+  - One `reconcileCobol(repoSet)` used by both full and incremental paths.
+  - `cobol_placeholder` meta on bound edges.
+  - `MaterialIdentity()` extractor interface.
+  - `index.cobol` config namespace.
+  - `ProjectionScope` → `Scope` with an alias.
+  - `EdgeAliases` for D-11.
+  - The D-14 rollout reuses `purgeUnprefixedRepoRows` as migration v22.
+  - Embedded single-repo mode goes through MultiIndexer, after measuring its blast radius.
+  - The ID-09 equivalence corpus is limited to COBOL. Already-bound generic cross-repo edges are not re-checked incrementally.
+  - The D-10 library entry shape and how a `COPY OF/IN` qualifier narrows the search follow the research recommendation.
 - Incremental COBOL resolution: today `resolveCobolReferences` runs only inside whole-graph `ResolveAll`, and incremental paths skip `cobol::` targets. D-04 requires incremental == clean, so the planner must make the incremental and watcher paths re-run COBOL CALL/COPY resolution for the affected scope (or escalate per D-08). Research picks the mechanism.
 - The exact volatile-key allowlist (D-01), dump format, and digest algorithm. Prefer the existing BLAKE3 dependency.
 - Config key names and shape for D-09, D-10, and D-11 in `.gortex.yaml` / workspace config. Follow existing workspace config conventions.
