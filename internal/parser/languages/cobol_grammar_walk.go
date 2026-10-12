@@ -33,6 +33,10 @@ type cobolWalk struct {
 	last     []int          // observation index -> last index in its subtree
 	owner    []int          // observation index -> owning program_definition, or -1
 	programs map[int]string // program_definition index -> program symbol
+	// root is the program symbol the file node stands in for: empty for a
+	// program document, cobolCopybookRoot for a copybook, whose synthetic
+	// wrapper program and divisions are never emitted (D-16).
+	root string
 
 	// Filled by cobolProcedure for a named program's procedure division and
 	// every observation inside it: the membership container symbol
@@ -118,6 +122,16 @@ func (w *cobolWalk) programSymbol(i int) string {
 		return ""
 	}
 	return w.programs[w.owner[i]]
+}
+
+// id returns the node ID of symbol: the file node ID when symbol is the
+// walk's root, else <filePath>::<symbol>. Edge From and owner IDs go through
+// it, so a copybook's wrapper program is never named.
+func (w *cobolWalk) id(symbol string) string {
+	if w.root != "" && symbol == w.root {
+		return w.filePath
+	}
+	return w.filePath + "::" + symbol
 }
 
 // statementSymbol returns the QualName of the innermost statement node

@@ -32,7 +32,7 @@ func cobolReferences(w *cobolWalk, data *cobolDataIndex) {
 			if prog == "" || w.flowFrom[i] == "" || len(w.children[i]) == 0 {
 				continue
 			}
-			cobolCallTarget(w, data, w.filePath+"::"+w.flowFrom[i], i, w.filePath+"::"+prog,
+			cobolCallTarget(w, data, w.id(w.flowFrom[i]), i, w.id(prog),
 				w.children[i][0], graph.EdgeCalls, "call_target")
 		case "copy_statement", "exec_sql_include":
 			cobolCopy(w, i)
@@ -99,7 +99,8 @@ func cobolCallTarget(w *cobolWalk, data *cobolDataIndex, from string, occurrence
 // A COPY is a grammar extra whose Parent is arbitrary (Pitfall 3), so its
 // program is the innermost named program whose generated span contains its
 // start. From is the procedure flow source when it sits in a procedure
-// division, else that program, else the file node.
+// division, else that program, else the file node. A copybook's wrapper
+// program is its walk root, so its COPYs come from the file node (D-16).
 func cobolCopy(w *cobolWalk, i int) {
 	obs := w.h.Facts.Observations
 	o := obs[i]
@@ -144,7 +145,6 @@ func cobolCopy(w *cobolWalk, i int) {
 		to = "unresolved::cobol::copybook::idms/" + kindKey + "/" + key
 	}
 
-	from := w.filePath
 	best := -1
 	for p := range w.programs {
 		g := obs[p].Generated
@@ -152,11 +152,12 @@ func cobolCopy(w *cobolWalk, i int) {
 			best = p
 		}
 	}
+	from := w.filePath
 	switch {
 	case w.flowFrom[i] != "":
-		from += "::" + w.flowFrom[i]
+		from = w.id(w.flowFrom[i])
 	case best >= 0:
-		from += "::" + w.programs[best]
+		from = w.id(w.programs[best])
 	}
 
 	edge := w.relationEdge(from, to, graph.EdgeImports, i)

@@ -218,24 +218,7 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	}
 	result := &parser.ExtractionResult{Nodes: []*graph.Node{fileNode}}
 	if copybook {
-		// The copybook file node owns the member's data items (D-07); the
-		// wrapper's program, divisions, and sections are never emitted. The
-		// walk gets its own docMeta copy, so COPY marks written on the file
-		// node never leak into item Meta.
-		w := newCobolWalk(h, src, filePath, maps.Clone(docMeta), nil, result)
-		idx := &cobolDataIndex{seen: make(map[string]int), taken: make(map[string]bool)}
-		for s, o := range h.Facts.Observations {
-			if p, ok := w.parent(s); ok && h.Facts.Observations[p].Kind == "data_division" && strings.HasSuffix(o.Kind, "_section") {
-				cobolDataSection(w, idx, filePath, "", "", s)
-			}
-		}
-		cobolDataBind(w, idx)
-		// Set after the walk so only the file node carries the binding keys
-		// resolveCobolReferences matches a COPY on.
-		base := filepath.Base(filePath)
-		docMeta["cobol_kind"] = "copybook"
-		docMeta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(strings.TrimSuffix(base, filepath.Ext(base))))
-		docMeta["cobol_name_norm"] = cobolNameNormRule
+		cobolCopybook(h, src, filePath, docMeta, result)
 		result.Edges = cobolDedupeEdges(result.Edges)
 		return result, nil
 	}
