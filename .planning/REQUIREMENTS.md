@@ -58,18 +58,18 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Deterministic COBOL and Mainframe Breadth
 
-- [x] **DET-01**: The extractor MUST emit source-positioned program, division, section, paragraph, statement, and data-item observations from named AST nodes.
-- [x] **DET-02**: The extractor MUST emit paragraph control-flow relationships for `PERFORM`, `THRU`, and `GO TO` constructs supported by the parser baseline.
-- [x] **DET-03**: Literal program calls MUST be represented separately from dynamic call identifiers.
-- [x] **DET-04**: Dynamic call identifiers MUST remain unresolved unless deterministic value-flow or resolution evidence establishes a target.
-- [x] **DET-05**: Copybook and include references MUST retain the referenced member name and source occurrence.
-- [x] **DET-06**: Copybook resolution MUST preserve ambiguity when available library, repository, or search-order evidence does not identify one target.
-- [x] **DET-07**: IDMS statements MUST emit source-positioned record references exposed by the parser baseline.
-- [x] **DET-08**: IDMS statements MUST emit source-positioned set references exposed by the parser baseline.
-- [x] **DET-09**: CICS statements MUST emit source-positioned program and transaction references exposed by the parser baseline.
-- [x] **DET-10**: CICS statements MUST emit source-positioned map and mapset references exposed by the parser baseline.
-- [x] **DET-11**: SQL statements MUST emit source-positioned read and write relationships to deterministically identified physical tables.
-- [x] **DET-12**: SQL aliases, CTEs, includes, and dynamic sources MUST remain distinguishable from physical tables.
+- [ ] **DET-01**: The extractor MUST emit source-positioned program, division, section, paragraph, statement, and data-item observations from named AST nodes.
+- [ ] **DET-02**: The extractor MUST emit paragraph control-flow relationships for `PERFORM`, `THRU`, and `GO TO` constructs supported by the parser baseline.
+- [ ] **DET-03**: Literal program calls MUST be represented separately from dynamic call identifiers.
+- [ ] **DET-04**: Dynamic call identifiers MUST remain unresolved unless deterministic value-flow or resolution evidence establishes a target.
+- [ ] **DET-05**: Copybook and include references MUST retain the referenced member name and source occurrence.
+- [ ] **DET-06**: Copybook resolution MUST preserve ambiguity when available library, repository, or search-order evidence does not identify one target.
+- [ ] **DET-07**: IDMS statements MUST emit source-positioned record references exposed by the parser baseline.
+- [ ] **DET-08**: IDMS statements MUST emit source-positioned set references exposed by the parser baseline.
+- [ ] **DET-09**: CICS statements MUST emit source-positioned program and transaction references exposed by the parser baseline.
+- [ ] **DET-10**: CICS statements MUST emit source-positioned map and mapset references exposed by the parser baseline.
+- [ ] **DET-11**: SQL statements MUST emit source-positioned read and write relationships to deterministically identified physical tables.
+- [ ] **DET-12**: SQL aliases, CTEs, includes, and dynamic sources MUST remain distinguishable from physical tables.
 
 ### Stable Identity and Incremental Idempotency
 
@@ -236,18 +236,18 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | PROV-04 | Phase 2 | Complete |
 | PROV-05 | Phase 2 | Complete |
 | PROV-06 | Phase 2 | Complete |
-| DET-01 | Phase 3 | Complete |
-| DET-02 | Phase 3 | Complete |
-| DET-03 | Phase 3 | Complete |
-| DET-04 | Phase 3 | Complete |
-| DET-05 | Phase 3 | Complete |
-| DET-06 | Phase 3 | Complete |
-| DET-07 | Phase 3 | Complete |
-| DET-08 | Phase 3 | Complete |
-| DET-09 | Phase 3 | Complete |
-| DET-10 | Phase 3 | Complete |
-| DET-11 | Phase 3 | Complete |
-| DET-12 | Phase 3 | Complete |
+| DET-01 | Phase 3 | Gaps Found |
+| DET-02 | Phase 3 | Gaps Found |
+| DET-03 | Phase 3 | Gaps Found |
+| DET-04 | Phase 3 | Gaps Found |
+| DET-05 | Phase 3 | Gaps Found |
+| DET-06 | Phase 3 | Gaps Found |
+| DET-07 | Phase 3 | Gaps Found |
+| DET-08 | Phase 3 | Gaps Found |
+| DET-09 | Phase 3 | Gaps Found |
+| DET-10 | Phase 3 | Gaps Found |
+| DET-11 | Phase 3 | Gaps Found |
+| DET-12 | Phase 3 | Gaps Found |
 | ID-01 | Phase 2 | Complete |
 | ID-02 | Phase 2 | Complete |
 | ID-03 | Phase 4 | Pending |

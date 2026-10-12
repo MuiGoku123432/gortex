@@ -1,8 +1,8 @@
 ---
 phase: 03-deterministic-cobol-and-mainframe-breadth
-verified: 2026-10-02T13:57:00Z
+verified: 2026-10-12T16:14:27Z
 status: gaps_found
-score: 11/13 must-haves verified
+score: 16/17 must-haves verified
 covered_files:
   - .planning/REQUIREMENTS.md
   - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-01-PLAN.md
@@ -31,13 +31,25 @@ covered_files:
   - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-12-SUMMARY.md
   - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-13-PLAN.md
   - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-13-SUMMARY.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-14-PLAN.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-14-SUMMARY.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-15-PLAN.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-15-SUMMARY.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-16-PLAN.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-16-SUMMARY.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-17-PLAN.md
+  - .planning/phases/03-deterministic-cobol-and-mainframe-breadth/03-17-SUMMARY.md
+  - cmd/gortex/cobol_breadth_test.go
   - docs/languages.md
   - go.mod
+  - internal/indexer/extractor_version.go
   - internal/indexer/incremental_resolve.go
   - internal/indexer/source_revision.go
   - internal/parser/languages/cobol_grammar.go
+  - internal/parser/languages/cobol_grammar_copybook.go
   - internal/parser/languages/cobol_grammar_data.go
   - internal/parser/languages/cobol_grammar_data_clauses.go
+  - internal/parser/languages/cobol_grammar_data_refs.go
   - internal/parser/languages/cobol_grammar_dedupe.go
   - internal/parser/languages/cobol_grammar_flow.go
   - internal/parser/languages/cobol_grammar_identity.go
@@ -46,239 +58,257 @@ covered_files:
   - internal/parser/languages/cobol_grammar_refs.go
   - internal/parser/languages/cobol_grammar_sql.go
   - internal/parser/languages/cobol_grammar_statements.go
+  - internal/parser/languages/cobol_grammar_unsupported.go
   - internal/parser/languages/cobol_grammar_walk.go
   - internal/resolver/cobol_references.go
   - internal/resolver/cross_repo.go
   - internal/resolver/resolver.go
-covered_digest: "v1:sha256:6a15fc8cdcbd846f1e2a9681577fd7a57095b24f69ec6a1389f10649bcacf9cc"
+covered_digest: "v1:sha256:018f509a36dab243597a9f2c71788210bcb890946864ed188ff319eab4fab401"
 behavior_unverified: 0
 overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 11/13
+  gaps_closed:
+    - "DET-05 / SC3: copybook and include references keep the referenced member name and source occurrence, including COPY statements inside an analyzed copybook (03-15)"
+    - "Human item 1: procedure-fragment copybooks now emit sections, paragraphs, statements, flow, CALL, COPY, IDMS, CICS, and SQL edges (03-16, 03-17; user chose fix now)"
+    - "Gap 1, cross-file part: a CALL from another file never binds to a nested program (03-14)"
+  gaps_remaining:
+    - "Gap 1, same-file part: a literal CALL is bound only to a program a separately compiled caller can actually reach. A top-level program in a multi-program (batch) file still binds to a program nested inside a different top-level program of the same file (review WR-08)"
+  regressions: []
 gaps:
-  - truth: "Phase goal clause 'without false deterministic resolution': a literal CALL is bound only to a program a separately compiled caller can actually reach"
-    status: failed
-    reason: "resolveCobolReferences indexes nested (contained) programs as repo-wide candidates. A CALL 'INNER' in a different file binds to OUTER/INNER whenever that nested program is the only INNER in the repository. COBOL scoping makes a nested program uncallable from outside its containing program, so this binding is false. Confirmed by a non-mutating overlay probe: a/caller.cbl CALL 'INNER' -> a/nest.cbl::OUTER/INNER with no cobol_unresolved_reason."
+  - truth: "Phase goal clause 'without false deterministic resolution' (carried from previous gap 1): a literal CALL is bound only to a program a separately compiled caller can actually reach"
+    status: partial
+    reason: "03-14 closed the cross-file case. The same-file branch of resolveCobolReferences still treats every program in the caller's file as visible, whatever its containment. Non-mutating overlay probe through the real MultiIndexer, SQLite store, and production resolver: in cobol/batch.cbl (top-level A containing UTIL, then top-level B), B's CALL 'UTIL' binds to cobol/batch.cbl::A/UTIL with no cobol_unresolved_reason. That happens even though a top-level UTIL exists in cobol/util.cbl: the non-empty same-file set shadows it. COBOL scoping makes A/UTIL unreachable from B. In a second case, P contains X and Y (X not COMMON), and Y's CALL 'X' binds to P/X. Both are deterministic bindings the phase goal forbids (review WR-08)."
     artifacts:
       - path: "internal/resolver/cobol_references.go"
-        issue: "cobolCandidateIndex includes every cobol_kind=program node. The same-file filter (lines 81-92) prefers same-file candidates but falls back to nested programs from other files"
+        issue: "lines 92-106: every candidate with c.FilePath == e.FilePath goes into sameFile, regardless of cobol_nested or containment, and sameFile replaces the top-level set whenever it is non-empty"
       - path: "internal/parser/languages/cobol_grammar.go"
-        issue: "every program node, including contained programs, gets cobol_name_key, and no nested/top-level marker is stamped for the resolver to filter on"
+        issue: "program nodes carry cobol_nested but not their container, so the resolver cannot test visibility. CALL edges do not record the caller program"
     missing:
-      - "Only offer nested programs (QualName contains '/', or a cobol_nested=true Meta stamped at extraction) as candidates for callers in the same file. A cross-file caller sees only top-level programs. A sole nested match then gives missing, not a binding"
-      - "A resolver test: cross-file CALL to the only nested INNER stays on unresolved::cobol::program::INNER with cobol_unresolved_reason=missing"
-  - truth: "DET-05 / SC3: copybook and include references keep the referenced member name and source occurrence, including COPY statements inside an analyzed copybook"
-    status: partial
-    reason: "Plan 03-13 turned on copybook analysis, so the parser now exposes the copy_statement observations inside a copybook. The copybook branch of Extract runs only cobolDataSection and cobolDataBind and never calls cobolCopy. A 'COPY INNERCPY.' inside outer.cpy only sets cobol_contains_copy=true on an item. No imports edge is emitted, so the member name INNERCPY and its source range are lost. Confirmed by overlay probe: outer.cpy emitted only defines/member_of edges. Plan 03-13 assigned this to Phase 4, but neither the Phase 4 roadmap success criteria nor the CONTEXT deferred list mention copybook-to-copybook edges. CONTEXT defers only library search order."
-    artifacts:
-      - path: "internal/parser/languages/cobol_grammar.go"
-        issue: "the copybook branch (lines 220-241) never emits COPY or EXEC SQL INCLUDE reference edges"
-    missing:
-      - "In the copybook branch, call cobolCopy(w, i) for every copy_statement and exec_sql_include observation. cobolCopy already emits from the file node when no program owns the COPY"
-      - "Extend TestCobolGrammar_CopybookNestedCopy to assert the imports edge to unresolved::cobol::copybook::<key> with cobol_copy_member_raw and the statement range keys"
+      - "Decide visibility from containment, not file equality. A nested candidate is visible only to its direct container. Bind a sibling only when COMMON is proven; if the producer does not expose IS COMMON, a sibling stays unresolved with a distinct reason, never bound. Either stamp cobol_container on program nodes and the caller program on CALL edges, or bind visible nested callees in the extractor and keep nested programs out of the resolver index entirely"
+      - "Same-file top-level programs join the ordinary top-level candidate set (other files included), so a real top-level target is never shadowed"
+      - "Tests: a batch file (A contains UTIL; top-level B calls UTIL; top-level UTIL in another file) where B's CALL binds to the other file's UTIL, or is missing or ambiguous, and never binds to A/UTIL. A non-COMMON sibling call is not bound. Both a resolver unit test and a TestCobolBreadth real-path case"
 deferred:
-  - truth: "Incremental re-index keeps bound COBOL CALL/COPY edges in the cobol:: namespace and does not drop inbound COPY edges (review CR-01, WR-01)"
+  - truth: "Incremental re-index keeps bound COBOL CALL/COPY edges in the cobol:: namespace and does not drop inbound COPY edges, now including copybook-to-copybook imports and copybook CALLs (review CR-01, WR-01)"
     addressed_in: "Phase 4"
     evidence: "Phase 4 SC3 'Edit, delete, restore ... changes remove or invalidate stale owned observations', SC4 'Incremental reconciliation and a clean rebuild produce the same canonical active deterministic subgraph', SC5 'Resolution ... fail closed ... reject unsupported same-name ... binding'"
-  - truth: "Shared DB2/IDMS/CICS resource nodes survive eviction of the first-sighting file without deleting other programs' edges (review CR-02)"
+  - truth: "Shared DB2/IDMS/CICS resource nodes survive eviction of the writing file, and their per-document prov_* fields do not flip between program and copybook writers (review CR-02, scope widened by 03-17)"
     addressed_in: "Phase 4"
-    evidence: "Phase 4 SC1 'namespaced resources ... retain stable, non-colliding identities', SC3, SC4. Plan 03-08 Pitfall 7 assigned shared-node ownership to Phase 4"
+    evidence: "Phase 4 SC1 'namespaced resources ... retain stable, non-colliding identities and distinguishable provenance', SC3, SC4"
   - truth: "Unprefixed per-program unresolved placeholders (dynamic/label/data) cannot collide across repositories with the same file path"
     addressed_in: "Phase 4"
     evidence: "Phase 4 SC5 'report zero unowned or misprefixed active nodes for the acceptance corpus'"
+  - truth: "COBOL mapping changes invalidate stale stores: the extractor version is bumped past gortex-cobol-grammar/3, .cbl/.cob/.cpy carry an extractor-version salt, and a program node with no cobol_nested key is never a cross-file candidate (review WR-10)"
+    addressed_in: "Phase 4"
+    evidence: "Phase 4 SC3 '... parser-version, extractor-version ... changes remove or invalidate stale owned observations' (ID-08); SC5 'Resolution and all downstream surfaces fail closed on missing scope'"
   - truth: "Copybook analysis failure is distinguishable from a missing copybook (review WR-06), and SQL unparsed tails, WORKING-STORAGE DECLARE CURSOR, and DECLARE ... WITH HOLD produce explicit parse findings (WINDOWS.md 4-6)"
     addressed_in: "Phase 5"
     evidence: "Phase 5 goal 'distinguish source that could not be parsed from referenced artifacts that were not retrieved'; SC1 'Named unparsed tails and localized ERROR or MISSING nodes produce ... PARSE_UNRESOLVED findings'"
+  - truth: "Unresolved reasons are scope-accurate: a procedure copybook's cursor use gets a copybook-scoped reason instead of cursor_not_declared (WR-09), a twice-declared cursor is ambiguous, not cursor_not_declared (WR-07), and a program nested under unresolved containment does not report a plain missing (IN-08)"
+    addressed_in: "Phase 5"
+    evidence: "Phase 5 SC2 'Each finding exposes ... resolution class, normalized reason'; SC3 'Missing-target placeholders preserve the observed target reference without fabricated ... attributes'"
 ---
 
 # Phase 3: Deterministic COBOL and Mainframe Breadth Verification Report
 
 **Phase Goal:** Users can inspect source-positioned COBOL structure, control flow, data, calls, copybooks, IDMS, CICS, and SQL without false deterministic resolution.
-**Verified:** 2026-10-02T13:57:00Z
+**Verified:** 2026-10-12T16:14:27Z
 **Status:** gaps_found
-**Re-verification:** No (initial verification)
+**Re-verification:** Yes, after gap closure (plans 03-14 to 03-17)
 
 ## Goal Achievement
 
-The core breadth is real. It is substantive, wired end-to-end (extractor, indexer hook, SQLite, resolver, daemon MCP relay, CLI relay), and behaviorally tested on a two-repository real-path fixture. Two observable defects remain. Both are small and both are in Phase 3 scope:
+The gap-closure work is real and wired. COPY inside copybooks (previous gap 2) and procedure copybooks (previous human item 1) are closed and proven on the persisted SQLite graph. The cross-file part of previous gap 1 is closed.
 
-1. A cross-file literal CALL binds falsely to a nested program.
-2. Copybook-mode extraction drops the member name of a nested COPY.
+One false deterministic binding remains. The same-file rule from 03-14 ignores containment, so in a multi-program file a top-level program's CALL binds to a program nested inside a different top-level program. It also shadows the real top-level target in another file. A non-mutating overlay probe confirmed this on the real indexing path (review WR-08). It is the same class of defect as previous gap 1 and fails the same truth, so it stays a blocker.
+
+### Previous Gap Status
+
+| Previous item | Status now | Evidence |
+|---|---|---|
+| Gap 1: cross-file CALL binds to a nested program | ⚠️ Partially closed | Cross-file: closed. `cobol_nested` is stamped on every program node (`cobol_grammar.go:233`, `identity.go` `nested: len(open) > 0`). The resolver excludes nested programs from other files. `TestCobolBreadth_NestedProgramScope` and 4 `nested_*` resolver subtests pass. Same-file: still false (WR-08, see gap) |
+| Gap 2: COPY inside a copybook loses member name (DET-05) | ✓ Closed | `cobolCopybook` calls `cobolReferences(w, idx)`, and `w.id(root)` maps the wrapper to the file node. `TestCobolBreadth_CopybookNestedCopy`: `copy/custall.cpy -> copy/custrec.cpy` imports edge bound, with `cobol_copy_member_raw=CUSTREC`, `prov_start_row=1`, `prov_range_exact`, and no reason. `TestCobolGrammar_CopybookNestedCopy/IncludeForms` pass |
+| Human item 1: procedure copybooks emit nothing | ✓ Closed (user chose fix now) | `TestCobolBreadth_CopybookProcedure`: `copy/valpara.cpy::@proc/VALIDATE-PARA` and `CHECK-PARA` persist at member rows 0 and 5. PERFORM is bound. The foreign `PERFORM MAIN-PARA` stays `label_not_in_copybook`. CALL 'SUBPGM' is bound. MCP `get_callers` returns VALIDATE-PARA. There is no program or division node and no wrapper name. `TestCobolBreadth_CopybookProcedureReferences`: reads edge to `db2::MYSCH/ORDERS` at row 4 |
 
 ### Observable Truths
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | SC1: source-positioned programs, copybooks, divisions, sections, paragraphs, statements, and data items come from named parser nodes | ✓ VERIFIED | `cobol_grammar_procedure.go`, `cobol_grammar_statements.go`, and `cobol_grammar_data.go` build every node from `h.Facts.Observations` and stamp original-coordinate ranges through `cobolStampRange`/`cobolStampExtent`. The tests pass: `TestCobolGrammar_Structure/Statements/Paragraphs/Divisions/DataItems` and `TestCobolGrammar_CopybookDataItems`. On the real path, `TestCobolBreadth_StructureAndFlow` runs MCP `get_symbol` on a field, a variable, a statement, and a division, and `TestCobolTracer_CopybookDataItems` passes. Caveat: procedure-fragment copybooks yield only a file node (see Human Verification 1) |
-| 2 | SC2: PERFORM, THRU, and GO TO produce paragraph control flow without claiming unsupported resolution | ✓ VERIFIED | `cobol_grammar_flow.go`: labels resolve program-locally; THRU expands only for a valid range and otherwise goes to one `unresolved::cobol::label::…::thru::…` with a reason; GO TO DEPENDING ON keeps positions; an alterable GO TO marks its node; no fall-through edges. `TestCobolGrammar_ControlFlow` has 14 subtests, including `thru_invalid`, `nested_isolation`, and `no_fallthrough`. Real path: `get_call_chain` from MAIN-PARA reaches STEP-A..E, and MCP plus CLI `get_callers` on STEP-B return MAIN-PARA |
-| 3 | SC3: literal calls, dynamic identifiers, copybook references, missing targets, and ambiguous resolution stay distinguishable | ✓ VERIFIED (program-origin references) | `cobolCallTarget` keeps literal calls (`unresolved::cobol::program::`) apart from dynamic ones (`unresolved::cobol::dynamic::program::<prog>::`, reason dynamic). `cobolCopy` handles the copy, inc, idms, and sql_include forms. The resolver stamps missing or ambiguous plus `cobol_candidate_ids`. `TestCobolBreadth_CallsAndCopy` on the persisted graph covers: SUBPGM bound; TWINPGM ambiguous with both IDs; ONLYB missing even though it exists in repo B; WS-PGM dynamic; COPY IDMS `idms_dictionary_member`. References inside copybooks are not covered; see truth 7 |
-| 4 | SC4: IDMS record/set and CICS program/transaction/map/mapset references keep exact source evidence | ✓ VERIFIED | `cobol_grammar_mainframe.go` has the verb table, `_unqualified` subschema and mapset, `scope_role_unknown` for WITHIN, and CICS PROGRAM handled through `cobolCallTarget`. `TestCobolGrammar_IDMS` (9 subtests) and `TestCobolGrammar_CICS` (7 subtests) pass. On the real path, the OBTAIN reads `idms::_unqualified/record/EMP-REC` and the SEND writes `cics::map/MSET1/MAP1`, each with verb or command Meta, `cobol_statement_symbol`, and Line = prov_start_row+1 |
-| 5 | SC5: DB2 reads and writes keep statement-level evidence, while aliases, CTEs, includes, and dynamic sources stay distinct from physical tables | ✓ VERIFIED | `cobol_grammar_sql.go`: tables come only from `sql_source_candidate`; CTE names are subtracted; aliases and derived aliases go to Meta; PREPARE goes to a dynamic placeholder; EXECUTE is marked `sql_dynamic`. `TestCobolGrammar_SQL` (13 subtests) covers delimited identifiers kept verbatim and the `tables_exact`/`cursor_tables_exact` sets. On the real path, the persisted KindTable set is exactly {MYSCH/ORDERS, _unqualified/AUDIT_LOG, _unqualified/ORDHIST}. Producer limits are documented in WINDOWS.md 4-6; no table is invented and affected documents grade amber or red |
-| 6 | Goal clause: no false deterministic resolution on a full index | ✗ FAILED | Overlay probe: `a/caller.cbl` with CALL 'INNER' binds to `a/nest.cbl::OUTER/INNER`, a nested program a separately compiled caller cannot reach. `cobolCandidateIndex` does not distinguish nested programs from top-level ones (also flagged by code review WR-02) |
-| 7 | DET-05: copybook/include references keep the member name and occurrence, including references inside analyzed copybooks | ✗ FAILED (partial) | Overlay probe: `outer.cpy` containing `COPY INNERCPY.` emits no imports edge, only `cobol_contains_copy=true`. The copybook branch never calls `cobolCopy` (code review WR-05) |
-| 8 | 03-02 CR-01: BOM byte offsets shift by 3 on nodes and edges; any other mismatch is marked inexact; VCS stamp on edges | ✓ VERIFIED | `stampSourceRevision` stamps edges and calls `alignProvByteOffsets` (`source_revision.go:85`). It is reached from `applyCoverageDomains` on 3 indexer paths. `TestSourceRevision*` and `TestCobolBOMByteOffsets` pass. Real path: `TestCobolBreadth_BOMEdgeOffsets` checks that the PERFORM edge's prov_start_byte equals the raw-file offset with the BOM included |
-| 9 | 03-04: owned `cobol::` namespace; same-repo exactly-one binding; dynamic/label/data/idms_scope/COPY IDMS never rebound | ✓ VERIFIED | `resolver.go:3379`, `cross_repo.go:1121`, and `incremental_resolve.go:453` exclude `cobol::`. `resolveCobolReferences` is called at `resolver.go:1662`, skips `copybook::idms/`, and handles only `program::`/`copybook::`. `TestCobolNamespaceExclusions`, `TestCobolReferences_*`, and `TestReuseIdentifierSkipsCobolNamespace` pass |
-| 10 | Provenance contract: full prov_* on analyzed nodes and relationship edges; structural edges have nil Meta; Meta value types are restricted; no secret-like keys; extractor version /3 | ✓ VERIFIED | `relationEdge`/`symbolNode` clone docMeta, and `structural` sets no Meta. `TestCobolGrammar_ProvKeys` passes; real-path tests assert `gortex-cobol-grammar/3` |
-| 11 | Amber and red documents still emit breadth, with grade keys and per-observation prov_affected | ✓ VERIFIED | `TestCobolGrammar_DegradedBreadth` passes. The SQL `amber` subtest asserts that edges carry the amber grade and prov_affected |
-| 12 | Neo4j projection keeps Phase 3 node Meta keys as meta_ properties | ✓ VERIFIED | `TestProjectNode_CobolBreadthMeta` passes. Info: the fixture's `cobol_renames` type differs from the extractor's []string (review IN-05) |
-| 13 | 03-11/12/13: fork copybook mode is pushed and pinned; copybooks go through AnalyzeCopybook under the approved-grammar check; copybook-owned data items keep member coordinates; no wrapper nodes | ✓ VERIFIED | `go.mod` requires preprocessor `v0.0.0-20261002100409-e64234cc493c`; the forest-shim replace is unchanged at f9eaf99. The module cache copy contains `AnalyzeCopybook`, `RunCopybook`, `PolicyCopybookV1`, and `AnchorsByConstruction`. `cobolApprovedGrammarID` is unchanged since 81d26400 (Phase 2). `Extract` runs the grammar check after both analysis branches. `TestCobolGrammar_CopybookGrammarPinned/ProcedureFragment/ReplacingDegrades` and `TestCobolTracer_CopybookDataItems` pass. Orchestrator-verified: ls-remote shows the fork commit on origin |
+| 1 | SC1: source-positioned programs, copybooks, divisions, sections, paragraphs, statements, and data items from named parser nodes | ✓ VERIFIED | Unchanged from the previous verification. The procedure-copybook caveat is closed: copybook paragraphs and statements have member coordinates (truth 15) |
+| 2 | SC2: PERFORM, THRU, and GO TO paragraph flow without unsupported resolution | ✓ VERIFIED | Unchanged for programs (`TestCobolGrammar_ControlFlow`). Copybooks resolve labels member-locally with `label_not_in_copybook` (`TestCobolGrammar_CopybookProcedureFlow`, real path) |
+| 3 | SC3: literal calls, dynamic identifiers, copybook references, missing, and ambiguous stay distinguishable | ✓ VERIFIED | `TestCobolBreadth_CallsAndCopy` and `TestCobolGrammar_CopybookProcedureCalls` (dynamic CALL in a copybook goes to `unresolved::cobol::dynamic::program::<path>::<key>` with reason dynamic) pass |
+| 4 | SC4: IDMS record/set and CICS program/transaction/map/mapset keep exact source evidence | ✓ VERIFIED | Unchanged for programs. Copybooks: `TestCobolGrammar_CopybookProcedureMainframe` |
+| 5 | SC5: DB2 reads/writes keep statement evidence; aliases, CTEs, includes, and dynamic sources stay distinct | ✓ VERIFIED | Unchanged. Copybook SQL adds no table: repository A's KindTable set is unchanged (03-17 real-path test) |
+| 6 | Goal clause: a literal CALL binds only to a program the caller can actually reach (no false deterministic resolution) | ✗ FAILED (partial) | Cross-file: fixed. Same-file: the overlay probe shows `batch.cbl::B` CALL 'UTIL' binding to `batch.cbl::A/UTIL` (reason nil) while top-level `util.cbl::UTIL` exists, and `sibling.cbl::P/Y` CALL 'X' binding to non-COMMON `P/X`. `cobol_references.go:92-106` puts every same-file candidate in `sameFile` |
+| 7 | DET-05: copybook/include references keep member name and occurrence, including inside analyzed copybooks | ✓ VERIFIED | Gap 2 closed (see table above) |
+| 8 | 03-02 CR-01: BOM byte offsets aligned on nodes and edges; VCS stamp on edges | ✓ VERIFIED | `TestSourceRevision*`, `TestCobolBreadth_BOMEdgeOffsets` pass |
+| 9 | 03-04: owned `cobol::` namespace; same-repo exactly-one; dynamic/label/data/idms_scope/COPY IDMS never rebound | ✓ VERIFIED | `TestCobolNamespaceExclusions`, `TestCobolReferences_*`, `TestReuseIdentifierSkipsCobolNamespace` pass. COPY IDMS skip still at `cobol_references.go` (`cobolIDMSCopyTargetPrefix`) |
+| 10 | Provenance contract: full prov_* on analyzed nodes and edges, restricted Meta types, no secret-like keys, extractor version recorded | ✓ VERIFIED | `TestCobolGrammar_ProvKeys` passes, and the copybook fixtures pass `assertCobolMetaContract`. Warning: the version is still `/3` after mapping changes (WR-10, deferred to Phase 4) |
+| 11 | Amber and red documents still emit breadth with grade keys and prov_affected | ✓ VERIFIED | `TestCobolGrammar_DegradedBreadth` passes |
+| 12 | Neo4j projection keeps Phase 3 node Meta keys | ✓ VERIFIED | `TestProjectNode_CobolBreadthMeta` passes |
+| 13 | 03-11/12/13: fork copybook mode pinned; copybooks via AnalyzeCopybook under the grammar check; no wrapper nodes | ✓ VERIFIED | `go.mod`/`go.sum` show no diff since `78f40016`. `TestCobolGrammar_CopybookGrammarPinned` passes. The real-path test asserts no `CPYWRAP` ID and no program or division node in copybooks |
+| 14 | 03-14: every program node carries `cobol_nested`; the resolver reads the flag and never infers nesting from ID shape | ✓ VERIFIED | Probe: `A` and `B` give `nested=false`; `A/UTIL`, `P/X`, and `P/Y` give `nested=true`. `TestCobolGrammar_ProgramNestedStamp` passes. The resolver uses only `metaCobolNested` |
+| 15 | 03-16: procedure copybooks own sections, paragraphs, statements, PERFORM/THRU/GO TO, CALL, and COPY with member coordinates; no wrapper program or division | ✓ VERIFIED | `TestCobolGrammar_CopybookProcedureRoot/Flow/Calls/Fragment` and `TestCobolBreadth_CopybookProcedure` (SQLite plus MCP relay) pass |
+| 16 | 03-17: copybook IDMS, CICS, and SQL edges; `not_declared_in_copybook` for undeclared data names | ✓ VERIFIED | `TestCobolGrammar_CopybookProcedureMainframe`, `TestCobolGrammar_CopybookDataNames`, and `TestCobolBreadth_CopybookProcedureReferences` pass. `cobol_grammar_data_refs.go` gates the reason on `w.root != ""` |
+| 17 | 03-17: WR-04 window recorded (`cobol_copybook_wrapper`, `copybook_content_unmapped`) and documented in docs/languages.md | ✓ VERIFIED | `cobol_grammar_copybook.go` stamps both, `TestCobolGrammar_CopybookWrapperWindow` passes, and the docs row has every required sentence plus the Windows sentence |
 
-**Score:** 11/13 truths verified (0 present, behavior-unverified)
+**Score:** 16/17 truths verified (0 present, behavior-unverified)
+
+### Judgment on New Review Findings
+
+| Finding | Verdict | Reasoning |
+|---|---|---|
+| WR-08 batch file: a top-level caller binds to a program nested in another top-level program, shadowing a real top-level target | 🛑 Goal gap (blocker) | Confirmed on the real path. It is a deterministic binding to an unreachable program, the exact class the phase goal and previous gap 1 forbid. No later phase names same-file containment visibility (Phase 4 SC5 covers cross-repository binding only) |
+| WR-08 non-COMMON sibling binds | 🛑 Part of the same gap | Confirmed by the probe. It is a false binding unless COMMON is proven. If the producer cannot expose `IS COMMON` (no COMMON observation found in the pinned producer module), the call should fail closed |
+| WR-08 two containers each holding UTIL: false `ambiguous` | ⚠️ Warning | Conservative: nothing is bound. The containment fix above resolves it as a side effect |
+| WR-09 copybook cursor stamped `cursor_not_declared` | ⚠️ Warning, deferred to Phase 5 | Confirmed by the probe (`curpara.cpy::@proc/CUR-PARA/@exec_sql_statement` and `#2`). Nothing is bound and no table is invented, so this is not a false resolution. It is an inaccurate reason, which belongs to Phase 5's normalized-reason contract. No plan truth required a copybook cursor reason. It would be cheap to fix with the gap above |
+| WR-10 fail-open on a missing `cobol_nested` key | ⚠️ Warning, deferred to Phase 4 | On a fresh full index every program node carries the key (probe and real-path test). Only stale stores or foreign writers lack it, which is Phase 4 SC5 "fail closed on missing scope" |
+| WR-10 extractor version `/3` not bumped; COBOL not in `extractorSaltExtLang` | ⚠️ Warning, deferred to Phase 4 | Confirmed: `cobol_grammar.go:42` is `gortex-cobol-grammar/3`, and `extractor_version.go` has no `.cbl/.cob/.cpy` entry. PROV-05 (an identifier is recorded) still holds. Stale-store invalidation on extractor change is Phase 4 SC3/ID-08. Recommendation: bump to `/4` when the WR-08 fix lands, since that changes emitted Meta again |
+| IN-07 self-COPY binds a self-import | ℹ️ Info | Confirmed (`selfcpy.cpy -imports-> selfcpy.cpy`). It mirrors what is written, and compilers reject recursive COPY. Not a false resolution of a valid program |
+| IN-08 `cobol_nested=true` under unresolved containment gives false `missing` | ⚠️ Warning, deferred to Phase 5 | Conservative: nothing is bound. The file node carries `prov_containment_unresolved` |
+| CR-01, CR-02, WR-01, WR-06 | Deferred (unchanged) | No indexer, graph, or `resolver.go` change in `78f40016..HEAD`. The full-index path is unaffected: all real-path tests pass on a full track. CR-02's provenance flip between program and copybook writers is a shared-node ownership issue, which is Phase 4 SC1 |
 
 ### Deferred Items
 
 | # | Item | Addressed In | Evidence |
 |---|------|-------------|----------|
-| 1 | Incremental re-index restubs bound COBOL CALLs to bare `unresolved::<Name>` (then generic resolution) and drops inbound COPY edges; `resolveCobolReferences` does not run on the incremental path (review CR-01, WR-01) | Phase 4 | SC3, SC4 (incremental = clean rebuild), SC5 (fail closed, reject unsupported same-name binding) |
-| 2 | Shared DB2/IDMS/CICS nodes are owned by the first or last sighting file; evicting that file deletes other programs' edges (review CR-02) | Phase 4 | SC1 namespaced resource identities, SC3/SC4 stale-observation reconciliation; Plan 03-08 Pitfall 7 |
-| 3 | Unprefixed per-program placeholder IDs can collide across repositories that share a relative path | Phase 4 | SC5 "zero unowned or misprefixed active nodes" |
-| 4 | Copybook analysis failure drops the file node, so COPYs report `missing` (review WR-06); SQL unparsed tails, WORKING-STORAGE DECLARE CURSOR, and WITH HOLD (WINDOWS.md 4-6) | Phase 5 | Goal: distinguish unparsed source from unretrieved artifacts; SC1 PARSE_UNRESOLVED findings |
+| 1 | Incremental restub and COPY-edge drops, now including copybook-origin edges (CR-01, WR-01) | Phase 4 | SC3, SC4, SC5 |
+| 2 | Shared resource ownership and prov flip between program and copybook writers (CR-02) | Phase 4 | SC1, SC3, SC4 |
+| 3 | Cross-repository placeholder collisions | Phase 4 | SC5 |
+| 4 | Extractor version bump, COBOL salt, fail-closed `cobol_nested` (WR-10) | Phase 4 | SC3 (ID-08), SC5 |
+| 5 | Copybook analysis failure vs missing (WR-06); SQL producer windows (WINDOWS.md 4-6) | Phase 5 | Goal, SC1 |
+| 6 | Reason accuracy: copybook cursor (WR-09), duplicate DECLARE (WR-07), unresolved containment (IN-08) | Phase 5 | SC2, SC3 |
 
-Deferral note: items 1 and 2 are real hazards for any user who edits files after the initial index. They do not affect the full-index path this phase delivers. Phase 4 must close them before COBOL is used under a watcher.
+Phase 4 must close items 1, 2, and 4 before COBOL is used under a watcher or on a store indexed before 03-14.
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `internal/parser/languages/cobol_grammar.go` | Extract orchestration, /3 version, copybook branch, pins | ✓ VERIFIED | 301 lines; calls `newCobolWalk`, `cobolProcedure`, `cobolDataItems`, `cobolReferences(w, data)`, `cobolMainframe(w, data)`, `cobolSQL(w, data)`, `cobolDedupeEdges`, `AnalyzeCopybook`, `cobolDataSection` |
-| `internal/parser/languages/cobol_grammar_walk.go` | shared walk, relationEdge, resourceNode, stamping | ✓ VERIFIED | 280 lines; `cobolDedupeEdges` lives in sibling `cobol_grammar_dedupe.go` (49 lines), not in walk.go as planned. This is a harmless relocation |
-| `internal/parser/languages/cobol_grammar_procedure.go` | divisions, sections, paragraphs, ordinals, extents | ✓ VERIFIED | calls `cobolStatements(w)` and then `cobolFlow(w)` |
-| `internal/parser/languages/cobol_grammar_statements.go` | KindLocal statements, COPY span placement | ✓ VERIFIED | |
-| `internal/parser/languages/cobol_grammar_data.go` (+ `_data_clauses.go`) | data items, hierarchy, REDEFINES/RENAMES, data index | ✓ VERIFIED | |
-| `internal/parser/languages/cobol_grammar_flow.go` | label resolver, THRU, GO TO | ✓ VERIFIED | all edges are built through `relationEdge` |
-| `internal/parser/languages/cobol_grammar_refs.go` | CALL, COPY, -INC, COPY IDMS, SQL INCLUDE | ✓ VERIFIED | not wired into the copybook branch (gap 2) |
-| `internal/parser/languages/cobol_grammar_mainframe.go` | IDMS verb table, CICS commands | ✓ VERIFIED | CICS PROGRAM goes through `cobolCallTarget` |
-| `internal/parser/languages/cobol_grammar_sql.go` | DB2 tables, cursors, dynamic SQL | ✓ VERIFIED | |
-| `internal/resolver/cobol_references.go` | exactly-one same-repo binding pass | ⚠️ VERIFIED with defect | wired at `resolver.go:1662`; the nested-program candidate leak is gap 1 |
-| `internal/indexer/source_revision.go` | alignProvByteOffsets and edge stamping | ✓ VERIFIED | |
-| `cmd/gortex/cobol_breadth_test.go`, `cmd/gortex/cobol_tracer_test.go` | real-path acceptance | ✓ VERIFIED | 431 and 649 lines; all 12 tests pass |
-| `internal/parser/languages/cobol_grammar_contract_test.go` | ProvKeys, DegradedBreadth | ✓ VERIFIED | |
-| `internal/neo4jprojection/properties_test.go` | TestProjectNode_CobolBreadthMeta | ✓ VERIFIED | |
-| `docs/languages.md` | COBOL Phase 3 row | ✓ VERIFIED | Info: it does not state the copybook limits (no nested COPY edges, no procedure-fragment structure) |
-| `go.mod` | preprocessor re-pin, forest-shim unchanged | ✓ VERIFIED | |
+| `internal/parser/languages/cobol_grammar_identity.go` | `nested` from the END PROGRAM stack | ✓ VERIFIED | `nested: len(open) > 0` |
+| `internal/parser/languages/cobol_grammar.go` | `cobol_nested` on program nodes; copybook branch delegates | ✓ VERIFIED | `meta["cobol_nested"] = p.nested`; `cobolCopybook(h, src, filePath, docMeta, result)` |
+| `internal/parser/languages/cobol_grammar_copybook.go` | copybook pipeline, wrapper root, WR-04 stamps | ✓ VERIFIED | 86 lines. Calls `cobolProcedure`, `cobolDataSection`, `cobolDataBind`, `cobolReferences`, `cobolMainframe`, and `cobolSQL`, then stamps `grade.Green` absence |
+| `internal/parser/languages/cobol_grammar_walk.go` | `root`, `id()` | ✓ VERIFIED | `func (w *cobolWalk) id(symbol string)` maps the root to the file node |
+| `internal/parser/languages/cobol_grammar_data_refs.go` | data-name resolution plus `not_declared_in_copybook` | ✓ VERIFIED | 114 lines. Logic moved from `cobol_grammar_data.go` |
+| `internal/resolver/cobol_references.go` | `metaCobolNested`, cross-file nested exclusion | ⚠️ VERIFIED with defect | Cross-file rule correct. Same-file rule ignores containment (gap) |
+| `cmd/gortex/cobol_breadth_test.go` | nest, custall, and valpara fixtures and tests | ✓ VERIFIED | 8 `TestCobolBreadth_*` pass |
+| `internal/parser/languages/cobol_grammar_copybook_test.go` | copybook unit tests | ✓ VERIFIED | 13 `TestCobolGrammar_Copybook*` pass |
+| `docs/languages.md` | COBOL row updates | ✓ VERIFIED | Nested-scope, copybook COPY, procedure copybook, not-expanded, WR-04, and Windows sentences present |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| cobol_grammar.go | cobol_grammar_procedure.go | `cobolProcedure(w)` | ✓ WIRED | |
-| cobol_grammar.go | cobol_grammar_dedupe.go | `cobolDedupeEdges(result.Edges)` on both branches | ✓ WIRED | |
-| cobol_grammar_walk.go | cobol_grammar_statements.go | `statementSymbol` in `relationEdge` | ✓ WIRED | |
-| cobol_grammar.go | cobol_grammar_data.go | `cobolDataItems(w)` / copybook `cobolDataSection` | ✓ WIRED | |
-| cobol_grammar_flow.go | cobol_grammar_walk.go | `relationEdge(` | ✓ WIRED | |
-| cobol_grammar_refs.go | resolver/cobol_references.go | `unresolved::cobol::program::` / `copybook::` plus node `cobol_name_key` | ✓ WIRED | proven bound on the persisted graph |
-| cobol_grammar_refs.go | cobol_grammar_data.go | `cobolDataReference(` for dynamic CALL | ✓ WIRED | |
-| cobol_grammar_mainframe.go | cobol_grammar_refs.go | `cobolCallTarget(` for CICS PROGRAM | ✓ WIRED | |
-| cobol_grammar_sql.go | cobol_grammar_walk.go | `resourceNode(` KindTable | ✓ WIRED | |
-| resolver.go | cobol_references.go | `r.resolveCobolReferences()` in ResolveAllContext | ✓ WIRED | full resolve only; incremental path deferred to Phase 4 |
-| source_revision.go | indexer.go | `alignProvByteOffsets(` inside `stampSourceRevision` | ✓ WIRED | |
-| cobol_grammar.go | fork preprocessor | `e.analyzer.AnalyzeCopybook(` under `cobolAnalyzeSlot` | ✓ WIRED | |
-| cobol_tracer_test.go | tools_core get_callers | daemon relay `"get_callers"` | ✓ WIRED | |
+| identity.go | cobol_grammar.go | `p.nested` into Meta | ✓ WIRED | |
+| cobol_grammar.go | resolver/cobol_references.go | `cobol_nested` read as `metaCobolNested` | ✓ WIRED | Probe shows the flag on persisted nodes |
+| cobol_grammar.go | cobol_grammar_copybook.go | `cobolCopybook(` | ✓ WIRED | |
+| cobol_grammar_copybook.go | cobol_grammar_refs.go | `cobolReferences(w, idx)` | ✓ WIRED | Bound copybook-to-copybook edge on SQLite |
+| cobol_grammar_copybook.go | cobol_grammar_procedure.go | `cobolProcedure(w)` | ✓ WIRED | |
+| cobol_grammar_copybook.go | cobol_grammar_sql.go / mainframe.go | `cobolSQL(w, idx)`, `cobolMainframe(w, idx)` | ✓ WIRED | Persisted reads edge to `db2::MYSCH/ORDERS` |
+| cobol_grammar_data_refs.go | cobol_grammar_walk.go | `w.root` selects `not_declared_in_copybook` | ✓ WIRED | |
+| cobol_grammar_copybook.go | producer `grade` | `h.Assessment.Grade != grade.Green` | ✓ WIRED | |
+| cobol_grammar_flow.go | resolver | `unresolved::cobol::label::` never bound | ✓ WIRED | Copybook label placeholder persists with its reason |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |----------|---------------|--------|--------------------|--------|
-| Persisted COBOL graph (SQLite) | nodes/edges | handoff Observations → Extract → MultiIndexer → store_sqlite | Yes; read back through `store.GetOutEdges`, `NodesByKinds`, MCP `get_symbol`/`get_callers`/`get_call_chain` | ✓ FLOWING |
-| Resolver stamps | cobol_unresolved_reason / cobol_candidate_ids | `resolveCobolReferences` → `ReindexEdges` / `PersistEdgeAttributesBatch` | Yes; asserted on SQLite-persisted edges | ✓ FLOWING |
+| Persisted COBOL graph (SQLite) | copybook nodes and edges | handoff → `cobolCopybook` → MultiIndexer → store_sqlite | Yes. Read back via `GetNode`, `GetOutEdges`, and MCP `get_callers` | ✓ FLOWING |
+| Resolver stamps | `cobol_nested` → candidate filter | extractor Meta → `resolveCobolReferences` | Yes. The cross-file result is `missing` on SQLite | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Extractor unit and contract suite | `GOWORK=off go test -count=1 -run TestCobol ./internal/parser/languages/` | ok | ✓ PASS |
-| Resolver, indexer, and BOM | `go test -run 'TestCobol\|TestReuseIdentifierSkipsCobolNamespace\|TestSourceRevision' ./internal/resolver/ ./internal/indexer/` | ok, ok | ✓ PASS |
-| Neo4j projection | `go test -run TestProjectNode_CobolBreadthMeta ./internal/neo4jprojection/` | ok | ✓ PASS |
-| Real-path two-repo acceptance | `go test -v -run 'TestCobolTracer\|TestCobolBreadth' ./cmd/gortex/` | 12/12 PASS | ✓ PASS |
-| Cross-file CALL to sole nested program (overlay probe, no repo change) | `go test -overlay … -run TestVerifierProbe_NestedCrossFile ./internal/resolver/` | `CALL 'INNER' -> a/nest.cbl::OUTER/INNER reason=<nil>` | ✗ FAIL (false binding) |
-| COPY inside a copybook (overlay probe) | `go test -overlay … -run TestVerifierProbe_NestedCopyInCopybook ./internal/parser/languages/` | no imports edge; `cobol_contains_copy=true` on A-FLD only | ✗ FAIL (member name lost) |
-| Procedure-fragment copybook (overlay probe) | same probe | `nodes=1 edges=0 grade=amber absence=<nil>` for PERFORM/CALL/EXEC SQL | ? see Human Verification 1 |
-| Full suite (orchestrator) | `go test -race -timeout 30m ./...` | 156 ok packages, exit 0 | ✓ PASS (relied on, not re-run) |
+| Extractor, resolver, indexer, and projection COBOL suites | `GOWORK=off go test -count=1 -run 'Cobol\|TestReuseIdentifierSkipsCobolNamespace\|TestSourceRevision' ./internal/parser/languages/ ./internal/resolver/ ./internal/indexer/ ./internal/neo4jprojection/` | 4 × ok | ✓ PASS |
+| Real-path two-repo acceptance | `GOWORK=off go test -count=1 -v -run 'TestCobolBreadth\|TestCobolTracer' ./cmd/gortex/` | 16/16 PASS | ✓ PASS |
+| Build and vet | `GOWORK=off go build ./...`; `go vet` on the languages and resolver packages | exit 0, no findings | ✓ PASS |
+| Windows dependency closure | `GOOS=windows go list -deps ./cmd/gortex \| grep -c preprocessor` | 0 | ✓ PASS |
+| go.mod/go.sum unchanged during gap closure | `git diff --stat 78f40016..HEAD -- go.mod go.sum` | empty | ✓ PASS |
+| Batch file: top-level B CALL 'UTIL' (overlay probe, no tree change) | `go test -overlay … -run TestVerifierProbe_Phase3 ./cmd/gortex/` | `B/@proc/B-PARA -calls-> batch.cbl::A/UTIL reason=<nil>` while `util.cbl::UTIL` exists | ✗ FAIL (false binding) |
+| Non-COMMON sibling CALL (same probe) | same | `P/Y/@proc/Y-PARA -calls-> sibling.cbl::P/X reason=<nil>` | ✗ FAIL (false binding) |
+| Copybook cursor reason (same probe) | same | `curpara.cpy::@proc/CUR-PARA/@exec_sql_statement reason=cursor_not_declared` | ⚠️ WR-09 confirmed (deferred) |
+| Self-COPY (same probe) | same | `selfcpy.cpy -imports-> selfcpy.cpy` | ℹ️ IN-07 confirmed |
+| Full suite | `go test -race -timeout 40m ./...` | orchestrator: 156 ok through wave 13; 03-17 executor reports a pass on final HEAD | relied on, not re-run |
 
 ### Probe Execution
 
-No `scripts/*/tests/probe-*.sh` probes are declared or present for this phase. Step 7c: SKIPPED (no declared probes).
+No `scripts/*/tests/probe-*.sh` probes are declared or present for this phase. Step 7c: SKIPPED. The verifier's own overlay probe is listed under spot-checks. It was overlaid as `cmd/gortex/zz_verifier_probe_test.go` from the scratchpad, and the working tree was not modified.
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|----------|
-| DET-01 | 03-01,02,03,05,10,11,12,13 | source-positioned program/division/section/paragraph/statement/data-item observations | ✓ SATISFIED | Truths 1, 8, 10, 11, 13 |
-| DET-02 | 03-01,06,10 | PERFORM/THRU/GO TO control flow | ✓ SATISFIED | Truth 2 |
-| DET-03 | 03-04,07,10 | literal calls separate from dynamic identifiers | ✓ SATISFIED | Truth 3. The separation itself holds; the false nested binding is tracked under the goal clause (truth 6) |
-| DET-04 | 03-04,07,10 | dynamic identifiers stay unresolved | ✓ SATISFIED | `cobolCallTarget` dynamic branch; resolver skips `dynamic::`; CICS data-name operands are dynamic; real-path WS-PGM stays dynamic |
-| DET-05 | 03-07,10 | copybook/include references keep member name and occurrence | ✗ BLOCKED (partial) | Program-origin COPY/-INC/SQL INCLUDE/COPY IDMS are satisfied. COPY inside an analyzed copybook loses the member name (gap 2) |
-| DET-06 | 03-04,07,10 | copybook ambiguity preserved | ✓ SATISFIED | Exactly-one rule with ambiguous plus candidate IDs. The `OF/IN` library is recorded but not used for binding; library search order is deferred per CONTEXT D-11 |
-| DET-07 | 03-08,10 | IDMS record references | ✓ SATISFIED | Truth 4 |
-| DET-08 | 03-08,10 | IDMS set references | ✓ SATISFIED | Truth 4 (`set_operand`, `adjacency`) |
-| DET-09 | 03-08,10 | CICS program/transaction references | ✓ SATISFIED | Truth 4 (`link_literal`, `link_dynamic`, `transid`) |
-| DET-10 | 03-08,10 | CICS map/mapset references | ✓ SATISFIED | Truth 4 (`maps`, real-path SEND MAP) |
-| DET-11 | 03-09,10 | SQL read/write to deterministically identified tables | ✓ SATISFIED | Truth 5. INSERT…SELECT source reads and WORKING-STORAGE cursors are producer windows (WINDOWS.md 4-6) and are never guessed |
-| DET-12 | 03-09,10 | aliases/CTEs/includes/dynamic sources distinguishable | ✓ SATISFIED | Truth 5 |
+| DET-01 | 03-01,02,03,05,10,11,12,13,16,17 | source-positioned program/division/section/paragraph/statement/data-item observations | ✓ SATISFIED | Truths 1, 13, 15, 17 |
+| DET-02 | 03-01,06,10,16 | PERFORM/THRU/GO TO control flow | ✓ SATISFIED | Truth 2 |
+| DET-03 | 03-04,07,10,14,16 | literal calls separate from dynamic identifiers | ✓ SATISFIED | Separation holds. The same-file false binding is tracked under the goal clause (truth 6), not DET-03's separation wording |
+| DET-04 | 03-04,07,10,14,16,17 | dynamic identifiers stay unresolved | ✓ SATISFIED | Copybook dynamic CALL, CICS, and PREPARE stay dynamic |
+| DET-05 | 03-07,10,15,16 | copybook/include references keep member name and occurrence | ✓ SATISFIED | Truth 7; previous gap 2 closed |
+| DET-06 | 03-04,07,10,15 | copybook ambiguity preserved | ✓ SATISFIED | The unchanged exactly-one rule applies to copybook-origin COPYs |
+| DET-07 | 03-08,10,17 | IDMS record references | ✓ SATISFIED | Truths 4, 16 |
+| DET-08 | 03-08,10,17 | IDMS set references | ✓ SATISFIED | Truths 4, 16 |
+| DET-09 | 03-08,10,17 | CICS program/transaction references | ✓ SATISFIED | Truths 4, 16 |
+| DET-10 | 03-08,10,17 | CICS map/mapset references | ✓ SATISFIED | Truths 4, 16 |
+| DET-11 | 03-09,10,17 | SQL read/write to deterministically identified tables | ✓ SATISFIED | Truths 5, 16 |
+| DET-12 | 03-09,10,17 | aliases/CTEs/includes/dynamic sources distinguishable | ✓ SATISFIED | Truth 5 |
 
-No orphaned requirements. All of DET-01..DET-12 are claimed by at least one plan, and REQUIREMENTS.md maps no other ID to Phase 3. Note: REQUIREMENTS.md already marks DET-05 `[x] Complete`; that mark is premature until gap 2 closes.
+No orphaned requirements. DET-01 to DET-12 are all claimed, and REQUIREMENTS.md maps no other ID to Phase 3. REQUIREMENTS.md marks all twelve `[x] Complete`. Every requirement is satisfied as worded, but the phase as a whole is not complete until the goal-clause gap closes.
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| (all phase source files) | – | TBD/FIXME/XXX/TODO/HACK | none found | Debt marker gate clean |
-| internal/resolver/cobol_references.go | 54, 81-92 | nested programs indexed as repo-wide candidates | 🛑 Blocker | False deterministic CALL binding (gap 1) |
-| internal/parser/languages/cobol_grammar.go | 220-241 | copybook branch skips reference emission | 🛑 Blocker | Nested COPY member names lost (gap 2) |
-| internal/parser/languages/cobol_grammar_sql.go | 151-156 | two DECLAREs of one cursor reported as `cursor_not_declared` | ⚠️ Warning | Misleading reason vocabulary (review WR-07); matches the plan truth as written |
-| internal/parser/languages/cobol_grammar_data.go | 64-90, 111-131 | REDEFINES/RENAMES looked up program-wide | ⚠️ Warning | False `ambiguous` for routine repeated child names (review WR-03); conservative, not a false binding |
-| fork preprocessor transform/copybook.go | 77-94 | copybook header heuristic (`EXEC` → data header; FD/SD, leading COPY/-INC → procedure header) | ⚠️ Warning | Common members are misclassified and degrade (review WR-04); producer-side |
-| internal/parser/languages/cobol_grammar_dedupe.go | 26-46 | PERFORM and GO TO on one line collapse to one cobol_flow | ℹ️ Info | review IN-04 |
-| internal/parser/languages/cobol_grammar_identity.go | 102-112 | program symbol not passed through cobolIDSegment | ℹ️ Info | review IN-03 |
+| (all files changed in 78f40016..HEAD) | – | TBD/FIXME/XXX/TODO/HACK/PLACEHOLDER | none found | Debt-marker gate clean |
+| internal/resolver/cobol_references.go | 92-106 | same-file candidates ignore containment | 🛑 Blocker | False CALL binding in multi-program files (gap) |
+| internal/parser/languages/cobol_grammar_sql.go | 151-156 | copybook cursor use and duplicate DECLARE both stamped `cursor_not_declared` | ⚠️ Warning | Misleading reason (WR-07, WR-09). Deferred to Phase 5 |
+| internal/parser/languages/cobol_grammar.go | 42 | extractor version unchanged after mapping changes | ⚠️ Warning | Stale stores undetectable (WR-10). Deferred to Phase 4 |
+| internal/resolver/cobol_references.go | 98 | missing `cobol_nested` treated as top-level | ⚠️ Warning | Fail-open on stale stores (WR-10). Deferred to Phase 4 |
+| internal/parser/languages/cobol_grammar_data_refs.go | 14-41, 62-82 | REDEFINES/RENAMES looked up owner-wide | ⚠️ Warning | False `ambiguous` (WR-03). Conservative, not a binding |
+| internal/parser/languages/cobol_grammar_procedure.go / statements.go | 96-98 / 110 | copybook statements `member_of` the file; paragraphs do not | ℹ️ Info | Two containment shapes (IN-06) |
+| internal/resolver/cobol_references.go | 108-115 | self-COPY binds | ℹ️ Info | IN-07 |
+| procedure copybook CALL binding | – | a copybook's literal CALL binds to the repository's sole top-level program, though an including program may contain a same-named nested program | ℹ️ Info | The copybook cannot see its includers, and COPY is not expanded (documented). Rare. Note for the WR-08 fix design |
 
 ### Human Verification Required
 
-Status is `gaps_found`, so these items are listed here but do not set the status. Resolve them alongside gap closure.
+Status is `gaps_found`, so these items do not set the status. Resolve them alongside gap closure.
 
-#### 1. Procedure-fragment copybooks emit no structure and no absence reason
+#### Judgment-tier prohibitions (non-authoritative LLM-judge verdicts, flagged: unverified-prohibition, human review recommended)
 
-**Test:** Index a `.cpy` containing only procedure statements (PERFORM, CALL 'X', EXEC SQL SELECT … FROM T1).
-**Expected:** Either paragraphs and statements with their CALL/SQL/CICS edges are emitted, or the file node carries an explicit `prov_analysis_absence` reason (for example `copybook_procedure_member_unsupported`).
-**Why human:** Overlay probe result: `nodes=1 edges=0 grade=amber`, no absence key. Programs do not expand COPY either, so CALL, SQL, and CICS usage inside procedure copybooks is invisible to impact queries. Plan 03-13 assigned this to Phase 4, but no Phase 4 success criterion names it, and ownership of copybook paragraphs is an open identity-design decision. Decide whether to add it to Phase 4 or close it now.
+The 20 prohibitions from 03-01 to 03-13 keep their previous verdicts (all hold; see the prior report). New prohibitions from 03-14 to 03-17:
 
-#### 2. Judgment-tier prohibitions (non-authoritative LLM-judge verdicts, flagged for human review)
-
-All 20 prohibitions across the 13 plans are `verification: judgment` with no wired enforcement, so each is `unverified-prohibition — human review recommended`:
-
-- No implicit fall-through or guessed PERFORM labels (03-01, 03-06). Judge: holds. No fall-through code exists, and unresolved targets carry reasons.
-- No estate-derived names, paths, or run IDs in fixtures, tests, docs, or the fork (03-01, 02, 03, 10, 11, 13). Judge: holds as far as visible. Fixtures use invented names (ORDPGM, SUBPGM, CUSTREC, MAIN-PARA). Estate provenance cannot be proven by inspection.
-- No byte offset presented as exact when indexed bytes differ from the file (03-02). Judge: holds (`alignProvByteOffsets`, tests).
-- No statement source text in statement Meta (03-03). Judge: holds. Only kinds, verbs, cursor names, and CTE names are stored.
-- No fabricated level, parent, or copybook items; no PIC/VALUE text in errors (03-05). Judge: holds.
-- No choosing among 2+ candidates and no cross-repo binding by name (03-04). Judge: holds for repositories. The cross-file nested-program binding (gap 1) is a related but distinct defect.
-- No binding of dynamic, label, data, IDMS-scope, or COPY IDMS targets, and no VALUE heuristic (03-04, 03-07). Judge: holds.
-- No bare `unresolved::<name>` and no `import::`/`dyncall::` from the extractor (03-07). Judge: holds on extraction (grep finds only a comment). The incremental restub path can still produce a bare stub (deferred CR-01).
-- No guessed IDMS subschema, WITHIN role, or CICS mapset; no binding of data-named CICS operands (03-08). Judge: holds.
-- No KindTable for an alias, CTE, include, derived table, or dynamic source; no guessed schema or case fold of delimited identifiers (03-09). Judge: holds (`tables_exact` tests).
-- No change to grammar, transform.Run, ConfigurationID, or PolicyV1; fork commit touches exactly 7 files (03-11). Judge: plausibly holds. `cobolApprovedGrammarID` is unchanged and the forest-shim pin is unchanged. The 7-file claim was not re-checked in the fork repository.
-- Push only with explicit confirmation, no force-push, only the recorded commit (03-12). Judge: cannot be verified from code; the orchestrator confirmed via ls-remote that the recorded hash is on origin.
-- No re-pin of forest-shim, no change to the grammar ID, no copybook bypass of the grammar check, no wrapper nodes; no URL rewrite or credential in global git config (03-13). Judge: holds. Global git config has 0 `url.*` entries (counted only, values not read).
+- 03-14: no cross-file binding to a nested program, and no inferring nesting from ID shape. Judge: holds. The resolver reads only `metaCobolNested`. The same-file false binding is the separate gap above.
+- 03-15: no copybook-reference binding other than exactly-one, and no COPY IDMS binding. Judge: holds (copybook path unchanged; `cobolIDMSCopyTargetPrefix` skip).
+- 03-15 and 03-16: no wrapper program, division, or wrapper-byte range emitted. Judge: holds. The real-path test asserts no program or division node and no `CPYWRAP` ID, and the copybook root maps to the file node.
+- 03-16: no PERFORM or GO TO bound outside the member, and no fall-through. Judge: holds (`label_not_in_copybook` real-path assertion).
+- 03-16 and 03-17: no fork change, no go.mod/go.sum change. Judge: holds (empty diff since `78f40016`).
+- 03-17: no KindTable for an alias, CTE, include, derived table, or dynamic source from a copybook, and no binding of a copybook data name to an includer's item. Judge: holds (table set unchanged; `not_declared_in_copybook`).
+- 03-17 transparency: no degraded empty copybook presented as complete. Judge: holds as scoped. A degraded member that mapped something carries no absence stamp, and only its amber or red grade signals the loss. The plan accepted this explicitly.
+- All gap plans: no estate names in fixtures. Judge: holds as far as visible (invented names: CUSTALL, VALPARA, NESTCALL, OUTER/INNER).
 
 ### Gaps Summary
 
-The phase delivers its breadth on the full-index path, with honest unresolved placeholders, and the real-path tests prove it end to end. Two Phase 3-scoped defects remain. Both are cheap to fix and both are confirmed by non-mutating probes:
+Previous gap 2 and human item 1 are closed with real-path evidence. Previous gap 1 is closed for callers in other files but not for the same file. `resolveCobolReferences` puts every same-file program in the preferred candidate set, whatever its containment. As a result:
 
-1. **False deterministic binding to nested programs (goal clause).** `resolveCobolReferences` treats contained programs as repo-wide candidates. Restricting nested programs to same-file callers fixes it.
-2. **Nested COPY member names dropped in copybook mode (DET-05).** The copybook branch never calls `cobolCopy`. Calling it for `copy_statement` and `exec_sql_include` observations fixes it; the file-node `From` fallback already exists.
+- In a multi-program (batch) source file, a top-level program's literal CALL binds to a program nested inside a different top-level program.
+- That same-file set shadows the real top-level target in another file.
+- A non-COMMON sibling also binds.
 
-**This may be intentional for gap 2.** Plan 03-13 consciously assigned copybook-to-copybook edges to Phase 4. If you accept that, add an override and add the item to the Phase 4 roadmap so it is not lost:
+This is the false deterministic resolution the phase goal forbids, confirmed through the real MultiIndexer, SQLite, and resolver path.
+
+The fix is narrow. Program nodes need their container (or the extractor binds visible nested callees itself), and same-file top-level programs join the ordinary candidate set. When this lands, bump the extractor version to `/4` (WR-10). Optionally also give copybook cursor uses a copybook-scoped reason (WR-09).
+
+**Possible override (not recommended).** D-09 says literally "Nested and contained programs in the same file resolve within the file first", and 03-14 implemented that wording. If you decide multi-program batch files are out of scope for Phase 3, record an override and add the item to the Phase 4 roadmap:
 
 ```yaml
 overrides:
-  - must_have: "DET-05 / SC3: copybook and include references keep the referenced member name and source occurrence, including COPY statements inside an analyzed copybook"
-    reason: "Copybook-to-copybook import edges deferred to Phase 4 with library search order; Phase 4 roadmap updated to include them"
+  - must_have: "Phase goal clause 'without false deterministic resolution' (carried from previous gap 1): a literal CALL is bound only to a program a separately compiled caller can actually reach"
+    reason: "Same-file containment visibility (multi-program batch files, non-COMMON siblings) deferred; Phase 4 roadmap updated with a success criterion for it"
     accepted_by: "{name}"
     accepted_at: "{ISO timestamp}"
 ```
 
-Gap 1 should not be overridden. It is a false deterministic resolution, which the phase goal forbids.
-
-The incremental-lifecycle hazards (review CR-01, CR-02, WR-01) are real but belong to Phase 4. The parse-boundary findings (WR-06, WINDOWS.md 4-6) belong to Phase 5. They are recorded as deferred. The WINDOWS.md entries are honest documented producer windows: no table is invented, and affected documents grade amber or red. They are not goal gaps.
-
 ---
 
-_Verified: 2026-10-02T13:57:00Z_
+_Verified: 2026-10-12T16:14:27Z_
 _Verifier: Claude (gsd-verifier)_
