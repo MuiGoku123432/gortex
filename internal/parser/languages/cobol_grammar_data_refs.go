@@ -85,6 +85,9 @@ items:
 // that name and its IN/OF qualifiers match. Zero or several matches go to
 // unresolved::cobol::data::<owner>::<key>[/<qualifier key>...] with reason
 // not_declared_in_program or ambiguous plus cobol_candidate_symbols (D-12).
+// In a copybook (w.root set) zero matches say not_declared_in_copybook
+// instead: the member, not a program, owns the name, and an including
+// program may declare it, so it is never bound across files (D-06).
 // It is the one data-name path the reference, mainframe, and SQL walkers use.
 func cobolDataReference(w *cobolWalk, idx *cobolDataIndex, from string, occurrence int, owner, name string, qualifiers []string, role string) *graph.Edge {
 	matches := idx.lookup(owner, name, qualifiers)
@@ -99,6 +102,8 @@ func cobolDataReference(w *cobolWalk, idx *cobolDataIndex, from string, occurren
 	edge.Meta["cobol_ref_role"] = role
 	edge.Meta["cobol_name_norm"] = cobolNameNormRule
 	switch {
+	case len(matches) == 0 && w.root != "":
+		edge.Meta["cobol_unresolved_reason"] = "not_declared_in_copybook"
 	case len(matches) == 0:
 		edge.Meta["cobol_unresolved_reason"] = "not_declared_in_program"
 	case len(matches) > 1:
