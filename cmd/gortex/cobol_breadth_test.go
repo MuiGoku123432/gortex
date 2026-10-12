@@ -107,6 +107,18 @@ const cobolBreadthCustAllFixture = `       01 CUST-ALL.
            COPY CUSTREC.
 `
 
+// cobolBreadthValParaFixture is a procedure copybook: its PERFORM MAIN-PARA
+// names a paragraph only ORDPGM defines, and its EXEC SQL names a table
+// ORDPGM already uses.
+const cobolBreadthValParaFixture = `       VALIDATE-PARA.
+           PERFORM CHECK-PARA.
+           PERFORM MAIN-PARA.
+           CALL 'SUBPGM'.
+           EXEC SQL SELECT A INTO :WS-X FROM MYSCH.ORDERS END-EXEC.
+       CHECK-PARA.
+           EXIT.
+`
+
 // cobolBreadthOnlyBFixture lives only in the second repository.
 const cobolBreadthOnlyBFixture = `       IDENTIFICATION DIVISION.
        PROGRAM-ID. ONLYB.
@@ -191,6 +203,7 @@ func indexCobolBreadthRepos(t *testing.T) cobolBreadthRepos {
 		"cobol/bompgm.cbl":   "\xEF\xBB\xBF" + cobolBreadthBOMFixture,
 		"copy/custrec.cpy":   cobolBreadthCopybookFixture,
 		"copy/custall.cpy":   cobolBreadthCustAllFixture,
+		"copy/valpara.cpy":   cobolBreadthValParaFixture,
 		"cobol/nest.cbl":     cobolBreadthNestFixture,
 		"cobol/nestcall.cbl": cobolBreadthNestCallFixture,
 	})
@@ -408,6 +421,70 @@ func TestCobolBreadth_CopybookNestedCopy(t *testing.T) {
 
 	program := cobolBreadthOutEdge(t, repos.store, repos.prefixA+"/cobol/ordpgm.cbl::ORDPGM", custrec, graph.EdgeImports)
 	assert.NotContains(t, program.Meta, "cobol_unresolved_reason")
+}
+
+// TestCobolBreadth_CopybookProcedure proves a procedure copybook's
+// paragraphs, PERFORMs, and CALLs persist owned by the copybook at the
+// member's own rows (D-16, D-01, D-05), resolve labels member-locally only
+// (D-02, D-12), bind its literal CALL (D-09), and reach MCP get_callers over
+// the daemon relay, with no wrapper program or division node.
+func TestCobolBreadth_CopybookProcedure(t *testing.T) {
+	repos := indexCobolBreadthRepos(t)
+	path := repos.prefixA + "/copy/valpara.cpy"
+	validate := path + "::@proc/VALIDATE-PARA"
+	check := path + "::@proc/CHECK-PARA"
+	subpgm := repos.prefixA + "/cobol/subpgm.cbl::SUBPGM"
+
+	for _, tc := range []struct {
+		id       string
+		row, ord int
+	}{{validate, 0, 1}, {check, 5, 2}} {
+		n := repos.store.GetNode(tc.id)
+		require.NotNil(t, n, "missing %s", tc.id)
+		assert.Equal(t, graph.KindFunction, n.Kind, tc.id)
+		assert.Equal(t, "paragraph", n.Meta["cobol_kind"], tc.id)
+		assert.Equal(t, tc.ord, n.Meta["cobol_ordinal"], tc.id)
+		assert.Equal(t, tc.row, n.Meta["prov_start_row"], tc.id)
+		assert.Equal(t, true, n.Meta["prov_range_exact"], tc.id)
+		assert.Equal(t, "cobol-grade-policy-copybook-v1", n.Meta["prov_grade_policy"], tc.id)
+		assert.Equal(t, "gortex-cobol-grammar/3", n.Meta["prov_extractor_version"], tc.id)
+	}
+	stmt := repos.store.GetNode(validate + "/@call_statement")
+	require.NotNil(t, stmt, "missing the CALL statement node")
+	assert.Equal(t, graph.KindLocal, stmt.Kind)
+
+	perform := cobolBreadthOutEdge(t, repos.store, validate, check, graph.EdgeCalls)
+	assert.Equal(t, "perform", perform.Meta["cobol_flow"])
+	assert.Equal(t, "@proc/VALIDATE-PARA/@perform_statement_call_proc", perform.Meta["cobol_statement_symbol"])
+	assertCobolBreadthLine(t, perform)
+
+	// ORDPGM defines a MAIN-PARA in the same repository; it is not the target.
+	require.NotNil(t, repos.store.GetNode(repos.ordID("@proc/MAIN-PARA")))
+	foreign := cobolBreadthOutEdge(t, repos.store, validate,
+		"unresolved::cobol::label::copy/valpara.cpy::MAIN-PARA", graph.EdgeCalls)
+	assert.Equal(t, "label_not_in_copybook", foreign.Meta["cobol_unresolved_reason"])
+
+	call := cobolBreadthOutEdge(t, repos.store, validate, subpgm, graph.EdgeCalls)
+	assert.Equal(t, "literal", call.Meta["cobol_call"])
+	assert.NotContains(t, call.Meta, "cobol_unresolved_reason")
+
+	var copybookNodes int
+	for _, n := range repos.store.GetNodesByLanguage("cobol") {
+		if !strings.HasPrefix(n.ID, path) {
+			continue
+		}
+		copybookNodes++
+		assert.NotContains(t, []any{"program", "division"}, n.Meta["cobol_kind"], n.ID)
+		assert.NotContains(t, n.ID, "CPYWRAP")
+	}
+	assert.Greater(t, copybookNodes, 3, "copybook nodes under %s", path)
+
+	socket, _ := serveCobolTestDaemon(t, repos.dir, repos.store, repos.idx, repos.mi, repos.cm)
+	for _, target := range []string{check, subpgm} {
+		callers := cobolBreadthNodeIDs(t, callCobolTracerTool(t, socket, repos.rootA, "get_callers",
+			map[string]any{"id": target, "format": "json"}))
+		assert.Contains(t, callers, validate, "MCP get_callers on %s", target)
+	}
 }
 
 // TestCobolBreadth_NestedProgramScope proves on the persisted graph that a
