@@ -169,6 +169,77 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		assert.Equal(t, "a/nest.cbl::OUTER/INNER", e.To, "contained program resolves within the file first")
 	})
 
+	// seedNested seeds a contained program in repository a and stamps the
+	// cobol_nested Meta the extractor writes on it. The in-memory graph
+	// hands out the live node, so the stamp lands on the stored node.
+	seedNested := func(g graph.Store, id, key string) {
+		seedCobol(g, "a", id, graph.KindFunction, "program", key)
+		g.GetNode(id).Meta["cobol_nested"] = true
+	}
+	const crossCaller = "a/caller.cbl::CALLER"
+	const innerTarget = "unresolved::cobol::program::INNER"
+
+	t.Run("nested_cross_file_missing", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", crossCaller, graph.KindFunction, "program", "CALLER")
+		seedCobol(g, "a", "a/nest.cbl::OUTER", graph.KindFunction, "program", "OUTER")
+		seedNested(g, "a/nest.cbl::OUTER/INNER", "INNER")
+		cobolEdge(g, crossCaller, 5, graph.EdgeCalls, innerTarget, nil)
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, crossCaller, 5)
+		assert.Equal(t, innerTarget, e.To, "a contained program is not callable from another file")
+		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
+		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
+	})
+
+	t.Run("nested_cross_file_ignored", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", crossCaller, graph.KindFunction, "program", "CALLER")
+		seedCobol(g, "a", "a/nest.cbl::OUTER", graph.KindFunction, "program", "OUTER")
+		seedNested(g, "a/nest.cbl::OUTER/INNER", "INNER")
+		seedCobol(g, "a", "a/other.cbl::INNER", graph.KindFunction, "program", "INNER")
+		cobolEdge(g, crossCaller, 5, graph.EdgeCalls, innerTarget, nil)
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, crossCaller, 5)
+		assert.Equal(t, "a/other.cbl::INNER", e.To, "the top-level program is the only cross-file candidate")
+		assert.NotContains(t, e.Meta, "cobol_unresolved_reason")
+	})
+
+	t.Run("nested_same_file", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", "a/nest.cbl::OUTER", graph.KindFunction, "program", "OUTER")
+		seedNested(g, "a/nest.cbl::OUTER/INNER", "INNER")
+		cobolEdge(g, "a/nest.cbl::OUTER", 9, graph.EdgeCalls, innerTarget, nil)
+
+		New(g).ResolveAll()
+
+		require.Equal(t, true, g.GetNode("a/nest.cbl::OUTER/INNER").Meta["cobol_nested"])
+		e := cobolEdgeAt(t, g, "a/nest.cbl::OUTER", 9)
+		assert.Equal(t, "a/nest.cbl::OUTER/INNER", e.To, "a contained program binds within its own file")
+		assert.NotContains(t, e.Meta, "cobol_unresolved_reason")
+	})
+
+	t.Run("nested_excluded_from_candidates", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "a", crossCaller, graph.KindFunction, "program", "CALLER")
+		seedCobol(g, "a", "a/d1.cbl::DUP", graph.KindFunction, "program", "DUP")
+		seedCobol(g, "a", "a/d2.cbl::DUP", graph.KindFunction, "program", "DUP")
+		seedCobol(g, "a", "a/nest.cbl::OUTER", graph.KindFunction, "program", "OUTER")
+		seedNested(g, "a/nest.cbl::OUTER/DUP", "DUP")
+		cobolEdge(g, crossCaller, 5, graph.EdgeCalls, "unresolved::cobol::program::DUP", nil)
+
+		New(g).ResolveAll()
+
+		e := cobolEdgeAt(t, g, crossCaller, 5)
+		assert.Equal(t, "ambiguous", e.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, []string{"a/d1.cbl::DUP", "a/d2.cbl::DUP"}, e.Meta["cobol_candidate_ids"],
+			"a contained program in another file is never listed as a candidate")
+	})
+
 	t.Run("sqlite_persisted", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "cobol.sqlite")
 		store, err := store_sqlite.Open(path)

@@ -110,6 +110,33 @@ const cobolBreadthOnlyBFixture = `       IDENTIFICATION DIVISION.
            GOBACK.
 `
 
+// cobolBreadthNestFixture is OUTER with a contained INNER; OUTER calls INNER
+// within the file.
+const cobolBreadthNestFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTER.
+       PROCEDURE DIVISION.
+       OUTER-PARA.
+           CALL 'INNER'.
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNER.
+       PROCEDURE DIVISION.
+       INNER-PARA.
+           GOBACK.
+       END PROGRAM INNER.
+       END PROGRAM OUTER.
+`
+
+// cobolBreadthNestCallFixture is a separately compiled caller of INNER,
+// which COBOL scoping hides inside OUTER.
+const cobolBreadthNestCallFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NESTCALL.
+       PROCEDURE DIVISION.
+       NESTCALL-PARA.
+           CALL 'INNER'.
+           GOBACK.
+`
+
 // cobolBreadthRepos is two tracked repositories sharing one SQLite store.
 type cobolBreadthRepos struct {
 	dir, rootA, rootB string
@@ -152,12 +179,14 @@ func indexCobolBreadthRepos(t *testing.T) cobolBreadthRepos {
 	dir := testenv.ShortTempDir(t)
 	repos := cobolBreadthRepos{dir: dir, rootA: filepath.Join(dir, "a"), rootB: filepath.Join(dir, "b")}
 	writeCobolBreadthRepo(t, repos.rootA, map[string]string{
-		"cobol/ordpgm.cbl": cobolBreadthOrdFixture,
-		"cobol/subpgm.cbl": cobolBreadthSubFixture,
-		"cobol/twin1.cbl":  cobolBreadthTwinFixture,
-		"cobol/twin2.cbl":  cobolBreadthTwinFixture,
-		"cobol/bompgm.cbl": "\xEF\xBB\xBF" + cobolBreadthBOMFixture,
-		"copy/custrec.cpy": cobolBreadthCopybookFixture,
+		"cobol/ordpgm.cbl":   cobolBreadthOrdFixture,
+		"cobol/subpgm.cbl":   cobolBreadthSubFixture,
+		"cobol/twin1.cbl":    cobolBreadthTwinFixture,
+		"cobol/twin2.cbl":    cobolBreadthTwinFixture,
+		"cobol/bompgm.cbl":   "\xEF\xBB\xBF" + cobolBreadthBOMFixture,
+		"copy/custrec.cpy":   cobolBreadthCopybookFixture,
+		"cobol/nest.cbl":     cobolBreadthNestFixture,
+		"cobol/nestcall.cbl": cobolBreadthNestCallFixture,
 	})
 	writeCobolBreadthRepo(t, repos.rootB, map[string]string{
 		"cobol/onlyb.cbl": cobolBreadthOnlyBFixture,
@@ -351,6 +380,33 @@ func TestCobolBreadth_CallsAndCopy(t *testing.T) {
 	assert.Equal(t, "idms_dictionary_member", idms.Meta["cobol_unresolved_reason"])
 
 	for _, e := range []*graph.Edge{sub, twin, onlyB, dynamic, copybook, idms} {
+		assertCobolBreadthLine(t, e)
+	}
+}
+
+// TestCobolBreadth_NestedProgramScope proves on the persisted graph that a
+// contained program is a CALL candidate only in its own file (D-09): OUTER's
+// CALL 'INNER' binds to OUTER/INNER, while NESTCALL's CALL 'INNER' from
+// another file stays missing.
+func TestCobolBreadth_NestedProgramScope(t *testing.T) {
+	repos := indexCobolBreadthRepos(t)
+	outerID := repos.prefixA + "/cobol/nest.cbl::OUTER"
+	innerID := outerID + "/INNER"
+	for id, nested := range map[string]bool{outerID: false, innerID: true} {
+		n := repos.store.GetNode(id)
+		require.NotNil(t, n, id)
+		assert.Equal(t, nested, n.Meta["cobol_nested"], id)
+	}
+
+	same := cobolBreadthOutEdge(t, repos.store, outerID+"/@proc/OUTER-PARA", innerID, graph.EdgeCalls)
+	assert.NotContains(t, same.Meta, "cobol_unresolved_reason")
+
+	cross := cobolBreadthOutEdge(t, repos.store, repos.prefixA+"/cobol/nestcall.cbl::NESTCALL/@proc/NESTCALL-PARA",
+		"unresolved::cobol::program::INNER", graph.EdgeCalls)
+	assert.Equal(t, "missing", cross.Meta["cobol_unresolved_reason"])
+	assert.NotContains(t, cross.Meta, "cobol_candidate_ids")
+
+	for _, e := range []*graph.Edge{same, cross} {
 		assertCobolBreadthLine(t, e)
 	}
 }
