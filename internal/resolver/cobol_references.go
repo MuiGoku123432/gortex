@@ -21,8 +21,12 @@ const (
 	metaCobolCandidateIDs     = "cobol_candidate_ids"
 
 	// Program node Meta read by this pass: true on a program contained in
-	// another program, stamped by the extractor from END PROGRAM nesting.
-	metaCobolNested = "cobol_nested"
+	// another program, stamped by the extractor from END PROGRAM nesting,
+	// and the node ID of that directly containing program.
+	metaCobolNested    = "cobol_nested"
+	metaCobolContainer = "cobol_container"
+	// Literal CALL edge Meta read by this pass: the calling program's node ID.
+	metaCobolCallerProgram = "cobol_caller_program"
 )
 
 // resolveCobolReferences binds literal COBOL program calls and copybook
@@ -34,10 +38,13 @@ const (
 // cobol-name-norm/1. This pass lands each one on the single KindFunction
 // program (Meta cobol_kind=program) or KindFile copybook (cobol_kind=copybook)
 // whose cobol_name_key equals <key> and whose RepoPrefix is the caller's.
-// Program candidates sharing the edge's file win first, so nested and
-// contained programs resolve within the file. Otherwise only top-level
-// programs (cobol_nested not true) in other files are candidates: a
-// contained program is never bound from another file. Zero candidates stamps
+// A contained program (cobol_nested=true) is a candidate only for a CALL
+// whose cobol_caller_program is its cobol_container, and such a candidate
+// wins first. Otherwise top-level programs in the edge's file win, then
+// top-level programs in other files. A sibling or unrelated program never
+// reaches a contained one: COMMON is not observed, so fail closed. A program
+// node without cobol_nested predates the flag and is never a candidate until
+// the file is re-extracted. Zero candidates stamps
 // cobol_unresolved_reason=missing; two or more stamps ambiguous plus the
 // sorted candidate IDs in cobol_candidate_ids, and nothing is picked.
 //
@@ -91,17 +98,30 @@ func (r *Resolver) resolveCobolReferences() {
 
 		candidates := index[r.callerRepoPrefix(e)+"\x00"+key]
 		if isProgram {
-			var sameFile, topLevel []*graph.Node
+			caller, _ := e.Meta[metaCobolCallerProgram].(string)
+			var contained, sameFile, otherFile []*graph.Node
 			for _, c := range candidates {
-				if e.FilePath != "" && c.FilePath == e.FilePath {
+				nested, known := c.Meta[metaCobolNested].(bool)
+				switch {
+				case !known:
+					// Indexed before the flag existed: fail closed until reindex.
+				case nested:
+					if container, _ := c.Meta[metaCobolContainer].(string); caller != "" && container == caller {
+						contained = append(contained, c)
+					}
+				case e.FilePath != "" && c.FilePath == e.FilePath:
 					sameFile = append(sameFile, c)
-				} else if nested, _ := c.Meta[metaCobolNested].(bool); !nested {
-					topLevel = append(topLevel, c)
+				default:
+					otherFile = append(otherFile, c)
 				}
 			}
-			candidates = sameFile
-			if len(candidates) == 0 {
-				candidates = topLevel
+			switch {
+			case len(contained) > 0:
+				candidates = contained
+			case len(sameFile) > 0:
+				candidates = sameFile
+			default:
+				candidates = otherFile
 			}
 		}
 

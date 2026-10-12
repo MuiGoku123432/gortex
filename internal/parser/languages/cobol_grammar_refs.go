@@ -80,6 +80,9 @@ func cobolCallTarget(w *cobolWalk, data *cobolDataIndex, from string, occurrence
 	edge.Meta["cobol_name_norm"] = cobolNameNormRule
 	if call == "dynamic" {
 		edge.Meta["cobol_unresolved_reason"] = "dynamic"
+	} else {
+		// The resolver binds a nested program only from its container.
+		edge.Meta["cobol_caller_program"] = programID
 	}
 	edges := []*graph.Edge{edge}
 	if name != "" {

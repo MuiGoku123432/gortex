@@ -16,9 +16,10 @@ type cobolProgramSymbol struct {
 	name   string // verbatim program_name bytes from h.Generated
 	symbol string // containment path joined by "/", plus "#k" for k >= 2
 	// nested: the program was opened inside another program, so its symbol
-	// has a container segment; COBOL scoping makes it callable only within
-	// its containing program's file.
-	nested bool
+	// has a container segment; COBOL scoping makes it callable only from its
+	// directly containing program, whose symbol is container.
+	nested    bool
+	container string
 }
 
 // cobolProgramSymbols derives each named program's containment-path symbol
@@ -103,9 +104,10 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 				}
 				open = open[:len(open)-1]
 			}
-			base := name
+			base, container := name, ""
 			if len(open) > 0 {
-				base = open[len(open)-1].symbol + "/" + name
+				container = open[len(open)-1].symbol
+				base = container + "/" + name
 				open[len(open)-1].hasChildren = true
 			}
 			occurrences[base]++
@@ -113,7 +115,7 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 			if k := occurrences[base]; k >= 2 {
 				symbol += "#" + strconv.Itoa(k)
 			}
-			program := cobolProgramSymbol{index: i, name: name, symbol: symbol, nested: len(open) > 0}
+			program := cobolProgramSymbol{index: i, name: name, symbol: symbol, nested: container != "", container: container}
 			programs = append(programs, program)
 			open = append(open, frame{cobolProgramSymbol: program})
 		case "end_program":

@@ -216,6 +216,8 @@ func TestCobolGrammar_NestedIDs(t *testing.T) {
 	assert.Equal(t, "INNERPGM", inner.Name)
 	assert.Equal(t, false, outer.Meta["cobol_nested"])
 	assert.Equal(t, true, inner.Meta["cobol_nested"])
+	assert.NotContains(t, outer.Meta, "cobol_container")
+	assert.Equal(t, outer.ID, inner.Meta["cobol_container"], "a contained program names its direct container")
 	assertCobolRange(t, outer)
 	assertCobolRange(t, inner)
 

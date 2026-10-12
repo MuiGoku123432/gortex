@@ -39,7 +39,7 @@ const (
 	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20261002100409-e64234cc493c"
 	// cobolGrammarExtractorVersion identifies this handoff-to-graph mapping.
 	// Bump it whenever the emitted nodes, edges, or prov_* keys change.
-	cobolGrammarExtractorVersion = "gortex-cobol-grammar/3"
+	cobolGrammarExtractorVersion = "gortex-cobol-grammar/4"
 	// cobolForestModulePath is the module path the enhanced grammar is
 	// linked under; go.mod replaces it with the fork's forest-shim.
 	cobolForestModulePath = "github.com/alexaandru/go-sitter-forest/cobol"
@@ -231,6 +231,9 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		meta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(p.name))
 		meta["cobol_name_norm"] = cobolNameNormRule
 		meta["cobol_nested"] = p.nested
+		if p.nested {
+			meta["cobol_container"] = filePath + "::" + p.container
+		}
 		meta["prov_observation_kind"] = o.Kind
 		meta["prov_affected"] = o.Affected
 		id := filePath + "::" + p.symbol

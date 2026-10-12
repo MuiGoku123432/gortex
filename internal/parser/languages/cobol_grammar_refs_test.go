@@ -121,6 +121,7 @@ func TestCobolGrammar_Calls(t *testing.T) {
 		assert.Equal(t, "'SUBPGM'", edge.Meta["cobol_target_raw"])
 		assert.Equal(t, cobolNameNormRule, edge.Meta["cobol_name_norm"])
 		assert.Equal(t, "CALLPGM/@proc/MAIN-PARA/@call_statement", edge.Meta["cobol_statement_symbol"])
+		assert.Equal(t, path+"::CALLPGM", edge.Meta["cobol_caller_program"], "the resolver scopes nested candidates by caller")
 		assert.NotContains(t, edge.Meta, "cobol_unresolved_reason")
 
 		low := cobolOneEdge(t, result, main, "unresolved::cobol::program::LOWPGM", graph.EdgeCalls)

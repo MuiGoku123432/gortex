@@ -127,7 +127,7 @@ func TestCobolGrammar_ProvKeys(t *testing.T) {
 		for _, key := range cobolDocumentKeys {
 			assert.Contains(t, n.Meta, key, n.ID)
 		}
-		assert.Equal(t, "gortex-cobol-grammar/3", n.Meta["prov_extractor_version"], n.ID)
+		assert.Equal(t, "gortex-cobol-grammar/4", n.Meta["prov_extractor_version"], n.ID)
 	}
 	// The fixture must reach every node-producing walker, or the loop above
 	// proves less than it claims.
@@ -152,7 +152,7 @@ func TestCobolGrammar_ProvKeys(t *testing.T) {
 			"prov_observation_kind", "prov_affected", "prov_range_exact") {
 			assert.Contains(t, edge.Meta, key, owner)
 		}
-		assert.Equal(t, "gortex-cobol-grammar/3", edge.Meta["prov_extractor_version"], owner)
+		assert.Equal(t, "gortex-cobol-grammar/4", edge.Meta["prov_extractor_version"], owner)
 	}
 	for _, kind := range []graph.EdgeKind{graph.EdgeCalls, graph.EdgeImports, graph.EdgeReads,
 		graph.EdgeWrites, graph.EdgeReferences} {

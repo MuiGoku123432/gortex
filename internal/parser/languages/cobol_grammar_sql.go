@@ -55,7 +55,7 @@ var cobolSQLOrientation = map[string]bool{
 // only from source (D-13, D-15). Aliases, CTE names, and derived tables are
 // statement-scoped Meta, never nodes; EXEC SQL INCLUDE stays on the COPY
 // path. OPEN, FETCH, and CLOSE read the tables of the one same-program
-// DECLARE of their cursor, else are marked cursor_not_declared (D-12).
+// DECLARE of their cursor, else are marked cursor_not_declared, or cursor_not_in_copybook in a copybook (D-12).
 // PREPARE goes to a per-program dynamic placeholder that is never bound, and
 // EXECUTE only marks its statement, so no table is invented for dynamic SQL.
 // Every key passes through the SQL clause of cobol-name-norm/1 and
@@ -151,7 +151,12 @@ func cobolSQL(w *cobolWalk, data *cobolDataIndex) {
 		decls := declared[u.programID+"\x00"+cobolSQLName(u.cursor)]
 		if len(decls) != 1 {
 			if n != nil {
-				n.Meta["cobol_unresolved_reason"] = "cursor_not_declared"
+				reason := "cursor_not_declared"
+				if len(decls) == 0 && w.root != "" {
+					// A copybook does not declare it; an including program may.
+					reason = "cursor_not_in_copybook"
+				}
+				n.Meta["cobol_unresolved_reason"] = reason
 			}
 			continue
 		}

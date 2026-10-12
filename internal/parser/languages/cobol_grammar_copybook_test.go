@@ -450,7 +450,8 @@ const cobolCopybookMainframeFixture = "       MAIN-PARA.\n" +
 	"           EXEC CICS RETURN TRANSID(WS-TRN) END-EXEC.\n" +
 	"           EXEC SQL SELECT A INTO :WS-A FROM MYSCH.ORDERS AS O\n" +
 	"           END-EXEC.\n" +
-	"           EXEC SQL PREPARE S1 FROM :WS-SQLTXT END-EXEC.\n"
+	"           EXEC SQL PREPARE S1 FROM :WS-SQLTXT END-EXEC.\n" +
+	"           EXEC SQL FETCH C1 INTO :WS-A END-EXEC.\n"
 
 // cobolCopybookRootSQLFixture is an invented procedure member whose IDMS
 // and SQL statements come before any paragraph header.
@@ -492,6 +493,17 @@ func TestCobolGrammar_CopybookProcedureMainframe(t *testing.T) {
 
 		prepare := cobolOneEdge(t, result, para, "unresolved::cobol::dynamic::sql::"+path+"::WS-SQLTXT", graph.EdgeReferences)
 		assert.Equal(t, "dynamic", prepare.Meta["cobol_unresolved_reason"])
+
+		// WR-09: the including program may declare the cursor.
+		var fetch *graph.Node
+		for _, n := range result.Nodes {
+			if n.Meta["sql_cursor"] == "C1" {
+				fetch = n
+			}
+		}
+		require.NotNil(t, fetch, "FETCH C1 statement node")
+		assert.Equal(t, "cursor_not_in_copybook", fetch.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, path, link.Meta["cobol_caller_program"], "a copybook CALL names the copybook, never a nested container")
 
 		assert.Equal(t, []string{"db2::MYSCH/ORDERS"}, cobolTableIDs(result))
 		for _, n := range result.Nodes {
