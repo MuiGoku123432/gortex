@@ -214,6 +214,8 @@ func TestCobolGrammar_NestedIDs(t *testing.T) {
 	assert.Equal(t, "src/nest.cbl::OUTERPGM/INNERPGM", inner.ID)
 	assert.Equal(t, "OUTERPGM/INNERPGM", inner.QualName)
 	assert.Equal(t, "INNERPGM", inner.Name)
+	assert.Equal(t, false, outer.Meta["cobol_nested"])
+	assert.Equal(t, true, inner.Meta["cobol_nested"])
 	assertCobolRange(t, outer)
 	assertCobolRange(t, inner)
 
@@ -339,6 +341,34 @@ func TestCobolGrammar_StolenEndMarkerUnresolved(t *testing.T) {
 			result := extractCobolGrammar(t, e, "src/stolen.cbl", tc.src)
 			assert.Equal(t, tc.ids, cobolProgramIDs(result))
 			assert.Equal(t, true, cobolFileNode(t, result, "src/stolen.cbl").Meta["prov_containment_unresolved"])
+		})
+	}
+}
+
+// TestCobolGrammar_ProgramNestedStamp pins cobol_nested on every program
+// node (D-09). The flag comes from END PROGRAM containment, never from the
+// symbol's shape: a top-level literal name containing '/' is not nested.
+func TestCobolGrammar_ProgramNestedStamp(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	for _, tc := range []struct {
+		name, src string
+		nested    map[string]any // program QualName -> cobol_nested
+	}{
+		{"top_level", cobolDemoFixture, map[string]any{"DEMOPGM": false}},
+		{"literal_slash_name", cobolProgram(`"A/B"`, ""), map[string]any{`"A/B"`: false}},
+		{
+			"stolen_marker",
+			cobolProgram("APGM", "") + cobolProgram("BPGM", "BPGM") + cobolProgram("APGM", "APGM"),
+			map[string]any{"APGM": false, "APGM/BPGM": true, "APGM/APGM": true},
+		},
+		{"siblings", strings.Repeat(cobolSiblingProgram, 2), map[string]any{"FIRSTPGM": false, "FIRSTPGM#2": false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := map[string]any{}
+			for _, n := range cobolProgramNodes(extractCobolGrammar(t, e, "src/stamp.cbl", tc.src)) {
+				got[n.QualName] = n.Meta["cobol_nested"]
+			}
+			assert.Equal(t, tc.nested, got)
 		})
 	}
 }
