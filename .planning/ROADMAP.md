@@ -111,7 +111,7 @@ Plans:
   4. IDMS record/set and CICS program/transaction/map/mapset references retain exact source evidence.
   5. DB2 reads and writes retain statement-level evidence while aliases, CTEs, includes, and dynamic sources remain distinguishable from physical tables.
 
-**Plans**: 13/17 plans executed (4 gap-closure plans pending)
+**Plans**: 14/17 plans executed (3 gap-closure plans pending)
 
 Plans:
 **Wave 1**
@@ -159,7 +159,7 @@ Plans:
 
 **Wave 11** *(gap closure; blocked on Wave 10 completion)*
 
-- [ ] 03-14-PLAN.md -- Gap 1: nested programs are CALL candidates only in their own file (cobol_nested stamp + resolver rule)
+- [x] 03-14-PLAN.md -- Gap 1: nested programs are CALL candidates only in their own file (cobol_nested stamp + resolver rule)
 
 **Wave 12** *(gap closure; blocked on Wave 11 completion)*
 
@@ -293,7 +293,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 |-------|----------------|--------|-----------|
 | 1. General Neo4j Projection Command | 7/7 | Complete    | 2026-09-22 |
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
-| 3. Deterministic COBOL and Mainframe Breadth | 13/17 | In Progress|  |
+| 3. Deterministic COBOL and Mainframe Breadth | 14/17 | In Progress|  |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 0/TBD | Deferred: Phase 3 | - |
 | 5. Explicit Unresolved Evidence | 0/TBD | Deferred: Phase 4 | - |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |
