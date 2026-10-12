@@ -25,7 +25,9 @@ var cobolIDMSKinds = map[string][2]graph.EdgeKind{
 }
 
 // cobolMainframe emits the IDMS and CICS edges of every statement in a
-// named program's procedure division (DET-07..DET-10).
+// named program's or a procedure copybook's procedure division
+// (DET-07..DET-10). From and owner IDs go through w.id, so a copybook
+// statement's edges come From its paragraph or the copybook file node.
 //
 // PURPOSE: IDMS records and sets and CICS programs, transactions, maps, and
 // mapsets are the mainframe half of the dependency picture, and each use
@@ -43,12 +45,12 @@ func cobolMainframe(w *cobolWalk, data *cobolDataIndex) {
 		if prog == "" || w.flowFrom[i] == "" || len(w.children[i]) == 0 {
 			continue
 		}
-		from := w.filePath + "::" + w.flowFrom[i]
+		from := w.id(w.flowFrom[i])
 		switch o.Kind {
 		case "idms_navigation_statement", "idms_update_statement", "idms_session_statement", "idms_accept_statement":
 			cobolIDMS(w, from, i)
 		case "exec_cics_statement":
-			cobolCICS(w, data, from, w.filePath+"::"+prog, i)
+			cobolCICS(w, data, from, w.id(prog), i)
 		}
 	}
 }

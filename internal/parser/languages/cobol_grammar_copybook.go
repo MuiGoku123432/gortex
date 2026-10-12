@@ -24,7 +24,8 @@ const cobolCopybookRoot = "@proc"
 //
 // PURPOSE: the copybook file node owns the member's data items (D-07), its
 // procedure sections, paragraphs, statements, and PERFORM/GO TO/CALL edges
-// (D-01, D-02, D-05), and every COPY, -INC, COPY IDMS, and EXEC SQL INCLUDE
+// (D-01, D-02, D-05), its IDMS, CICS, and DB2 edges (D-13, D-14, D-15),
+// and every COPY, -INC, COPY IDMS, and EXEC SQL INCLUDE
 // written in the member (D-11, D-19), so impact queries reach them.
 // RATIONALE: the producer's copybook mode wraps the member in a synthetic
 // header (D-16). Its first program_definition is that wrapper, registered as
@@ -54,6 +55,9 @@ func cobolCopybook(h handoff.Handoff, src []byte, filePath string, docMeta map[s
 	}
 	cobolDataBind(w, idx)
 	cobolReferences(w, idx)
+	// IDMS, CICS, and DB2 use in a procedure member, in Extract's order.
+	cobolMainframe(w, idx)
+	cobolSQL(w, idx)
 	// Set after the walk so only the file node carries the binding keys
 	// resolveCobolReferences matches a COPY on.
 	base := filepath.Base(filePath)

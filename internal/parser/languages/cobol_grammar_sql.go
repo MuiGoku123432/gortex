@@ -45,7 +45,7 @@ var cobolSQLOrientation = map[string]bool{
 }
 
 // cobolSQL emits the DB2 table and dynamic SQL edges of every EXEC SQL
-// statement in a named program (DET-11, DET-12).
+// statement in a named program or a procedure copybook (DET-11, DET-12).
 //
 // PURPOSE: DB2 table use is the other half of the mainframe dependency
 // picture, and a false table would poison every impact query.
@@ -89,10 +89,10 @@ func cobolSQL(w *cobolWalk, data *cobolDataIndex) {
 		}
 		// The pinned grammar admits EXEC SQL statements only in a procedure
 		// division; outside one the program is the flow source.
-		programID := w.filePath + "::" + prog
+		programID := w.id(prog)
 		from := programID
 		if w.flowFrom[i] != "" {
-			from = w.filePath + "::" + w.flowFrom[i]
+			from = w.id(w.flowFrom[i])
 		}
 		verb, at := cobolSQLVerb(w, i)
 		n := w.statementNode(i)
