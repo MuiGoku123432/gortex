@@ -249,6 +249,8 @@ func (s *Server) filterTextMatchesByResolvedScope(ctx context.Context, matches [
 	// Every match in the batch is attributed through the same reader,
 	// so the request-reader lookup is hoisted out of the loop.
 	reader := s.readerFor(ctx)
+	multi := s.multiIndexer != nil && s.multiIndexer.IsMultiRepo()
+	pathAllowed := map[string]bool{}
 	out := make([]trigram.Match, 0, len(matches))
 	for _, m := range matches {
 		repo, _, ok := strings.Cut(m.Path, "/")
@@ -262,6 +264,23 @@ func (s *Server) filterTextMatchesByResolvedScope(ctx context.Context, matches [
 		knownRepo := ok && repo != "" && s.multiIndexer != nil && s.multiIndexer.GetMetadata(repo) != nil
 		if len(resolved.RepoAllow) > 0 && knownRepo && !resolved.RepoAllow[repo] {
 			continue
+		}
+		// The repository that physically owns the anchored file must be in
+		// scope too: a nested tracked root can own bytes under the outer
+		// repository's spelling (CR-01, D-16). A path that does not anchor
+		// fails closed. The searcher stops at limit, so the cache is bounded.
+		// note: findUseSiteMatches repeats this anchor-and-gate step (two
+		// uses, below the rule of three).
+		if multi {
+			ok, seen := pathAllowed[m.Path]
+			if !seen {
+				abs := s.multiIndexer.ResolveFilePath(m.Path)
+				ok = abs != "" && s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, m.Path), abs) == nil
+				pathAllowed[m.Path] = ok
+			}
+			if !ok {
+				continue
+			}
 		}
 		// Fail CLOSED under active narrowing: keep a match only when it
 		// can be positively attributed to an in-scope graph node. A match

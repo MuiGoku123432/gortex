@@ -145,19 +145,23 @@ func (s *Server) handleFindDeclaration(ctx context.Context, req mcp.CallToolRequ
 // applies the prefix natively. Multi-repo mode fans out across every
 // tracked per-repo Indexer — the singleton s.indexer has no rootPath
 // in that mode, so its trigram index is empty and a direct call
-// returns no matches. A use site in a repository outside the request's
-// source scope is dropped, since its line is source bytes.
+// returns no matches. A use site whose file lies in a repository outside
+// the request's source scope is dropped, since its line is source bytes;
+// the repository that physically owns the anchored file decides too, so a
+// nested tracked root cannot leak through the outer spelling (CR-01, D-16).
 func (s *Server) findUseSiteMatches(ctx context.Context, useSite string, isRegex bool, pathPrefix string, limit int) ([]trigram.Match, error) {
 	inScope := map[string]bool{}
 	allowed := func(m trigram.Match) bool {
 		if s.multiIndexer == nil {
 			return true
 		}
-		repo := matchedRepoPrefix(s.multiIndexer, m.Path)
-		ok, seen := inScope[repo]
+		ok, seen := inScope[m.Path]
 		if !seen {
-			ok = s.requireSourceScope(ctx, repo) == nil
-			inScope[repo] = ok
+			// note: filterTextMatchesByResolvedScope repeats this
+			// anchor-and-gate step (two uses, below the rule of three).
+			abs := s.multiIndexer.ResolveFilePath(m.Path)
+			ok = abs != "" && s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, m.Path), abs) == nil
+			inScope[m.Path] = ok
 		}
 		return ok
 	}

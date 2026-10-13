@@ -305,7 +305,7 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 	const nestedID = "alpha/nested/main.go::ZebraWidget"
 	const zebraSource = "func ZebraWidget() {}"
 
-	run := func(t *testing.T, srv *Server) {
+	run := func(t *testing.T, srv *Server, betaDir string) {
 		ctx := context.Background()
 		t.Run("read_file", func(t *testing.T) {
 			res := callSourceTool(t, srv, ctx, srv.handleReadFile, "read_file",
@@ -330,6 +330,44 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 				map[string]any{"ids": []any{nestedID}, "include_source": true, "repo": "alpha"})
 			assert.NotContains(t, sourceScopeText(res), zebraSource)
 		})
+		t.Run("search_text", func(t *testing.T) {
+			res := callSourceTool(t, srv, ctx, srv.handleSearchText, "search_text",
+				map[string]any{"query": "Zebra", "repo": "alpha", "format": "json"})
+			require.Falsef(t, res.IsError, "an alpha-scoped search_text must succeed: %s", sourceScopeText(res))
+			assert.NotContains(t, sourceScopeText(res), "func ZebraWidget")
+
+			res = callSourceTool(t, srv, ctx, srv.handleSearchText, "search_text",
+				map[string]any{"query": "Zebra", "repo": "beta", "format": "json"})
+			require.Falsef(t, res.IsError, "a beta-scoped search_text must succeed: %s", sourceScopeText(res))
+			assert.Contains(t, sourceScopeText(res), "beta/main.go")
+		})
+		t.Run("find_declaration", func(t *testing.T) {
+			alphaCtx := withSourceScopeRequest(ctx, makeReq("find_declaration", map[string]any{"repo": "alpha"}))
+			for _, isRegex := range []bool{false, true} {
+				matches, err := srv.findUseSiteMatches(alphaCtx, "Zebra", isRegex, "", 100)
+				require.NoError(t, err)
+				for _, m := range matches {
+					assert.Falsef(t, strings.HasPrefix(m.Path, "alpha/nested/") || strings.Contains(m.Text, "ZebraWidget"),
+						"an alpha-scoped use site from beta's nested checkout (regex=%v): %s %q", isRegex, m.Path, m.Text)
+				}
+			}
+		})
+		t.Run("rename_symbol", func(t *testing.T) {
+			betaMain := filepath.Join(betaDir, "main.go")
+			before, err := os.ReadFile(betaMain)
+			require.NoError(t, err)
+			res := callSourceTool(t, srv, ctx, srv.handleRenameSymbol, "rename_symbol",
+				map[string]any{"id": nestedID, "new_name": "ZebraRenamed", "repo": "alpha"})
+			require.Truef(t, res.IsError, "an alpha-scoped rename of beta's file must be refused: %s", sourceScopeText(res))
+			assert.NotContains(t, sourceScopeText(res), zebraSource)
+			after, err := os.ReadFile(betaMain)
+			require.NoError(t, err)
+			assert.Equal(t, string(before), string(after), "beta's main.go must be unchanged on disk")
+
+			res = callSourceTool(t, srv, ctx, srv.handleRenameSymbol, "rename_symbol",
+				map[string]any{"id": alphaThingID, "new_name": "AlphaRenamed", "repo": "alpha", "dry_run": true})
+			require.Falsef(t, res.IsError, "an alpha-scoped dry-run rename of alpha's own symbol must succeed: %s", sourceScopeText(res))
+		})
 		t.Run("in_scope_reads", func(t *testing.T) {
 			res := callSourceTool(t, srv, ctx, srv.handleGetSymbolSource, "get_symbol_source",
 				map[string]any{"id": "beta/main.go::ZebraWidget", "repo": "beta"})
@@ -344,14 +382,14 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 	}
 
 	t.Run("tracked_together", func(t *testing.T) {
-		srv, _, _ := newNestedCheckoutServer(t, false)
-		run(t, srv)
+		srv, _, betaDir := newNestedCheckoutServer(t, false)
+		run(t, srv, betaDir)
 	})
 	t.Run("outer_indexed_first", func(t *testing.T) {
-		srv, _, _ := newNestedCheckoutServer(t, true)
+		srv, _, betaDir := newNestedCheckoutServer(t, true)
 		require.NotNilf(t, srv.graph.GetNode(nestedID),
 			"the fixture must reproduce a store indexed before the nested repository was tracked: %s is missing", nestedID)
-		run(t, srv)
+		run(t, srv, betaDir)
 	})
 }
 

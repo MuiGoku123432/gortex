@@ -592,6 +592,9 @@ func (s *Server) withAbsPaths(ctx context.Context, nodes []*graph.Node) []*graph
 // works on raw path strings — used for edges, search results, and other
 // references that don't carry a Node pointer. Returns errPathUnresolved
 // rather than letting os.Open resolve against the daemon process CWD.
+//
+// Both branches admit the returned path through requirePathSourceScope, so
+// the repository that physically owns it must be in scope too (D-16, D-20).
 func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string, error) {
 	if graphPath == "" {
 		return "", errors.New("empty path")
@@ -602,8 +605,10 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 	if s.multiIndexer != nil {
 		// The source gate (D-13, D-20): rename and scaffold read and write
 		// through this resolver, so it carries the same rule as resolveFilePath.
-		// An absolute path is also checked against the repository that
-		// physically owns its symlink-resolved location.
+		// An absolute path is checked against the repository that physically
+		// owns its symlink-resolved location here; a relative one is checked
+		// the same way once it is anchored below. The early lexical check
+		// keeps the unbound-refusal text for paths that do not anchor.
 		if filepath.IsAbs(graphPath) {
 			abs := filepath.Clean(graphPath)
 			if err := s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, s.repoRelative(abs)), abs); err != nil {
@@ -631,6 +636,11 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 				// there is no prefix to recover the root from — but a routed
 				// view still has to move the path into its own checkout.
 				abs = requestViewPathRoot(ctx).rooted(abs, root)
+			}
+			// A nested tracked root can own the bytes under the outer
+			// repository's spelling (CR-01).
+			if err := s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, graphPath), abs); err != nil {
+				return "", err
 			}
 			return abs, nil
 		}
