@@ -143,6 +143,14 @@ type MultiIndexer struct {
 	// pass self-consistent without widening mi.mu's scope.
 	reconcileMu sync.Mutex
 
+	// cobolReconcileMu serialises every COBOL CALL/COPY reconcile pass this
+	// MultiIndexer drives, through a master resolver or a per-repository
+	// one: each pass reads, decides, and rewrites edges from its own
+	// snapshot, and overlapping repository sets decide the same edges. It is
+	// installed on each resolver (SetCobolReconcileLock), which takes it
+	// inside the pass, as reconcileMu does for contract edges.
+	cobolReconcileMu sync.Mutex
+
 	// stitchProber / proxyBudget wire the cross-daemon proxy-edge feature:
 	// when set by the daemon entry point (flag on), every CrossRepoResolver
 	// this MultiIndexer builds mints proxy edges to remote-owned symbols
@@ -185,6 +193,12 @@ type MultiIndexer struct {
 	// batchCensusEligible is the daemon's one-shot full-coverage attestation
 	// for the armed batch scope — see ArmBatchCensusEligible.
 	batchCensusEligible bool
+	// batchCobolRepos collects the repositories whose warm-restart COBOL
+	// reconcile a parallel batch deferred: deciding one before every
+	// repository is registered would drop bindings into the unregistered
+	// ones. EndBatch and ResetBatch run one reconcile over the set. Guarded
+	// by mi.mu.
+	batchCobolRepos map[string]struct{}
 
 	// resolverLSPHelper is the resolve-time LSP helper propagated
 	// onto every per-repo Indexer and onto the global post-pass
@@ -377,6 +391,7 @@ func (mi *MultiIndexer) newPerRepoIndexerGuardedWithMode(
 	// a per-repository pass decides cross-repository edges exactly as the
 	// master pass does (D-09).
 	idx.resolver.SetCobolPolicyLookup(mi.cobolPolicyLookup())
+	idx.resolver.SetCobolReconcileLock(&mi.cobolReconcileMu)
 	return idx
 }
 
@@ -963,6 +978,7 @@ func (mi *MultiIndexer) newMasterResolver(useLSP bool) *resolver.Resolver {
 	master.SetPathAliasResolver(mi.pathAliasResolver())
 	master.SetWorkspaceMembership(mi.workspaceMembershipResolver())
 	master.SetCobolPolicyLookup(mi.cobolPolicyLookup())
+	master.SetCobolReconcileLock(&mi.cobolReconcileMu)
 	return master
 }
 
@@ -1582,12 +1598,17 @@ func (mi *MultiIndexer) EndBatch() {
 	mi.deferGlobalPasses = false
 	mi.deferResolve = false
 	state := mi.detachBatchGlobalPassStateLocked()
+	cobolRepos := mi.batchCobolRepos
+	mi.batchCobolRepos = nil
 	mode := multiIndexerBatchMode{}
 	for _, idx := range mi.indexers {
 		applyMultiIndexerBatchMode(idx, mode)
 	}
 	mi.mu.Unlock()
 
+	if len(cobolRepos) > 0 {
+		mi.reconcileCobolRepos(cobolRepos)
+	}
 	// Keep the transition write side through the complete global pass: a
 	// watcher admitted before or during EndBatch runs wholly before or after it.
 	mi.runGlobalGraphPasses(context.Background(), state.scope, state.censusEligible)
@@ -1608,14 +1629,22 @@ func (mi *MultiIndexer) ResetBatch() {
 	defer mi.batchMutationGate.Unlock()
 
 	mi.mu.Lock()
-	defer mi.mu.Unlock()
 	mi.deferGlobalPasses = false
 	mi.deferResolve = false
 	mi.batchChangedPrefixes = nil
 	mi.batchCensusEligible = false
+	cobolRepos := mi.batchCobolRepos
+	mi.batchCobolRepos = nil
 	mode := multiIndexerBatchMode{}
 	for _, idx := range mi.indexers {
 		applyMultiIndexerBatchMode(idx, mode)
+	}
+	mi.mu.Unlock()
+
+	// The deferred warm-restart COBOL reconcile still runs here: an
+	// interrupted reindex leaves placeholders that no census can see.
+	if len(cobolRepos) > 0 {
+		mi.reconcileCobolRepos(cobolRepos)
 	}
 }
 
@@ -3249,8 +3278,19 @@ func (mi *MultiIndexer) ReconcileRepoCtx(ctx context.Context, entry config.RepoE
 		// A reindex interrupted before its resolver tail leaves COBOL edges on
 		// their placeholders with mtimes already recorded, so this restart's
 		// census can see no change. Reconcile unconditionally: it is a no-op
-		// without COBOL nodes and idempotent with them (ID-07).
-		mi.reconcileCobolRepos(map[string]struct{}{prefix: {}})
+		// without COBOL nodes and idempotent with them (ID-07). A parallel
+		// warmup defers it to the batch end, once every repository is
+		// registered, as it defers the other resolve tails.
+		if batchMode.deferResolve {
+			mi.mu.Lock()
+			if mi.batchCobolRepos == nil {
+				mi.batchCobolRepos = make(map[string]struct{})
+			}
+			mi.batchCobolRepos[prefix] = struct{}{}
+			mi.mu.Unlock()
+		} else {
+			mi.reconcileCobolRepos(map[string]struct{}{prefix: {}})
+		}
 
 		publishTiming.complete(nil)
 		// Total includes nested phase timings: do not sum it with them.

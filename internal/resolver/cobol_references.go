@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/zzet/gortex/internal/graph"
 )
@@ -39,6 +40,14 @@ const (
 	// Literal CALL edge Meta read by this pass: the calling program's node ID.
 	metaCobolCallerProgram = "cobol_caller_program"
 )
+
+// SetCobolReconcileLock installs a mutex every COBOL reconcile pass of this
+// resolver holds, so the passes of resolvers that share it (a MultiIndexer's
+// master and per-repository resolvers) are serialised. nil, the default,
+// takes no lock.
+func (r *Resolver) SetCobolReconcileLock(mu *sync.Mutex) {
+	r.cobolReconcileMu = mu
+}
 
 // ReconcileCobol re-decides every literal COBOL CALL and COPY edge whose
 // caller repository is in changed, or resolves from a repository in changed
@@ -115,6 +124,10 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	if !r.graphHasLanguage("cobol") {
 		return
+	}
+	if r.cobolReconcileMu != nil {
+		r.cobolReconcileMu.Lock()
+		defer r.cobolReconcileMu.Unlock()
 	}
 	programs := cobolCandidateIndex(r.nodesByKindLang(graph.KindFunction, "cobol"), "program")
 	copybooks := cobolCandidateIndex(r.nodesByKindLang(graph.KindFile, "cobol"), "copybook")

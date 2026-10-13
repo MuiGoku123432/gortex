@@ -485,6 +485,11 @@ type Resolver struct {
 	// via SetCobolPolicyLookup.
 	cobolPolicyLookup CobolPolicyLookup
 
+	// cobolReconcileMu, when set, is held across each COBOL reconcile pass
+	// so passes of resolvers sharing it never interleave. Set via
+	// SetCobolReconcileLock.
+	cobolReconcileMu *sync.Mutex
+
 	// stampTerminal, when true, lets a FULL (unscoped) ResolveAll durably mark
 	// the edges it concludes are permanently external / stdlib / definition-
 	// less so a later SCOPED warm resolve can skip re-feeding them (see

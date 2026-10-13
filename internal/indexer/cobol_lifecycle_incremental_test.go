@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -354,8 +355,18 @@ func TestCobolLifecycle_Interrupted(t *testing.T) {
 		assert.Equal(t, bound[e.from+"\x00"+p], e.to, "binding of %s %s", e.from, p)
 	}
 
-	// Daemon restart: drop the stack, open a fresh one over the same SQLite
-	// file, and reconcile each repository from its persisted mtimes.
+	// Daemon restart: reconcile each repository from its persisted mtimes.
+	env.restart(t)
+	for _, name := range []string{"lifea", "lifeb"} {
+		env.warmReconcile(t, name)
+	}
+	requireSameDump(t, clean, env.requireCleanEquivalent(t))
+}
+
+// restart drops env's stack and opens a fresh one over the same SQLite file,
+// as a daemon restart does.
+func (env *cobolLifecycleEnv) restart(t *testing.T) {
+	t.Helper()
 	require.NoError(t, env.mi.Close(context.Background()))
 	require.NoError(t, env.store.Close())
 	// note: the same store and MultiIndexer wiring as newCobolLifecycleEnv
@@ -372,15 +383,40 @@ func TestCobolLifecycle_Interrupted(t *testing.T) {
 		_ = store.Close()
 	})
 	env.store, env.cm, env.mi = store, cm, mi
-	for _, name := range []string{"lifea", "lifeb"} {
-		prior := store.LoadFileMtimes(name)
-		require.NotEmpty(t, prior, name)
-		_, err := mi.ReconcileRepoCtx(context.Background(), config.RepoEntry{
-			Path: env.roots[name], Name: name, Workspace: "phase4", Project: "phase4",
-		}, prior)
-		require.NoError(t, err)
-	}
-	requireSameDump(t, clean, env.requireCleanEquivalent(t))
+}
+
+// warmReconcile reconciles one repository from its persisted mtimes, the
+// daemon's warm-restart route.
+func (env *cobolLifecycleEnv) warmReconcile(t *testing.T, name string) {
+	t.Helper()
+	prior := env.store.LoadFileMtimes(name)
+	require.NotEmpty(t, prior, name)
+	_, err := env.mi.ReconcileRepoCtx(context.Background(), config.RepoEntry{
+		Path: env.roots[name], Name: name, Workspace: "phase4", Project: "phase4",
+	}, prior)
+	require.NoError(t, err)
+}
+
+// TestCobolLifecycle_ParallelWarmRestart restarts the cross-repository store
+// under a parallel warmup batch and reconciles crossa before crossb is
+// registered. The COBOL reconcile waits for the batch end (WR-01): crossa's
+// binding into crossb is not rewritten to missing while crossb is merely
+// unregistered, and the batch end leaves the clean build.
+func TestCobolLifecycle_ParallelWarmRestart(t *testing.T) {
+	const callX = "unresolved::cobol::program::XPGM"
+	env := newCobolLifecycleEnv(t, cobolCrossRepos(map[string]string{".gortex.yaml": cobolCrossAllowlist}))
+	env.track(t, "crossa", "crossb")
+	env.restart(t)
+
+	env.mi.BeginParallelBatch()
+	env.warmReconcile(t, "crossa")
+	call := cobolPlaceholderEdge(t, cobolDumpEdges(t, env.dump(t)), "crossa", callX)
+	assert.Equal(t, "crossb/cobol/xpgm.cbl::XPGM", call.to, "decided before crossb was registered")
+	env.warmReconcile(t, "crossb")
+	env.mi.ResetBatch()
+
+	call = cobolPlaceholderEdge(t, cobolDumpEdges(t, env.requireCleanEquivalent(t)), "crossa", callX)
+	assert.Equal(t, "crossb/cobol/xpgm.cbl::XPGM", call.to)
 }
 
 // TestCobolLifecycle_OverCap caps lifea's affected-by fan-out at one file.
@@ -438,4 +474,42 @@ func TestCobolLifecycle_OverCap(t *testing.T) {
 	defer mu.Unlock()
 	assert.Equal(t, []string{"lifea/cobol/main.cbl", "lifea/cobol/progb.cbl", "lifea/cobol/progc.cbl"},
 		appendUniqueSorted(nil, affected...), "the affected set above the cap of 1 must not be truncated")
+}
+
+// TestCobolLifecycle_ReconcileSerialized proves every COBOL reconcile pass a
+// MultiIndexer drives, through a master resolver or a per-repository one,
+// takes the shared cobolReconcileMu, so two passes never decide the same
+// edges from interleaved snapshots (WR-01).
+func TestCobolLifecycle_ReconcileSerialized(t *testing.T) {
+	env := newCobolLifecycleEnv(t, cobolCrossRepos(map[string]string{".gortex.yaml": cobolCrossAllowlist}))
+	env.track(t, "crossa", "crossb")
+	idx := env.mi.GetIndexer("crossa")
+	require.NotNil(t, idx)
+	crossa := map[string]struct{}{"crossa": {}}
+
+	for name, pass := range map[string]func(){
+		"master":         func() { env.mi.reconcileCobolRepos(crossa) },
+		"per_repository": func() { idx.resolver.ReconcileCobol(crossa) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			env.mi.cobolReconcileMu.Lock()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				pass()
+			}()
+			select {
+			case <-done:
+				env.mi.cobolReconcileMu.Unlock()
+				t.Fatal("the reconcile pass ran while another pass held the lock")
+			case <-time.After(200 * time.Millisecond):
+			}
+			env.mi.cobolReconcileMu.Unlock()
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatal("the reconcile pass did not finish after the lock was released")
+			}
+		})
+	}
 }
