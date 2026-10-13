@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-11-PLAN.md
-last_updated: "2026-10-13T02:11:06.848Z"
+stopped_at: Completed 04-12-PLAN.md
+last_updated: "2026-10-13T02:35:13.193Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: af9714611e553a55bb7d53703eda7ccf1106f5db
+state_head: 38da6e43f0cb5a823d19a1485a8d42a04e4e68bd
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 36
+  completed_plans: 37
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 7 of 16
+Plan: 8 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -97,6 +97,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P04 | 6 min | 2 tasks | 2 files |
 | Phase 04 P06 | 6min | 1 tasks | 4 files |
 | Phase 04 P11 | 6 min | 1 tasks | 6 files |
+| Phase 04 P12 | 19 min | 1 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -184,6 +185,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-06: reconcileCobol(changed) is the single COBOL binding pass (full via r.scope, incremental via ReconcileCobol); re-decides bound edges from cobol_placeholder, candidates through per-caller graph.Scope, empty RepoPrefix caller -> caller_unowned, diff-only writes
 - [Phase 04]: 04-06: cobolPolicyFor carries //nolint:unused until 04-14 reads ResolveFrom; 04-14 must remove it
 - [Phase 04]: gortex-cobol-grammar/5 is the single Phase 4 COBOL mapping bump (04-01 shared resources + 04-02 identity); later Phase 4 extractor changes keep /5 until the phase gate
+- [Phase 04]: 04-12: source gate resolves scope with IntentReach (bound sessions keep workspace-wide source); a resolved WorkspaceID with empty RepoAllow expands to that workspace's repos
+- [Phase 04]: 04-12: resolveFilePath/resolveNodePath/resolveGraphPath and committed-view reads carry requireSourceScope; graphRelPath and workspace-edit ownership use ungated resolveConfinedFilePath (graph keys only); rename_symbol refuses whole when any site is gated
 
 ### Pending Todos
 
@@ -212,6 +215,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T02:11:06.796Z
-Stopped at: Completed 04-11-PLAN.md
+Last session: 2026-10-13T02:35:13.140Z
+Stopped at: Completed 04-12-PLAN.md
 Resume file: None
