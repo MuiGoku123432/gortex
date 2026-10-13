@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-12-PLAN.md
-last_updated: "2026-10-13T02:35:13.193Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-10-13T03:26:32.936Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 38da6e43f0cb5a823d19a1485a8d42a04e4e68bd
+state_head: 72e6095eb3b520fbab9b59333a8f9444da1bab08
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 37
+  completed_plans: 38
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 8 of 16
+Plan: 9 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -98,6 +98,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P06 | 6min | 1 tasks | 4 files |
 | Phase 04 P11 | 6 min | 1 tasks | 6 files |
 | Phase 04 P12 | 19 min | 1 tasks | 7 files |
+| Phase 04 P05 | 49 min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,8 @@ Recent decisions affecting current work:
 - [Phase 04]: gortex-cobol-grammar/5 is the single Phase 4 COBOL mapping bump (04-01 shared resources + 04-02 identity); later Phase 4 extractor changes keep /5 until the phase gate
 - [Phase 04]: 04-12: source gate resolves scope with IntentReach (bound sessions keep workspace-wide source); a resolved WorkspaceID with empty RepoAllow expands to that workspace's repos
 - [Phase 04]: 04-12: resolveFilePath/resolveNodePath/resolveGraphPath and committed-view reads carry requireSourceScope; graphRelPath and workspace-edit ownership use ungated resolveConfinedFilePath (graph keys only); rename_symbol refuses whole when any site is gated
+- [Phase 04]: 04-05: Ownership exemptions are three enumerated Go lists (OwnershipExemptKinds/ExemptPathPrefixes/GlobalIDNamespaces) that also generate the SQLite predicates; strict Clean fails on any unowned node (D-14)
+- [Phase 04]: 04-05: purgeUnprefixedRepoRows (v7, re-run as v22) deletes only the audit's unowned file-backed rows so external::-path modules and workspace rationale survive
 
 ### Pending Todos
 
@@ -215,6 +218,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T02:35:13.140Z
-Stopped at: Completed 04-12-PLAN.md
+Last session: 2026-10-13T03:26:32.886Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
