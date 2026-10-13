@@ -293,3 +293,49 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 	require.Falsef(t, res.IsError, "alpha's own file must still read: %s", sourceScopeText(res))
 	assert.Contains(t, sourceScopeText(res), "AlphaThing")
 }
+
+// TestSourceScope_TextSearchToolsGated: search_text and find_declaration
+// return matching source lines, so an unbound multi-repo request is refused
+// before any search runs, and a bound request never sees another
+// repository's lines (CR-02).
+func TestSourceScope_TextSearchToolsGated(t *testing.T) {
+	srv, _ := newTwoRepoServer(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		tool    string
+		handler func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error)
+		args    map[string]any
+	}{
+		{"search_text", srv.handleSearchText, map[string]any{"query": "func ", "format": "json"}},
+		{"search_text", srv.handleSearchText, map[string]any{"query": "NoSuchStringAnywhere", "format": "json"}},
+		{"search_text", srv.handleSearchText, map[string]any{"query": ".", "regexp": true, "format": "json"}},
+		{"find_declaration", srv.handleFindDeclaration, map[string]any{"use_site": "func ", "format": "json"}},
+	}
+	for _, tc := range cases {
+		res := callSourceTool(t, srv, ctx, tc.handler, tc.tool, tc.args)
+		text := sourceScopeText(res)
+		require.Truef(t, res.IsError, "%s %v must refuse an unbound multi-repo request, got: %s", tc.tool, tc.args, text)
+		assert.Contains(t, text, "repo")
+		assert.Contains(t, text, "workspace")
+		assert.NotContains(t, text, "ZebraWidget")
+		assert.NotContains(t, text, "AlphaThing")
+	}
+
+	// Bound to alpha: only alpha's lines come back.
+	res := callSourceTool(t, srv, ctx, srv.handleSearchText, "search_text",
+		map[string]any{"query": "func ", "repo": "alpha", "format": "json"})
+	require.Falsef(t, res.IsError, "repo-narrowed search_text must succeed: %s", sourceScopeText(res))
+	assert.Contains(t, sourceScopeText(res), "AlphaThing")
+	assert.NotContains(t, sourceScopeText(res), "ZebraWidget")
+
+	alphaCtx := withSourceScopeRequest(ctx, makeReq("find_declaration", map[string]any{"repo": "alpha"}))
+	for _, isRegex := range []bool{false, true} {
+		matches, err := srv.findUseSiteMatches(alphaCtx, "func ", isRegex, "", 100)
+		require.NoError(t, err)
+		require.NotEmpty(t, matches)
+		for _, m := range matches {
+			assert.Truef(t, strings.HasPrefix(m.Path, "alpha/"), "find_declaration use site outside the scope: %s %q", m.Path, m.Text)
+		}
+	}
+}

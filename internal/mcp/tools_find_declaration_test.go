@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -262,8 +263,11 @@ func consumer() int { return uniqueDecl() + uniqueDecl() }
 		MultiIndexer:  mi,
 	})
 
-	payload := declResult(t, callTool(t, srv, "find_declaration", map[string]any{
+	// Two tracked repos: use sites are source lines, so the request needs a
+	// scope (D-13) and goes through the production middleware that carries it.
+	payload := declResult(t, callSourceTool(t, srv, context.Background(), srv.handleFindDeclaration, "find_declaration", map[string]any{
 		"use_site": "uniqueDecl(",
+		"repo":     "alpha",
 	}))
 	require.Equal(t, float64(1), payload["count"],
 		"expected one declaration with two grouped use sites; got %v", payload)

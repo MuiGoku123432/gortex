@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,6 +46,13 @@ func (s *Server) handleSearchText(ctx context.Context, req mcp.CallToolRequest) 
 	resolved, errResult := s.resolveScope(ctx, req, IntentLocate)
 	if errResult != nil {
 		return errResult, nil
+	}
+	// Match lines are source bytes, so the source gate's unbound refusal
+	// (D-13) runs before any search: refusing only when something matched
+	// would tell an unbound caller whether the text exists. A bound request
+	// is narrowed by filterTextMatchesByResolvedScope below.
+	if err := s.requireSourceScope(ctx, ""); errors.Is(err, errSourceScopeRequired) {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	limit := req.GetInt("limit", 100)
