@@ -38,7 +38,7 @@ func TestGraphdump_Dump(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, full.Rows, 3)
 	require.True(t, sort.StringsAreSorted(full.Rows))
-	require.Equal(t, "graphdump-volatile/1", full.VolatileVersion)
+	require.Equal(t, "graphdump-volatile/2", full.VolatileVersion)
 	require.Contains(t, strings.Join(full.Rows, "\n"), `"stamp"`, "a key outside the allowlist stays in the rows")
 	again, err := Dump(ctx, store, scope, DeterministicVolatile)
 	require.NoError(t, err)

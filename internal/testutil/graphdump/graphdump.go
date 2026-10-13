@@ -29,7 +29,23 @@ type Volatile struct {
 // DeterministicVolatile is the allowlist the Phase 4 harness uses. Add a key
 // only when a harness diff proves it volatile, together with its
 // justification; never add one only to make a failing comparison pass.
-var DeterministicVolatile = Volatile{Version: "graphdump-volatile/1", Keys: map[string]string{}}
+//
+// v2 (04-08): the source_*_fingerprint keys are the incremental delta-probe
+// cache. The first incremental patch of a file stamps them on its file node
+// and cold indexing deliberately does not (indexer.prepareFileDelta), so
+// their presence records index history, not the inputs; an incremental dump
+// could never equal a clean one with them in.
+var DeterministicVolatile = Volatile{Version: "graphdump-volatile/2", Keys: map[string]string{
+	"source_semantic_fingerprint":         fingerprintCache,
+	"source_metadata_fingerprint":         fingerprintCache,
+	"source_core_fingerprint":             fingerprintCache,
+	"source_derived_decl_fingerprint":     fingerprintCache,
+	"source_derived_import_fingerprint":   fingerprintCache,
+	"source_derived_runtime_fingerprint":  fingerprintCache,
+	"source_derived_artifact_fingerprint": fingerprintCache,
+}}
+
+const fingerprintCache = "incremental delta-probe cache stamped only by an incremental patch, never by a cold index"
 
 // Result is one canonical dump: the sorted rows, the lowercase hex BLAKE3
 // digest of the rows joined by newlines, and the allowlist version used.

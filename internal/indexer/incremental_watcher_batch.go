@@ -264,6 +264,7 @@ func (idx *Indexer) incrementalEvictWatcherPath(path string) (nodesRemoved, edge
 		idx.observeIncrementalCatchup("resolve", nil)
 		idx.ResolveAll()
 	}
+	idx.reconcileCobolAfterMutation(result, nil)
 	if evictedGlobals {
 		idx.reresolveCSharpGlobalUsingDependents(
 			[]string{graphPath}, map[string]struct{}{graphPath: {}})
@@ -314,6 +315,7 @@ func (idx *Indexer) incrementalWatcherPaths(root string, paths []string, mode in
 		idx.observeIncrementalCatchup("resolve", nil)
 		idx.ResolveAll()
 	}
+	idx.reconcileCobolAfterMutation(result, receipt)
 	if mode.forceExplicitFiles || !idx.deferGlobalPasses.Load() {
 		if mode.exactPointSemantic {
 			idx.runIncrementalPointSemantic(result.DerivedInvalidation.Files)
@@ -418,6 +420,21 @@ func (mi *MultiIndexer) resolveIncrementalRepoMutationMode(
 			idx.materializeDataflowParamsForFiles(known)
 			idx.observeIncrementalCatchup("ref_facts", known)
 			idx.persistRefFactsForFiles(known)
+		}
+	}
+	// The COBOL reconcile runs outside the resolution branch: a receipt that
+	// is not ResolutionRelevant can still move or remove a COBOL target.
+	// It honours the same interruption seam as Indexer.reconcileCobolAfterMutation.
+	if cobolMutationTouched(result, receipt) {
+		idx.observeIncrementalCatchup("cobol", cobolMutationPaths(result, receipt))
+		if idx == nil || idx.incrementalResolveFilesHook == nil {
+			// note: the same repository scope is built inline in
+			// Indexer.reconcileCobolAfterMutation.
+			var repos map[string]struct{}
+			if repoPrefix != "" {
+				repos = map[string]struct{}{repoPrefix: {}}
+			}
+			mi.reconcileCobolRepos(repos)
 		}
 	}
 

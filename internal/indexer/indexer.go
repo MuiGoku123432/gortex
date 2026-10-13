@@ -5228,6 +5228,12 @@ func (idx *Indexer) reresolveFileScopedRaw(filePath string) error {
 // agnostic: GetInEdges + ReindexEdges are the same Store primitives the
 // resolver uses, so this behaves identically on the in-memory and disk
 // stores.
+//
+// A COBOL in-edge (one carrying cobol_placeholder) goes back to its own
+// placeholder instead, whatever its kind and whether the target is a
+// program or a copybook file, with no provenance stash and no Origin
+// change (CR-01, D-18): the COBOL reconcile pass, not the generic name
+// resolver, owns its binding.
 func (idx *Indexer) restubIncomingRefs(graphPath string) {
 	nodes := idx.graph.GetFileNodes(graphPath)
 	if len(nodes) == 0 {
@@ -5240,7 +5246,8 @@ func (idx *Indexer) restubIncomingRefs(graphPath string) {
 			continue
 		}
 		evicted[n.ID] = struct{}{}
-		if n.Name != "" && graph.IsReferenceableSymbol(n.Kind) {
+		if (n.Name != "" && graph.IsReferenceableSymbol(n.Kind)) ||
+			(n.Kind == graph.KindFile && n.Language == "cobol") {
 			refIDs = append(refIDs, n.ID)
 		}
 	}
@@ -5253,16 +5260,30 @@ func (idx *Indexer) restubIncomingRefs(graphPath string) {
 	inEdges := idx.graph.GetInEdgesByNodeIDs(refIDs)
 	var batch []graph.EdgeReindex
 	for _, n := range nodes {
-		if n == nil || n.Name == "" || !graph.IsReferenceableSymbol(n.Kind) {
+		if n == nil {
 			continue
 		}
+		referenceable := n.Name != "" && graph.IsReferenceableSymbol(n.Kind)
 		stub := graph.UnresolvedMarker + n.Name
 		for _, e := range inEdges[n.ID] {
-			if e == nil || !graph.IsResolvableRefEdge(e.Kind) {
+			if e == nil {
 				continue
 			}
 			if _, fromEvicted := evicted[e.From]; fromEvicted {
 				continue // intra-file edge: the source is evicted too
+			}
+			// note: the same COBOL-first restub is inline in
+			// restubIncomingRefsFromView (incremental_batch.go).
+			if placeholder, _ := e.Meta["cobol_placeholder"].(string); placeholder != "" {
+				if e.To != placeholder {
+					oldTo := e.To
+					e.To = placeholder
+					batch = append(batch, graph.EdgeReindex{Edge: e, OldTo: oldTo})
+				}
+				continue
+			}
+			if !referenceable || !graph.IsResolvableRefEdge(e.Kind) {
+				continue
 			}
 			if graph.IsUnresolvedTarget(e.To) {
 				continue // already a pending stub
