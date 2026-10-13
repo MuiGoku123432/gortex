@@ -257,9 +257,13 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	}
 
 	// ReindexEdges persists the moved edges' full payload, Meta included.
+	// A CALL bound across repositories gets its parallel cross_repo_calls
+	// edge here, the settle step CrossRepoResolver runs on its own batch, so
+	// the clean track path and the incremental derived pass agree.
 	if len(rebound) > 0 {
 		r.noteImportEdgeReindexes(rebound)
 		r.graph.ReindexEdges(rebound)
+		DetectCrossRepoEdgesForReindexes(r.graph, rebound)
 	}
 	// Meta- and Origin-only changes. The in-memory store hands out live
 	// edges, so the in-place mutation above is already durable there.

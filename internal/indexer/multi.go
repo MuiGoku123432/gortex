@@ -3246,6 +3246,11 @@ func (mi *MultiIndexer) ReconcileRepoCtx(ctx context.Context, entry config.RepoE
 		} else if result.FullRetrack && !batchMode.deferGlobalPasses {
 			mi.ReconcileContractEdges()
 		}
+		// A reindex interrupted before its resolver tail leaves COBOL edges on
+		// their placeholders with mtimes already recorded, so this restart's
+		// census can see no change. Reconcile unconditionally: it is a no-op
+		// without COBOL nodes and idempotent with them (ID-07).
+		mi.reconcileCobolRepos(map[string]struct{}{prefix: {}})
 
 		publishTiming.complete(nil)
 		// Total includes nested phase timings: do not sum it with them.
