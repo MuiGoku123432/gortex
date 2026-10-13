@@ -1,217 +1,313 @@
 ---
 phase: 04-stable-incremental-and-cross-repository-lifecycle
-reviewed: 2026-10-13T19:23:03Z
+reviewed: 2026-10-13T22:39:52Z
 depth: standard
-review_kind: incremental re-review of gap-closure plans 04-17 and 04-18 (diff base d1d1a688)
-files_reviewed: 14
+review_kind: incremental re-review of gap-closure round 2, plans 04-19..04-22 (diff base c9b6fd1a, HEAD 88fd602d)
+files_reviewed: 16
 files_reviewed_list:
+  - cmd/gortex/daemon_state.go
+  - internal/indexer/cobol_lifecycle_crossrepo_test.go
   - internal/indexer/indexer.go
   - internal/indexer/multi.go
   - internal/indexer/nested_tracked_root_test.go
-  - internal/indexer/walk_source.go
-  - internal/indexer/watcher.go
+  - internal/indexer/repository_untrack.go
   - internal/indexer/workspace_resolve.go
-  - internal/mcp/source_scope.go
+  - internal/mcp/explore_artifact_intent.go
   - internal/mcp/source_scope_test.go
-  - internal/mcp/tools_coding.go
-  - internal/mcp/tools_fileops.go
+  - internal/mcp/tools_explore.go
   - internal/mcp/tools_find_declaration.go
-  - internal/mcp/tools_search_text.go
-  - internal/mcp/tools_search_text_test.go
-  - internal/mcp/tools_search_text_pathsep_test.go
+  - internal/mcp/tools_find_declaration_test.go
+  - internal/mcp/tools_generate_skill.go
+  - internal/mcp/tools_generate_skill_test.go
+  - internal/mcp/tools_move_inline.go
+  - internal/mcp/tools_move_inline_test.go
 findings:
   critical: 1
-  warning: 5
-  info: 6
-  total: 12
+  warning: 7
+  info: 10
+  total: 18
 status: issues_found
 ---
 
-# Phase 4: Code Review Report (re-review of 04-17 / 04-18)
+# Phase 4: Code Review Report (re-review of 04-19..04-22)
 
-**Reviewed:** 2026-10-13T19:23:03Z
-**Depth:** standard (incremental: `git diff d1d1a688..HEAD`, with call chains followed into `GlobalConfig.ReposSnapshot`, `ConfigManager.ActiveRepos`, `MultiIndexer.indexMultiRepo`, `UntrackRepo`, `RepoForFile`, `LinkedWorktreeRoots`, `worktreeRootedPath`, and the explore text lanes)
-**Files Reviewed:** 14
+**Reviewed:** 2026-10-13T22:39:52Z
+**Depth:** standard (incremental: `git diff c9b6fd1a..HEAD` over the 16 files, with call chains followed into `requirePathSourceScope`, `filterTextMatchesByResolvedScope`, `GrepRegexpForRepos`, `trackRepoSourceCtx`, `reach.BeginTopologyMutation`, `indexMultiRepo` publication, the warmup worker pool, `resolveOverlayAbsPath`, and `AtomicWriteFile`)
+**Files Reviewed:** 16
 **Status:** issues_found
 
 ## Narrative Findings (AI reviewer)
 
 ## Summary
 
-Plan 04-17 adds a physical-owner check (`requirePathSourceScope`) to `resolveNodePath`, the relative branch of `resolveGraphPath`, `search_text`/`search_symbols` content fallback (`filterTextMatchesByResolvedScope`), and `find_declaration` (`findUseSiteMatches`). Plan 04-18 stops an outer repository's walk, admission probe, and watcher at a nested tracked root.
+Round 2 makes four changes:
+
+- **04-19:** explore's artifact lane now refuses unbound multi-repo requests and passes its matches through the physical-owner filter.
+- **04-20:** the per-Indexer config seed is replaced by live registered roots plus reference-counted declared roots.
+- **04-21:** tracking or untracking a repository now runs a scoped reconcile of every repository that encloses it.
+- **04-22:** each entry of the move, inline and generate_skill walks is gated, and the `find_declaration` regex branch filters before it caps.
+
+I ran throwaway probes with `go test -overlay`. The tree was not modified.
 
 **What holds:**
 
-- **Read gating.** The prior CR-01 read bypass is closed for every graph-backed reader that goes through `resolveNodePath` or `resolveGraphPath`: `get_symbol_source`, `batch_symbols`, `smart_context`, `get_editing_context`, nav, cfg, dataflow, manifest, and `rename_symbol`/scaffold. `search_text` and `find_declaration` are closed as well. All four new tests pass.
-- **Refusal text.** Refusals do not reveal whether an out-of-scope file exists. `errSourceOutOfScope` is the same generic not-found text whether the lexical gate or the physical-owner gate refuses, and `get_symbol_source` maps it to `symbol not found`.
-- **Lock order.** The new `mi.mu.RLock` in `nestedTrackedRootContains` is safe. I checked every `mi.mu.Lock` and `mi.mu.RLock` critical section in `internal/indexer`. None of them walks or calls `shouldExclude`, `PathIndexability`, or `Watcher.isExcluded`. The cold-index collector no longer holds `mi.mu` across the result channel (`multi.go:2297-2314`). `MultiWatcher.EnqueueFileMutation` releases `mw.mu` before it calls into the per-repo watcher. Nothing enforces this, though (IN-05).
+- **Round-1 CR-01, WR-01 and WR-02 are closed for the shapes they cited.** I probed a warm restart in which alpha is reconciled from persisted mtimes and a newly configured nested beta is cold-tracked in the same declared batch. Alpha's copies are dropped and beta owns the file. In a second probe, nested files arrived through the watcher's Indexer-level `IncrementalReindexPaths` before beta was tracked. The committed `FileMtimes` snapshot did include them, and `TrackRepoCtx` evicted alpha's copy.
+- **Lock order.** `DeclarePendingRoots` and its release take `mi.mu.Lock` only for map updates. The daemon declares inside `RunRepositoryTopologyBatch` (gate, then `mi.mu`), which matches the established order. `reconcileEnclosingRepos`:
+  - runs only after `trackRepoSourceCtx` or `untrackRepoTeardown` has returned, so every lane, gate and topology-writer defer has already run;
+  - holds `mi.mu.RLock` only while it reads an immutable committed `FileMtimes` map;
+  - is skipped inside a topology batch.
 
-**What does not hold:** the walk-pruning half (04-18) takes its roots from the wrong source, and its state goes stale. I wrote throwaway probe tests and ran them with `go test -overlay`, so the tree was not modified. They show that:
+  Concurrent tracks stay serialized by the exclusive reach topology writer (`reach.go:276-288`), so the "outer not yet published" race I looked for cannot occur while `WritesBaseTopology` is true. I found no recursion path from `IncrementalReindexRepo` back into track or untrack.
+- **Release and refcount.** Release is `sync.Once`-wrapped and deferred immediately at both declaration sites, so lane errors and panics are covered. Duplicate roots are counted and released symmetrically.
+- **Explore gate.** The refusal is decided from `classifyExploreArtifactIntent(task)` alone, and its text names no repository.
 
-1. A nested repository defined under `projects:` is still indexed twice.
-2. An inactive config entry makes the nested files disappear from the graph entirely.
-3. After `UntrackRepo("beta")`, alpha keeps excluding beta's former files.
+**What does not hold:**
 
-The tests only exercise the config shape where the seed happens to be correct.
+1. The per-entry walk gate that 04-22 added says it covers "a symlinked file", but it admits any symlink whose target is **outside every tracked root**. I confirmed with a probe that `generate_skill` copied an out-of-tree file's bytes into the repository's skill bundle (CR-04).
+2. Declared roots over-prune when a declared repository fails to register, and nothing re-admits the files afterwards (WR-06).
+3. Enclosing-reconcile failures are only logged (WR-07).
+4. The 04-19 residual (`preview_edit`/`simulate_chain` reading through the ungated `resolveOverlayAbsPath`) is still open. That resolver also accepts absolute paths with no confinement (WR-10).
 
-### Status of prior findings (base fec9f8e9 review)
+### Status of round-1 findings (review at base d1d1a688)
 
-| Prior finding | Status after 04-17/04-18 |
+| Round-1 finding | Status after 04-19..04-22 |
 |---|---|
-| CR-01: nested-checkout bypass on graph-backed reads, text search, rename writes | **Closed for the source-byte gate.** Root-cause pruning is only partial (see CR-01, WR-01..WR-03 below). One residual source surface is outside the changed files (WR-04). |
-| WR-01: untrack restub is best-effort before a destructive purge | **Open.** `repository_untrack.go` was not touched. |
-| WR-02: new COBOL reconcile call sites run outside the reach topology gate and batch gate | **Open.** Not touched. |
-| WR-03: `find_declaration` regex branch caps before the scope filter | **Open, and worse.** Re-raised as WR-05. |
-| WR-04: `rename_symbol` existence oracle (accepted risk, 04-12) | **Open (accepted).** It now also reveals whether a *nested* physical owner holds a reference. |
-| IN-01..IN-07 | **Open.** None of the touched code addresses them (IN-06 `get_editing_context` view branch still gates only `anchor.RepoPrefix`, `tools_coding.go:571-576`). |
+| CR-01: nested-root walk seed comes from the wrong repository list | **Resolved** (04-20). Pruning reads `mi.repos` plus `pendingRoots` live, and batches declare the list they actually index. Tests cover `projects:`, another active project, and the project filter. Residual on failed registration: WR-06 (new). |
+| WR-01: seed never refreshes after untrack | **Resolved** (04-20, 04-21). The per-Indexer copy is gone, and `untrackRepoChecked` admits the subtree into enclosing repositories. |
+| WR-02: tracking a nested repository later freezes outer duplicates | **Resolved** for `TrackRepoCtx` (04-21) and for the warm-restart batch (probe). `indexMultiRepo` still has no enclosing eviction (IN-10, new). |
+| WR-03: nested-root containment is lexical only | **Open, extended.** `DeclarePendingRoots`, `nestedTrackedRootContains` and the new `reconcileEnclosingRepos` are all lexical. See Prior review. |
+| WR-04: explore artifact lane emits source lines without a gate | **Resolved** (04-19). Unbound refusal plus `filterTextMatchesByResolvedScope`. Tested in both nested states, with positive controls. |
+| WR-05: `find_declaration` regex caps before filtering | **Partially resolved** (04-22). The cross-repository case is fixed. The per-repository cap still runs before the physical-owner filter. See Prior review. |
+| IN-01: scope re-resolved and `EvalSymlinks` per path | **Open, broadened.** Every walk entry in move, inline and generate_skill now pays for it (performance; noted only). |
+| IN-02: view-routed `search_text` anchored to the canonical root | **Open.** File not touched. |
+| IN-03: worktree fallback requires the worktree prefix in scope | **Open.** File not touched. |
+| IN-04: test gaps let CR-01 and WR-01..03 pass | **Partially resolved.** The CR-01, WR-01 and WR-02 shapes and the positive controls are now tested. WR-03 (symlink or alternate spelling) and the CR-04 symlink class have no test. |
+| IN-05: "caller must not hold mi.mu" not enforced | **Open.** The predicate now also iterates `pendingRoots` under the same RLock. Still documented, not enforced. |
+| IN-06: `rename_symbol` refusal reveals nested owners (accepted risk) | **Open (accepted).** The skip-versus-refuse policy now also governs the move and inline walks (WR-08). |
 
 ## Critical Issues
 
-### CR-01: The nested-root walk seed comes from the wrong repository list: project-defined repos are still double-indexed, and inactive entries make files disappear
+### CR-04: Per-entry walk gate admits symlinks whose target is outside every tracked root, so generate_skill copies arbitrary file bytes into the repository
 
-**File:** `internal/indexer/multi.go:376-392` (seed), consumed by `internal/indexer/indexer.go:5697-5710` (`inNestedTrackedRoot`)
+**File:** `internal/mcp/tools_generate_skill.go:146-205`; `internal/mcp/tools_move_inline.go:254-283,1148-1172`; root cause `internal/mcp/source_scope.go:114-127`
 
-**Issue:** The seed is built from `mi.configMgr.Global().ReposSnapshot()`, which copies only the top-level `gc.Repos` (`config/global.go:456-463`). The set a warmup actually indexes is `ConfigManager.ActiveRepos()` (`config/manager.go:447-459`), optionally narrowed by `filterReposByScope`. During a parallel warmup the live fallback (`nestedTrackedRootContains`) sees nothing, because `mi.repos` is published only after every worker has drained (`multi.go:2314-2322`). The seed is therefore the **only** guard on the cold path, and the two lists disagree in both directions:
+**Issue:** 04-22's comments say the per-entry gate stops "a tracked root nested under absDir, **or a symlinked file**". `requirePathSourceScope` resolves the entry with `EvalSymlinks`, and when `RepoForFile(real)` is `""` (the target lies outside every tracked root) it returns nil (`physical == "" → return nil`, line 124). `filepath.WalkDir` reports a symlink as a non-directory, and `os.ReadFile(path)` (line 198) follows it.
 
-- **Under-prune (SEC-08 still open).** When `active_project` names a `projects:` entry, `ActiveRepos` returns `gc.Projects[p].Repos`, which are not in `gc.Repos`. Alpha's walk then descends into beta. Probe result: `repos=[alpha beta]`, `alpha/nested/main.go::ZebraWidget present: true`, so one file has two owners. This is the exact CR-01/SEC-08 state the plan claims to close.
-- **Over-prune (graph data loss).** `gc.Repos` lists entries that are not being indexed: another project's entries when `active_project` is set, entries filtered out by `IndexScoped(workspace, project)`, and entries that fail to open or index (`resolveErrors`). Alpha still prunes their roots, so nobody indexes those files. Probe result: `active_project: p1`, beta tagged `p2`, so `repos=[alpha]`, `alpha/nested node present: false`, `beta node present: false`. Meanwhile `RepoForFile` attributes `alpha/nested/main.go` to alpha, so `read_file` serves it while every graph tool says it does not exist.
+Probe: in `newNestedGoModuleServer`, I created `alpha/a/link.txt -> <tmp>/secret.txt` and called `generate_skill {directory:"alpha/", repo:"alpha"}`. The result was `references` containing `{"rel_path":"a/link.txt","bytes_written":25}`, and `alpha/.claude/skills/alphaskill/references/a/link.txt` held `TOP-SECRET-OUTSIDE-ROOTS`.
 
-**Fix:** Seed from the list the batch is actually indexing, not from the raw config. Do it once, before the workers start, and pass it in:
+The copy is a regular file inside alpha. `read_file` then serves it, and an agent may commit it. A repository that ships a symlink such as `docs/notes.md -> ../../.ssh/id_rsa` can therefore exfiltrate any file the daemon can read. This breaks the SECURITY.md confinement invariant that `guardSymlinkWithinRepo` enforces for `read_file`.
+
+move_symbol and inline_symbol have the same hole for `*.go` symlinks. The target's bytes are read and rewritten, and `AtomicWriteFile`'s rename replaces the link with an in-repository copy of the out-of-tree file. The behavior predates this round, but these files were rewritten in this round specifically to close the symlink class. `TestGenerateSkill_NestedTrackedRootExcluded` has no symlink case.
+
+**Fix:** Confine each entry before gating its owner, and fail closed on non-regular files:
 ```go
-// indexMultiRepo, after `resolved` is built (absPath already filepath.Abs'd and Stat'd):
-roots := make([]string, 0, len(resolved))
-for _, r := range resolved { roots = append(roots, filepath.Clean(r.absPath)) }
-// newPerRepoIndexerGuardedWithMode(cfg, mode, roots) -> idx.trackedRepoRoots = roots
+// generate_skill WalkDir callback, before reading:
+if d.Type()&fs.ModeSymlink != 0 {
+    if s.guardSymlinkWithinRepo(ctx, path) != nil { skipped++; return nil }
+}
+if s.requirePathSourceScope(ctx, rootRepo, path) != nil { skipped++; return nil }
 ```
-Seed `TrackRepoCtx`/`IndexRepo` constructors from the registered `mi.repos` roots, taken before construction under `mi.mu.RLock`. Drop `ReposSnapshot()` from the constructor. Add tests for a `projects:`-map config, an `active_project` that excludes the nested entry, and a `filterReposByScope` run that excludes it.
+Apply the same `guardSymlinkWithinRepo` check in both move/inline walk callbacks and in the `callerFiles` read loops (`tools_move_inline.go:285,1188`). Better still, make `requirePathSourceScope` refuse `physical == ""` whenever `guardResolvedPathWithinRepo(ctx, absPath, real)` fails, so every caller inherits the confinement. Add a symlink-out-of-tree case to the generate_skill, move and inline tests.
 
 ## Warnings
 
-### WR-01: The seed never refreshes, so after untracking the nested repository the outer repository keeps excluding its files
+### WR-06: Declared roots over-prune when a declared repository fails to register, and nothing re-admits the files
 
-**File:** `internal/indexer/indexer.go:529-533,5701-5705`; `internal/indexer/watcher.go:2953`
+**File:** `cmd/gortex/daemon_state.go:644-645,712-755`; `internal/indexer/multi.go:2257-2263,2347-2366`
 
-**Issue:** `trackedRepoRoots` is documented as "read-only after construction". `UntrackRepo` deletes beta from `mi.repos` and from the config (`multi.go:3449`), but alpha's long-lived `Indexer` keeps its seed, and so does the `Watcher` that points at that Indexer. Probe result after `mi.UntrackRepo("beta")`: `repos=[alpha]`, same alpha Indexer, `shouldExclude(betaDir/main.go) == true`.
+**Issue:** The warmup declares every `gc.Repos` entry before the pool starts, and `indexMultiRepo` declares every resolved entry before its workers run. If beta's `TrackRepoCtx` or `ReconcileRepoCtx` then fails, the failure is logged ("startup track failed" or "startup reconcile failed"); the same happens if the per-entry panic guard fires or the `indexMultiRepo` worker returns `indexErr`. In every case, beta never reaches `mi.repos`. Alpha's walk, or its warm census, has already pruned or purged beta's subtree. The release then drops the declaration, but:
 
-As a result:
-- Alpha's watcher refuses every create or edit under `alpha/nested/`.
-- Nothing re-adopts the files. The untrack path does not reindex the enclosing repository.
-- The files are absent from the graph until alpha's Indexer is rebuilt by a full `IndexRepo` or a daemon restart. `RepoForFile` still says alpha owns them, which is the same inconsistency as CR-01's over-prune.
+- the warmup skips `reconcileEnclosingRepos` because it runs inside a topology batch;
+- `indexMultiRepo` has no enclosing reconcile at all.
 
-The same staleness applies to a config reload that removes an entry.
+Alpha therefore never re-admits the files. They disappear from the graph while `RepoForFile` attributes them to alpha. This is the over-prune half of round-1 CR-01, moved from "entries not in the batch" to "entries in the batch that fail".
 
-**Fix:** Drop the per-Indexer copy and keep the live `mi.repos` check as the only source after warmup. Have warmup pass its batch roots (CR-01) in a field that `indexMultiRepo` clears once it publishes `mi.repos`. Then, on untrack of a root nested in another tracked root, schedule a scoped reindex of the enclosing repository for that subtree, or at least of the files under it. Add a regression test: track both, untrack beta, then assert that alpha's watcher admits `betaDir/main.go` and that alpha's next incremental pass indexes it.
+The same window also affects an already-registered outer repository whose watcher runs while a batch is in flight. The watcher drops events under a declared root. If that root never registers, the dropped events are never replayed.
 
-### WR-02: Tracking a nested repository later freezes the outer repository's stale duplicates, because the watcher now refuses their update and delete events
+**Fix:** After the batch, compare the declared roots with `mi.repos`. For each declared root that did not register, run `reconcileEnclosingRepos(context.Background(), root, false)` after `release()`. For the daemon, do this after `RunRepositoryTopologyBatch` returns. For `indexMultiRepo`, do it after the lane and gate are released. Add a test that declares beta, forces its track to fail (for example an unreadable root, or a hook seam), and asserts that `alpha/nested/main.go` is indexed afterwards.
 
-**File:** `internal/indexer/watcher.go:2945-2955`; `internal/indexer/nested_tracked_root_test.go:127-136`
+### WR-07: Enclosing-reconcile failures are only logged: track and untrack report success while the outer repository keeps duplicates or misses files
 
-**Issue:** When beta is tracked after alpha was indexed, `alpha/nested/*` nodes remain in the graph (`trackNestedLater` asserts this precondition). After 04-18, alpha's watcher refuses every event under beta's root, including deletes. Those alpha-owned duplicates can therefore never be updated or evicted until alpha's next full reindex or warm-restart census. In the meantime:
-- `search_symbols`, `find_usages` and the other graph-metadata tools, which are not source-gated, keep returning `alpha/nested/...` symbols that drift from disk.
-- The ownership audit counts them as correctly prefixed alpha nodes, so `index_health` stays green while one file has two owners.
+**File:** `internal/indexer/multi.go:2987-2994`; `internal/indexer/repository_untrack.go:56-60`
 
-`TestNestedTrackedRoot_OuterReindexDropsDuplicates` passes only because it calls `mi.IndexRepo("alpha")` by hand. No production track path does that.
+**Issue:** `reconcileEnclosingRepos` turns every `IncrementalReindexRepo` error into a `Warn` log. `TrackRepoCtx` and `untrackRepoChecked` then return the trigger's own success.
 
-**Fix:** In `TrackRepoCtx`, after beta is registered, evict the enclosing repository's file nodes under beta's root. Every outer repository whose root strictly contains beta's root needs this, for example `EvictFile` for each `GetFileNodes` path with prefix `<outer>/<rel(beta)>/`. Do it under the same topology gate the track already holds. Assert this in `trackNestedLater` without the manual `IndexRepo`.
+- On track, a failed eviction leaves `alpha/nested/*` duplicates. Alpha's watcher now refuses events under that root, so the duplicates are frozen (round-1 WR-02's symptom) and nothing retries.
+- On untrack, a failed admission leaves the subtree out of the graph until alpha's next full reindex.
 
-### WR-03: Nested-root containment is lexical only, so a symlinked or alternate spelling of the nested root is not pruned
+Neither outcome reaches the caller, `index_health` or the lifecycle catalog. The function also takes a `ctx` that it ignores past the batch check, so an MCP request that is cancelled mid-reconcile keeps running.
 
-**File:** `internal/indexer/indexer.go:5701-5705`; `internal/indexer/workspace_resolve.go:152-168`; `internal/indexer/multi.go:386-390`
+**Fix:** Return an aggregated error, or a `DeferredEnclosingReconcile` list, from `reconcileEnclosingRepos`. Surface it on `IndexResult` (or as a joined error) without failing the already-committed track or untrack. Also record the outer prefix as stale, so the next watcher tick or warmup census retries it.
 
-**Issue:** Both checks use `pathkey.HasPathPrefix` on `filepath.Abs` spellings, which folds case only. If beta is tracked through a symlink to `alpha/nested`, or through any alternate spelling (`/var` vs `/private/var`, a bind mount), the check does not match. Probe result: alpha at `<tmp>/alpha`, beta tracked as `<tmp2>/betalink -> <tmp>/alpha/nested`, and `alpha/nested/main.go::ZebraWidget` is present. Elsewhere the codebase already treats roots by canonical identity: `pathkey.SamePathIdentity` in duplicate-root detection (`multi.go:2187`), and `CanonicalHasPathPrefix`/`CanonicalPath` in `bestRepoPrefixForPathLocked`.
+### WR-08: Scoped move_symbol and inline_symbol now silently leave out-of-scope callers unrewritten and report success
 
-**Fix:** Canonicalize the roots once when seeding or registering them, and compare with the canonical form:
+**File:** `internal/mcp/tools_move_inline.go:254-283,1148-1172`; `internal/mcp/tools_move_inline_test.go` (`TestMoveSymbol_NestedTrackedRootNotRewritten`)
+
+**Issue:** The new tests prove that `beta/use.go`, which imports `example.com/alpha/a` and calls `a.Foo()`, is left byte-identical while `Foo` moves to package `b`. The tool returns a non-error result whose `touched` list omits beta, and it gives no signal that callers were skipped. Beta no longer compiles.
+
+Before 04-22 the walk leaked by rewriting out-of-scope files. Now it silently produces a broken refactor. The summary defers this as the "skip vs refuse" policy (tied to IN-06). It is still a correctness defect in shipped behavior, not only a policy note.
+
+**Fix:** Pick one of two options:
+- Refuse the move or inline with the generic `errSourceOutOfScope` text when any walk entry or edge-loop caller is refused. This is consistent with `rename_symbol`'s accepted-risk refusal.
+- Always emit a fixed advisory, for example `"callers outside the resolved scope are not rewritten"`, whenever the walk refused any entry, with no count and no path, so it does not reveal which files exist.
+
+Add an assertion for whichever behavior is chosen.
+
+### WR-09: View attribution overrides a more specific registered owner in the physical-owner gate, and generate_skill's 04-22 deviation copies the same rule
+
+**File:** `internal/mcp/source_scope.go:118-122`; `internal/mcp/tools_generate_skill.go:150-156`
+
+**Issue:** The gate sets `physical = RepoForFile(real)`, then overwrites it unconditionally with `view.repoPrefix` whenever the request's view checkout contains `real`. Suppose a repository is tracked at a root nested inside a materialized worktree checkout, for example `alpha-wt/vendor-clone` tracked as `gamma`. `RepoForFile` returns `gamma`, but the override relabels it as alpha. An alpha-scoped view request then reads, bundles or rewrites gamma's files.
+
+This is the same nested-owner bypass the phase closed for the primary checkout, reopened through the view path. 04-22's "generate_skill root repository honors the request's view checkout" deviation applies the identical override to `rootRepo`.
+
+**Fix:** Apply the view override only when the registered owner is empty or is the view's own repository, or a worktree instance of it:
 ```go
-// seed / registration: r := pathkey.CanonicalPath(abs)
-// check: compare on canonical root identity, keeping the walk path lexical-fast:
-if pathkey.HasPathPrefix(path, r) || pathkey.CanonicalHasPathPrefix(path, r) { ... }
-```
-At minimum, also store `filepath.EvalSymlinks(root)` for each tracked root and test against both spellings.
-
-### WR-04: The explore artifact lane emits matched source lines without any source gate, so the physical-owner fix is not applied everywhere
-
-**File:** `internal/mcp/explore_artifact_intent.go:386-410,431` (outside the changed files; the review brief asked whether every source surface is consistent)
-
-**Issue:** The artifact probe runs `GrepTextForRepos`/`GrepText`, enriches the matches, and stores `truncateExploreArtifactSnippet(match.Text)` as the target's `source`. No `explore*.go` file calls `requireSourceScope` or `requirePathSourceScope`. Attribution goes only through `enrichTextMatchesContext`'s lexical node scope. In the `outer_indexed_first` state, which WR-02 keeps alive indefinitely, an alpha-scoped `explore` returns snippet bytes from beta's file through the `alpha/nested/...` node. When `scope.RepoAllow` is nil, the search fans out across all repositories with no unbound refusal at all.
-
-**Fix:** Route the matches through the same gate as `search_text` before taking snippets:
-```go
-matches = s.filterTextMatchesByResolvedScope(ctx, matches, ResolvedScope{WorkspaceID: scope.WorkspaceID, ProjectID: scope.ProjectID, RepoAllow: scope.RepoAllow})
-```
-Refuse up front with `requireSourceScope(ctx, "")`, as `search_text` does. Add `explore` to `TestSourceScope_NestedCheckoutRefused`.
-
-### WR-05: `find_declaration`'s regex branch still caps before filtering, and the new physical-owner filter makes false "no use sites matched" answers more likely (prior WR-03)
-
-**File:** `internal/mcp/tools_find_declaration.go:169-185`
-
-**Issue:** `GrepRegexp(useSite, pathPrefix, limit)` stops at `limit` (default 20) across every repository. `allowed` runs afterwards and now also drops matches whose physical owner is out of scope. A bound caller whose first `limit` raw hits are out of scope gets `"no use sites matched"` even though in-scope matches exist. The literal branch avoids this by scanning with limit 0 and capping after the filter.
-
-**Fix:** Mirror the literal branch:
-```go
-matches, err = s.multiIndexer.GrepRegexp(useSite, pathPrefix, 0) // or GrepRegexpForRepos with the resolved allow-set
-kept := matches[:0]
-for _, m := range matches {
-    if allowed(m) { kept = append(kept, m); if len(kept) >= limit { break } }
+if view := requestViewPathRoot(ctx); view.contains(real) && (physical == "" || physical == view.repoPrefix || sameMainRepo(physical, view.repoPrefix)) {
+    physical = view.repoPrefix
 }
 ```
-Add a test where an out-of-scope repository holds more than `limit` regex matches.
+Do the same for `rootRepo`. Add a test with a tracked root nested inside a worktree view.
+
+### WR-10: preview_edit and simulate_chain still read through ungated `resolveOverlayAbsPath`, which also accepts any absolute path (04-19 residual)
+
+**File:** `internal/mcp/overlay_view.go:465-483`; `internal/mcp/tools_simulate.go:810-860,1005-1040`; `internal/mcp/tools_review.go:1401-1405`
+
+**Issue:** 04-19's own threat flags record this residual, but no plan closed it. `groupEditByFile` resolves every WorkspaceEdit URI through `resolveOverlayAbsPath`. That function returns `filepath.Clean(p)` for any absolute path and calls neither `requireSourceScope` nor `guardSymlinkWithinRepo`. The simulation then:
+- reads the file (`readSimFile`);
+- parses it into the speculative graph diff, which returns symbol names, signatures and line ranges;
+- pushes it to an LSP server, whose diagnostics are returned.
+
+As a result:
+- An unbound or alpha-scoped caller can learn the structure of beta's files, including nested ones.
+- Any caller can learn the structure of files outside every tracked root.
+- With `keep: true`, the caller can promote that content into a session overlay.
+
+The 04-19 inventory test cannot see this, because it tracks only `Grep*` and `Walk*` call sites (IN-08).
+
+**Fix:** Have `groupEditByFile` resolve paths through `resolveFilePath(ctx, path)`, which applies the lexical gate, the physical-owner gate and confinement. Treat a refusal as a tool error carrying the generic not-found text. Keep the bare-path fallback only for new files inside an in-scope root. Add `preview_edit` and `simulate_chain` cases to `TestSourceScope_UnboundMultiRepoRefused` and `TestSourceScope_NestedCheckoutRefused`.
 
 ## Info
 
-### IN-01: Scope is re-resolved and `EvalSymlinks` runs once per unique match path
+### IN-07: `DeclarePendingRoots` was inserted between `indexMultiRepo`'s doc line and its function
 
-**File:** `internal/mcp/tools_find_declaration.go:153-167`; `internal/mcp/tools_search_text.go:252-284`; `internal/mcp/tools_fileops.go:513-548`; `internal/mcp/source_scope.go:107-128`
+**File:** `internal/indexer/multi.go:2126-2180`
 
-**Issue:** The cache moved from per-repository to per-path. Each new path pays `resolveScopeForRequest` once or twice, plus `EvalSymlinks` and `RepoForFile` when the lexical repository is in scope. That cost is invariant per request. The literal `find_declaration` branch calls `GrepText(useSite, 0)`, so the number of unique paths is unbounded. `resolveNodePath` also runs `requireSourceScope` twice per node, once early and once inside `requirePathSourceScope`, for every `withAbsPaths` listing row. The comment at `tools_search_text.go:270` ("the searcher stops at limit, so the cache is bounded") does not hold for the `find_declaration` copy.
+**Issue:** The line `// indexMultiRepo indexes multiple repos concurrently with repo prefixes.` now opens `DeclarePendingRoots`'s godoc, and `indexMultiRepo` has no doc comment. The doc also says roots are spelled "like mi.repos", but `trackRepoSourceCtx` additionally applies `pathkey.NormalizeVolume`. That is harmless on POSIX and only case-folded on Windows.
 
-**Fix:** Resolve the allowed repository set once per request (a small `sourceScopeChecker` closure built from `requireSourceScope`'s allow computation) and reuse it for both the lexical and the physical check. Skip `EvalSymlinks` when `RepoForFile(abs)` already equals the lexical repository and `os.Lstat` shows a non-symlink.
+**Fix:** Move the `indexMultiRepo` line back above `func (mi *MultiIndexer) indexMultiRepo`, and either drop "like mi.repos" from the spelling note or normalize the volume.
+
+### IN-08: The source-channel inventory test is name-keyed and covers only `Grep*` and `Walk*` selector calls
+
+**File:** `internal/mcp/source_scope_test.go:519-597`
+
+**Issue:** The inventory misses four kinds of call site:
+- a new call site inside an already-listed function;
+- method values (`g := s.multiIndexer.GrepText; g(...)`);
+- package-level function literals;
+- every `os.ReadFile`, `os.Open` and `readSimFile` channel.
+
+The last gap is how WR-10's ungated reads stayed invisible. The 04-19 summary's `os.ReadFile` audit is manual and unenforced. The 04-22 tests also have no symlink case, although the code comments claim symlink coverage (CR-04).
+
+**Fix:** Key the inventory on `file:function:callee` counts. Add `os.ReadFile`, `os.Open` and `readSimFile` to the tracked callees with the path source each one uses. Add symlink cases to the walk tests.
+
+### IN-09: Explore's artifact lane still caps the text probe before the scope filter when `RepoAllow` is nil
+
+**File:** `internal/mcp/explore_artifact_intent.go:389-400`
+
+**Issue:** For a workspace- or project-bound request with no explicit repository allow-set, the lane calls `GrepText(probe, exploreArtifactTextHitLimit)`, a global cap across all repositories. `filterTextMatchesByResolvedScope` runs only after that. Out-of-workspace matches can fill the cap and starve in-scope hits, which gives false "nothing found" answers. This is the same pattern as WR-05.
+
+**Fix:** Expand the workspace or project to its repository set (`ReposInWorkspace`) and call `GrepTextForRepos`. Alternatively, scan uncapped and cap after the filter, as `find_declaration`'s literal branch does.
+
+### IN-10: `indexMultiRepo` registers a nested repository without evicting an already-registered enclosing repository outside the batch
+
+**File:** `internal/indexer/multi.go:2347-2366`
+
+**Issue:** Only `TrackRepoCtx` and untrack call `reconcileEnclosingRepos`. Suppose `IndexScoped("", "p2")` indexes beta while alpha (project p1) is already registered and holds `alpha/nested/*`. Beta registers, alpha's watcher starts refusing that subtree, and alpha's copies stay frozen. This is round-1 WR-02's state. `IndexScoped` and `IndexAll` currently have no production callers, so this is latent.
+
+**Fix:** After publication and release, run `reconcileEnclosingRepos(ctx, meta.RootPath, true)` for each newly registered prefix whose enclosing repository was not in the batch.
+
+## Prior review (round-1 findings still open)
+
+### WR-03: Nested-root containment is lexical only; it now also covers declared roots and the enclosing reconcile
+
+**File:** `internal/indexer/workspace_resolve.go:152-175`; `internal/indexer/multi.go:2143-2178,2951-2985`
+
+**Issue:** This is unchanged from round 1, and the new code inherits it:
+- `DeclarePendingRoots` stores `filepath.Clean(filepath.Abs(p))`.
+- `nestedTrackedRootContains` compares with `pathkey.HasPathPrefix`, which folds case only.
+- `reconcileEnclosingRepos` selects enclosing repositories with the case-folding `HasPathPrefix`, then computes `sub` with the case-sensitive `filepath.Rel(r, root)` (line 2967). With a case-only spelling difference on a case-insensitive filesystem, `Rel` yields `../Alpha/nested`, `held` is false, and the eviction is skipped.
+
+A symlinked spelling (`/var` vs `/private/var`, or a link to `alpha/nested`) is still not pruned. There is still no test.
+
+**Fix:** As in round 1, canonicalize the roots at registration and declaration time and compare with `pathkey.CanonicalHasPathPrefix`. In `reconcileEnclosingRepos`, compute `rel` from canonical spellings, or use `relativeWithinRoot`-style alias-aware logic.
+
+### WR-05: `find_declaration`'s regex branch still caps each repository before the physical-owner filter (narrowed)
+
+**File:** `internal/mcp/tools_find_declaration.go:173-195`
+
+**Issue:** `GrepRegexpForRepos(useSite, pathPrefix, nil, limit)` caps **each repository** at `limit` before `allowed()` runs. Two cases still give false "no use sites matched" answers:
+- an in-scope repository whose first `limit` raw hits all lie under a nested tracked root or behind symlinks into an out-of-scope repository;
+- an alpha-scoped regex while alpha still holds copies (WR-06 / WR-07 states).
+
+Passing `nil` as the allow-set also greps repositories that are out of scope. The new test exercises only the cross-repository case.
+
+**Fix:** Pass the resolved allow-set to `GrepRegexpForRepos`. Within each repository, either scan uncapped and cap after `allowed()`, or loop with a growing per-repository limit until `limit` filtered hits are found or the repository is exhausted. Add a test where alpha's first `limit` regex hits lie under the nested root.
+
+### IN-01: Scope is re-resolved and `EvalSymlinks` runs once per path, and now once per walk entry
+
+**File:** `internal/mcp/source_scope.go:107-128`; `internal/mcp/tools_move_inline.go:265,273,1158,1166`; `internal/mcp/tools_generate_skill.go:175,180`
+
+**Issue:** This is unchanged from round 1. In addition, each directory and file in a module walk now pays `resolveScopeForRequest` twice, plus `EvalSymlinks` and `RepoForFile`. It is noted for maintainability only, since performance is out of scope.
+
+**Fix:** Same as round 1: resolve the allow-set once per request and reuse a checker closure.
 
 ### IN-02: View-routed `search_text` matches are anchored to the canonical root, not the view's checkout
 
 **File:** `internal/mcp/tools_search_text.go:274-279`
 
-**Issue:** `searchTextInView` returns matches from the view's working copy. The new gate anchors them with `ResolveFilePath`, which joins against the primary root, and never applies `requestViewPathRoot(ctx).rooted(...)` the way `resolveGraphPath` does. Suppose a path is a nested tracked root in the primary checkout but not in the worktree. The view's own bytes are then refused as beta's, which is a false refusal. The error goes in the fail-closed direction, but it is inconsistent with `resolveGraphPath`.
+**Issue:** Unchanged; the file was not touched.
 
-**Fix:** Re-root with `requestViewPathRoot(ctx).rooted(abs, root)` before calling `requirePathSourceScope`, as `resolveGraphPath` does at `tools_fileops.go:626-635`.
+**Fix:** Same as round 1: re-root through `requestViewPathRoot(ctx).rooted(...)` before `requirePathSourceScope`.
 
-### IN-03: Graph-backed reads now require the linked worktree's prefix to be in scope when the worktree fallback re-roots
+### IN-03: Graph-backed reads require the linked worktree's prefix to be in scope when the worktree fallback re-roots
 
-**File:** `internal/mcp/tools_fileops.go:540-548` (with `worktreeRootedPath`, `tools_fileops.go:274-308`)
+**File:** `internal/mcp/tools_fileops.go:540-548`
 
-**Issue:** `worktreeRootedPath` re-roots a missing main-checkout file onto a registered linked worktree (`LinkedWorktreeRoots` lists `mi.repos` entries with `IsWorktree`). `RepoForFile` then returns the worktree's prefix, which differs from `node.RepoPrefix`, so a request scoped to `repo: alpha` now needs `alpha@wt` in scope as well. Otherwise `get_symbol_source` answers "symbol not found". `resolveFilePath` already behaved this way. The graph-backed surfaces newly inherit the behavior, and no test covers it.
+**Issue:** Unchanged; there is still no test.
 
-**Fix:** Confirm that `repo: alpha` expands to its worktree instances. If it does not, treat a worktree of the same main repository as the lexical owner in `requirePathSourceScope`. Add a test either way.
+**Fix:** Same as round 1.
 
-### IN-04: Test gaps let the CR-01, WR-01, WR-02 and WR-03 defects pass
+### IN-04: Test gaps (partially resolved)
 
-**File:** `internal/indexer/nested_tracked_root_test.go:74-154`; `internal/mcp/source_scope_test.go:328-355`
+**File:** `internal/indexer/nested_tracked_root_test.go`; `internal/mcp/tools_generate_skill_test.go`; `internal/mcp/tools_move_inline_test.go`
 
-**Issue:**
-- `IndexedOnce` lists both repositories in top-level `repos:`, the only shape where the seed is right. No test covers a `projects:` map, an inactive entry, untrack, a symlinked spelling, or the live `mi.repos` path during a walk. The 04-18 summary concedes that `OuterReindexDropsDuplicates` "passes on the config seed alone".
-- The `find_declaration` subtest only asserts that no surviving match is nested. With no positive control (for example, a beta-scoped call returns `beta/main.go`), an empty result passes, including the `tracked_together` case where pruning leaves nothing to gate.
-- The `batch_symbols` subtest only asserts `NotContains`.
-- The search_symbols content-fallback behavior change flagged in 04-17-SUMMARY (fail-closed drop for Reach-unbound requests) has no test.
+**Issue:** The CR-01, WR-01 and WR-02 shapes, the positive controls and the content-fallback test are now present. These cases remain untested:
+- WR-03, a symlinked or alternate spelling of the nested root;
+- the CR-04 symlink-out-of-tree class;
+- the WR-06 failed registration;
+- WR-05's intra-repository physical-owner case.
 
-**Fix:** Add the probes described in CR-01, WR-01, WR-02 and WR-03 as tests. Add positive controls to the `find_declaration` and `batch_symbols` subtests. Add one test that asserts the content fallback's behavior under an unbound multi-repo request.
+**Fix:** Add the tests listed in CR-04, WR-03, WR-05 and WR-06.
 
 ### IN-05: The "caller must not hold mi.mu" invariant on walk and watcher admission is documented but not enforced
 
-**File:** `internal/indexer/workspace_resolve.go:146-154`; `internal/indexer/indexer.go:5706-5708`
+**File:** `internal/indexer/workspace_resolve.go:147-175`; `internal/indexer/indexer.go:5693-5701`
 
-**Issue:** The audit above found no caller holding `mi.mu`. But `shouldExclude` is now a hidden `mi.mu.RLock` acquisition on every walked entry. `sync.RWMutex` read locks are not reentrant once a writer is queued. Any future helper that walks or probes `PathIndexability` under `mi.mu.RLock`, which is a natural thing to write in `multi.go`, would deadlock intermittently under load.
+**Issue:** Unchanged. The per-file predicate now iterates `pendingRoots` as well, still under a hidden `mi.mu.RLock` on every walked entry. `DeclarePendingRoots` adds two more `mi.mu.Lock` writers, which makes reentrant-RLock deadlocks more likely if a future helper walks under `mi.mu`.
 
-**Fix:** State the invariant on `shouldExclude`, `PathIndexability` and `Watcher.isExcluded`, not only on the helper. Alternatively, publish registered roots as an `atomic.Pointer[[]string]` that is updated wherever `mi.repos` is written, and drop the lock from the per-file path entirely. That also resolves WR-01's staleness.
+**Fix:** Same as round 1. Publish `registered ∪ pending` roots as an `atomic.Pointer[[]string]` that is rebuilt wherever `mi.repos` or `pendingRoots` change, and drop the lock from the per-file path.
 
-### IN-06: Carried-forward accepted risk: the `rename_symbol` refusal now also reveals nested physical owners (prior WR-04)
+### IN-06: Carried-forward accepted risk: the `rename_symbol` refusal reveals nested physical owners
 
-**File:** `internal/mcp/tools_coding.go:2705-2730` (`resolvePath` / `scopeErr`)
+**File:** `internal/mcp/tools_coding.go:2705-2730`
 
-**Issue:** An alpha-scoped `dry_run` rename of an alpha symbol now also tells the caller whether a file under a nested out-of-scope root references it, through the distinct "some references lie outside the resolved scope" refusal. This is still the 04-12 accepted risk, now with a slightly wider surface.
+**Issue:** Unchanged (accepted 04-12). The related skip-versus-refuse decision for the move and inline walks is now a correctness issue (WR-08).
 
-**Fix:** If the acceptance is revisited, return the generic not-found text.
+**Fix:** Decide the policy once for rename, move and inline together.
 
 ---
 
-_Reviewed: 2026-10-13T19:23:03Z_
+_Reviewed: 2026-10-13T22:39:52Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
