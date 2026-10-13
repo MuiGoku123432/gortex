@@ -6,7 +6,7 @@ Gortex can index multiple repositories into a single shared graph, enabling cros
 
 Every node and contract is keyed on a **workspace slug**, which is the hard graph boundary for cross-repo work.
 
-> **Scope of this boundary.** It bounds *graph queries* — what symbols, callers and analysis a session can observe. It does **not** bound filesystem access: `read_file`, `edit_file` and the other path-argument tools are confined to the union of every tracked repository root, not to the session's workspace. See [SECURITY.md](../SECURITY.md#file-system-access). Two repos that should pair their contracts (an HTTP server and the client that calls it, a Kafka producer and its consumer, etc.) must declare the same `workspace:` in their `.gortex.yaml` — otherwise contract matching stops at the boundary and they look like orphans.
+> **Scope of this boundary.** It bounds *graph queries* — what symbols, callers and analysis a session can observe. It does **not** bound filesystem access: `read_file`, `edit_file` and the other path-argument tools are confined to the union of every tracked repository root and, when several repositories are tracked, to the request's resolved scope (see [Source read and write scope](#source-read-and-write-scope)). See [SECURITY.md](../SECURITY.md#file-system-access). Two repos that should pair their contracts (an HTTP server and the client that calls it, a Kafka producer and its consumer, etc.) must declare the same `workspace:` in their `.gortex.yaml` — otherwise contract matching stops at the boundary and they look like orphans.
 
 Slug resolution precedence (first match wins):
 
@@ -78,6 +78,28 @@ repository enables the complete registry; otherwise Gortex uses the union of
 the participating repositories' allow-lists. This keeps a repository from
 silently losing framework edges requested by a sibling while allowing a
 workspace where every repository opts out to avoid the scans entirely.
+
+### COBOL resolution scope
+
+COBOL `CALL` and `COPY` bind inside the caller's own repository unless that repository's `.gortex.yaml` widens it under `index.cobol`:
+
+```yaml
+# .gortex.yaml of the calling repository
+index:
+  cobol:
+    resolve_from: [shared-copybooks]      # other tracked repos this one may bind to
+    copybook_libraries:                   # ordered search; the first hit wins
+      - {name: PRODLIB, repo: shared-copybooks, path: copy/prod}
+      - {path: copy}                      # no repo: this repository
+    db2_default_schema: MYSCH             # links unqualified DB2 tables
+    idms_default_subschema: EMPSS         # links unqualified IDMS names
+```
+
+- `resolve_from` is directed: it lets this repository bind into the named ones and grants nothing back. When the same program or copybook name exists in the caller's repository and in an allowed one, the edge stays unresolved as `ambiguous` with its candidate IDs.
+- A copybook bound through `copybook_libraries` records `cobol_copy_search_rank` and `cobol_copy_search_rule` on the edge.
+- The default schema and subschema add an `aliases` link edge to an existing qualified node; they never rename a node.
+- Validation fails closed and rejects the whole file: a `resolve_from` entry must be one exact repository prefix (no blank, `*`, `?`, or `[`); a library `path` must be repository-relative with no `..` segment and no wildcard; a library `repo` must be listed in `resolve_from`; library names and default qualifiers must be upper-case, unquoted COBOL names (a delimited DB2 schema cannot be a default). An invalid block keeps the last valid configuration, or no cross-repository binding on a first load.
+- Changing `index.cobol` restages that repository's COBOL files on the next reindex, and every literal `CALL` and `COPY` is decided again on each change in any repository.
 
 ## Daemon tuning (optional)
 
@@ -366,6 +388,10 @@ Some `analyze` operation names are not dispatcher kinds at all: the facade maps 
 
 Their by-id lookups (`get_communities id:`, `get_processes id:`) resolve against the clamped set, so an out-of-scope id reports the same miss as one that never existed.
 
+### Source read and write scope
+
+With more than one tracked repository, every tool that reads or writes source bytes (`read_file`, `get_symbol_source`, `edit_file`, `write_file`, `rename_symbol`, and the like) needs a resolved scope. A session bound to a repository, or opened above several, uses its own scope; a request with no scope must pass `repo`, `project`, or `workspace`, or it is refused. A file or symbol in a repository outside the scope answers exactly like a missing one (`symbol not found: …`, `no such file or directory`). `rename_symbol` refuses the whole rename when any reference lies outside the scope. Graph-metadata tools are not gated by this rule. With one tracked repository nothing changes.
+
 ## Tool scoping by intent
 
 Tools are split by intent — each group has a different default scope:
@@ -410,6 +436,8 @@ Scoped tool responses carry a `scope_applied` meta field plus a one-line widen h
 ## How it works
 
 - **Qualified node IDs** — IDs are always `<repo_prefix>/<path>::<Symbol>` (e.g., `frontend/src/app.ts::App`), including for a workspace tracking a single repo: a lone repo is simply the first tracked repo. Tools still accept an unqualified path (`src/app.ts`) when exactly one repo is tracked, since there is then nothing to be ambiguous about.
-- **Cross-repo edges** — the resolver links symbols across repo boundaries with same-repo preference. Cross-repo edges carry a `cross_repo: true` flag.
+- **Cross-repo edges** — the resolver links symbols across repo boundaries with same-repo preference. Cross-repo edges carry a `cross_repo: true` flag. When several reachable repositories match a call and none is preferred, the call is left unresolved with `resolution_unresolved_reason: ambiguous` and `resolution_candidate_ids`, instead of binding the first match.
+- **Ownership health** — every indexed source node must be owned by exactly the repository its ID names. `index_health.repo_ownership.status` is `healthy` only when no node is unowned or misprefixed; otherwise it is `unhealthy` and lists sample node IDs. The status is reported, not enforced: queries still answer.
+- **Upgrading a store** — stores indexed before the COBOL lifecycle changes restage their COBOL files automatically on the next index. An existing Neo4j projection is not rewritten by that; refresh it by re-running the scoped projection.
 - **Impact analysis** — `explain_change_impact`, `verify_change`, and `get_test_targets` follow cross-repo edges automatically, grouping results by repository.
 - **Shared repos** — the same repo can appear in multiple projects with different reference tags. It's indexed once and shared across projects.
