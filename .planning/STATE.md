@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-08-PLAN.md
-last_updated: "2026-10-13T04:19:57.030Z"
+stopped_at: Completed 04-15-PLAN.md
+last_updated: "2026-10-13T04:45:47.625Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 7be14fba2eb3cd103e5289dc0812da5f5e860122
+state_head: 35f3032f220155b0aa6c2e4bcb74c001eca0b87c
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 42
+  completed_plans: 43
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 13 of 16
+Plan: 14 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -103,6 +103,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P07 | 13 min | 2 tasks | 7 files |
 | Phase 04 P13 | 6 min | 1 tasks | 2 files |
 | Phase 04 P08 | 13 min | 1 tasks | 7 files |
+| Phase 04 P15 | 23 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -199,6 +200,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-07: COBOL policy lookup treats a repository as tracked when registered or holding a live mutation lane, read per call; TrackRepoCtx registers after its own resolve pass, so a registered-only check loses crossa->crossb bindings
 - [Phase 04]: 04-07: index.cobol library names and default qualifiers must already be cobol-name-norm/1 keys; an invalid index.cobol block rejects the whole .gortex.yaml read and keeps the last good parse
 - [Phase 04]: 04-13: embedded gortex mcp --index indexes through MultiIndexer.TrackRepoCtx (indexEmbeddedRepo) and watches through mi.GetIndexer(prefix); no watcher without an indexed repo; nil MultiIndexer is an error (D-14, SEC-08) — The embedded path was the last writer of unowned nodes; a workspace of one keeps the strict 04-05 audit clean
+- [Phase 04]: 04-15: ReconcileRepoCtx reconciles COBOL unconditionally at the end of every warm restart, so an interrupted reindex (mtimes already persisted) converges
+- [Phase 04]: 04-15: Resolver.reconcileCobol runs DetectCrossRepoEdgesForReindexes on its rebound batch, so a cross-repository COBOL CALL carries cross_repo_calls on clean and incremental paths alike
+- [Phase 04]: 04-15 (D-08): above AffectedByReresolveMax both affected-by sites log 'affected-by: cap exceeded, resolving full affected set' at Info and resolve the full set
 
 ### Pending Todos
 
@@ -227,6 +231,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T04:19:56.972Z
-Stopped at: Completed 04-08-PLAN.md
+Last session: 2026-10-13T04:45:47.570Z
+Stopped at: Completed 04-15-PLAN.md
 Resume file: None
