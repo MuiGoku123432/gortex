@@ -296,8 +296,12 @@ func TestSourceScope_SymlinkIntoOtherRepoRefused(t *testing.T) {
 
 // newNestedCheckoutServer builds alpha at <tmp>/alpha and beta at
 // <tmp>/alpha/nested, both in workspace "shared", over a real SQLite store.
-// With trackBetaLater, alpha is indexed alone first and beta is tracked
-// afterwards, so the store keeps alpha-prefixed nodes for beta's files.
+// With trackBetaLater, alpha is indexed alone first and beta is then
+// registered through the warm-restart path (ReconcileRepoCtx), which
+// reconciles no enclosing repository (TrackRepoCtx does since 04-21). That
+// reproduces the window in which alpha still holds copies of beta's files,
+// such as a store written before 04-18 or a registration not yet followed by
+// alpha's census, so the physical-owner gate (04-17, 04-19) is exercised.
 func newNestedCheckoutServer(t *testing.T, trackBetaLater bool) (*Server, string, string) {
 	t.Helper()
 	alphaDir := filepath.Join(t.TempDir(), "alpha")
@@ -314,9 +318,7 @@ func newNestedCheckoutServer(t *testing.T, trackBetaLater bool) (*Server, string
 	beta := config.RepoEntry{Path: betaDir, Name: "beta", Workspace: "shared"}
 	repos := []config.RepoEntry{alpha, beta}
 	if trackBetaLater {
-		// Beta stays out of the config: plan 04-18 seeds walk pruning from
-		// the config, so a config entry would stop alpha from indexing the
-		// nested files and remove the state this fixture must reproduce.
+		// Beta stays out of the config so IndexScoped indexes alpha alone.
 		repos = []config.RepoEntry{alpha}
 	}
 	tmpCfg := filepath.Join(t.TempDir(), "config.yaml")
@@ -333,7 +335,9 @@ func newNestedCheckoutServer(t *testing.T, trackBetaLater bool) (*Server, string
 	_, err = mi.IndexScoped("", "")
 	require.NoError(t, err)
 	if trackBetaLater {
-		_, err = mi.TrackRepoCtx(context.Background(), beta)
+		// Non-empty prior mtimes keep ReconcileRepoCtx off its TrackRepoCtx
+		// fallback, so alpha's copies of beta's files stay in place.
+		_, err = mi.ReconcileRepoCtx(context.Background(), beta, map[string]int64{"main.go": 1})
 		require.NoError(t, err)
 	}
 	eng := query.NewEngine(store)
