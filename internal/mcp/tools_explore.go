@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -2741,6 +2742,18 @@ func (s *Server) handleExplore(ctx context.Context, req mcp.CallToolRequest) (*m
 	resolved, errResult := s.resolveScope(ctx, req, IntentLocate)
 	if errResult != nil {
 		return errResult, nil
+	}
+	// Artifact probes return matching source lines as target snippets, so
+	// the source gate's unbound refusal (D-13) runs before the lane, as in
+	// search_text. It is decided from the task text alone, never from what
+	// matched, so it cannot tell an unbound caller whether a string exists.
+	// Path-only artifact intents and ordinary code tasks return graph
+	// metadata, which keeps the all-repositories default (D-13); their
+	// source reads already fail closed at resolveNodePath and resolveFilePath.
+	if artifactIntent.active && len(artifactIntent.probes) > 0 {
+		if err := s.requireSourceScope(ctx, ""); errors.Is(err, errSourceScopeRequired) {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 	}
 	eng := s.engineFor(ctx)
 	if eng == nil {

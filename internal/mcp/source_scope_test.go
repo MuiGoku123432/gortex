@@ -25,6 +25,28 @@ import (
 
 const alphaThingID = "alpha/main.go::AlphaThing"
 
+// exploreSecret sits in a deploy.yaml that no symbol declares, so only a
+// text search can return it; exploreSecretTask is an artifact-intent task
+// whose probe (ZEBRA_SECRET_TOKEN) makes explore's artifact lane grep for it.
+const (
+	exploreSecret     = "hunter2zebraxyz"
+	exploreSecretTask = "Set ZEBRA_SECRET_TOKEN in deploy.yaml for the deployment pipeline config"
+)
+
+// writeBetaDeploySecret adds beta/deploy.yaml holding exploreSecret and
+// reindexes beta, so a refusal test proves the secret was reachable.
+func writeBetaDeploySecret(t *testing.T, srv *Server) {
+	t.Helper()
+	betaDir, ok := srv.multiIndexer.RepoRoot("beta")
+	require.True(t, ok)
+	require.NoError(t, os.WriteFile(filepath.Join(betaDir, "deploy.yaml"),
+		[]byte("ZEBRA_SECRET_TOKEN: "+exploreSecret+"\nreplicas: 3\n"), 0o644))
+	_, err := srv.multiIndexer.IndexRepo("beta")
+	require.NoError(t, err)
+	require.Truef(t, len(srv.graph.GetFileNodes("beta/deploy.yaml")) > 0 || srv.graph.GetNode("beta/deploy.yaml") != nil,
+		"beta/deploy.yaml must be indexed for the explore refusal to be meaningful")
+}
+
 // callSourceTool runs handler for tool through the production middleware.
 func callSourceTool(t *testing.T, srv *Server, ctx context.Context, handler func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error), tool string, args map[string]any) *mcplib.CallToolResult {
 	t.Helper()
@@ -50,6 +72,7 @@ func sourceScopeText(res *mcplib.CallToolResult) string {
 // no session, so no default narrowing applies to these requests.
 func TestSourceScope_UnboundMultiRepoRefused(t *testing.T) {
 	srv, _ := newTwoRepoServer(t)
+	writeBetaDeploySecret(t, srv)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -63,6 +86,7 @@ func TestSourceScope_UnboundMultiRepoRefused(t *testing.T) {
 		{"get_editing_context", srv.handleGetEditingContext, map[string]any{"path": "alpha/main.go", "compress_bodies": true}},
 		{"smart_context", srv.handleSmartContext, map[string]any{"task": "AlphaThing", "format": "json"}},
 		{"export_context", srv.handleExportContext, map[string]any{"task": "AlphaThing"}},
+		{"explore", srv.handleExplore, map[string]any{"task": exploreSecretTask, "format": "json"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
@@ -75,8 +99,23 @@ func TestSourceScope_UnboundMultiRepoRefused(t *testing.T) {
 			assert.NotContains(t, text, "beta")
 			assert.NotContains(t, text, "ZebraWidget")
 			assert.NotContains(t, text, "func AlphaThing", "no source bytes may leak through a refusal")
+			assert.NotContains(t, text, exploreSecret, "no source bytes may leak through a refusal")
 		})
 	}
+
+	// Positive control: the bound request reaches the deploy.yaml line, so
+	// the refusal above withheld something that was there.
+	res := callSourceTool(t, srv, ctx, srv.handleExplore, "explore",
+		map[string]any{"task": exploreSecretTask, "repo": "beta", "format": "json"})
+	require.Falsef(t, res.IsError, "a beta-scoped explore must succeed: %s", sourceScopeText(res))
+	assert.Contains(t, sourceScopeText(res), exploreSecret)
+
+	// No over-refusal: an ordinary code task runs no text probe, keeps the
+	// metadata default, and carries no source bytes.
+	res = callSourceTool(t, srv, ctx, srv.handleExplore, "explore",
+		map[string]any{"task": "AlphaThing", "format": "json"})
+	require.Falsef(t, res.IsError, "an unbound ordinary explore must not be refused: %s", sourceScopeText(res))
+	assert.NotContains(t, sourceScopeText(res), "func AlphaThing() {}")
 }
 
 // TestSourceScope_NarrowedAllowed: an explicit repo narrowing or a bound
