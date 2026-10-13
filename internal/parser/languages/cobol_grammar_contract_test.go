@@ -124,8 +124,12 @@ func TestCobolGrammar_ProvKeys(t *testing.T) {
 			continue
 		}
 		kinds[string(n.Kind)]++
-		for _, key := range cobolDocumentKeys {
-			assert.Contains(t, n.Meta, key, n.ID)
+		if n.Meta["prov_range_absence"] == "shared_resource" {
+			assertCobolSharedProvenance(t, n)
+		} else {
+			for _, key := range cobolDocumentKeys {
+				assert.Contains(t, n.Meta, key, n.ID)
+			}
 		}
 		assert.Equal(t, "gortex-cobol-grammar/4", n.Meta["prov_extractor_version"], n.ID)
 	}

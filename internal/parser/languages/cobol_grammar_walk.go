@@ -220,24 +220,42 @@ func (w *cobolWalk) relationEdge(from, to string, kind graph.EdgeKind, occurrenc
 	return edge
 }
 
+// cobolSharedResourceKeys are the document provenance keys a shared
+// resource node keeps: every program and copybook document writes the same
+// value for each, so the node does not depend on its writer (D-18). The
+// source path and IDs, grade, grade policy, and parse and transform
+// configuration differ by writer and are left on the referencing edges.
+var cobolSharedResourceKeys = []string{
+	"prov_parser_tool_id", "prov_parser_grammar_id", "prov_parser_module",
+	"prov_preprocessor_module", "prov_handoff_schema", "prov_extractor_version",
+	"prov_evidence_class", "prov_origin", "prov_confidence",
+}
+
 // resourceNode returns id after appending, at its first sighting in this
-// document only, a shared node (an IDMS or CICS resource, a DB2 table) with
-// Name as first written, the cloned document provenance, meta, and
-// prov_range_absence=shared_resource: the node is named by many statements
-// in many files, so no one range is its own. It gets no defines or
-// member_of edge, and its FilePath is a first sighting, not an owner
-// (Pitfall 7: shared-node ownership is Phase 4).
+// document only, a shared node (an IDMS or CICS resource, a DB2 table)
+// named by many statements in many files, so no one range is its own
+// (prov_range_absence=shared_resource). Name is the normalized key every
+// caller passes, and Meta is meta plus only the writer-independent
+// cobolSharedResourceKeys, so every writer emits a byte-identical node
+// (D-18); the as-written spelling rides on each edge as cobol_resource_raw.
+// The node owns its own virtual path: FilePath is id, so evicting a real
+// file never removes it, and an orphaned node is collected by the resolver
+// reconcile pass (Plan 04-06). It gets no defines or member_of edge.
 func (w *cobolWalk) resourceNode(id, name string, kind graph.NodeKind, meta map[string]any) string {
 	if w.resources[id] {
 		return id
 	}
 	w.resources[id] = true
-	m := maps.Clone(w.docMeta)
-	maps.Copy(m, meta)
+	m := maps.Clone(meta)
+	for _, key := range cobolSharedResourceKeys {
+		if v, ok := w.docMeta[key]; ok {
+			m[key] = v
+		}
+	}
 	m["prov_range_exact"] = false
 	m["prov_range_absence"] = "shared_resource"
 	w.result.Nodes = append(w.result.Nodes, &graph.Node{
-		ID: id, Kind: kind, Name: name, FilePath: w.filePath, Language: "cobol", Meta: m,
+		ID: id, Kind: kind, Name: name, FilePath: id, Language: "cobol", Meta: m,
 	})
 	return id
 }

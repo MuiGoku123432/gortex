@@ -95,8 +95,9 @@ func cobolTableIDs(result *parser.ExtractionResult) []string {
 }
 
 // assertCobolTable checks the DB2 table node contract: one node per
-// document, Name and table as written, schema only when written, dialect
-// db2, the name rule, and the shared-resource provenance.
+// document, Name and table the normalized key, schema normalized and only
+// when written, dialect db2, the name rule, and the writer-independent
+// shared-resource provenance.
 func assertCobolTable(t *testing.T, result *parser.ExtractionResult, id, table, schema string) {
 	t.Helper()
 	var found []*graph.Node
@@ -117,11 +118,7 @@ func assertCobolTable(t *testing.T, result *parser.ExtractionResult, id, table, 
 		assert.Equal(t, schema, n.Meta["schema"])
 	}
 	assert.Equal(t, cobolNameNormRule, n.Meta["cobol_name_norm"])
-	assert.Equal(t, false, n.Meta["prov_range_exact"])
-	assert.Equal(t, "shared_resource", n.Meta["prov_range_absence"])
-	for _, key := range cobolDocumentKeys {
-		assert.Contains(t, n.Meta, key)
-	}
+	assertCobolSharedProvenance(t, n)
 }
 
 // cobolEdgeTargets returns "<kind> <to>" for each edge, in order.

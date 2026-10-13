@@ -27,12 +27,14 @@ var cobolSQLKinds = map[string]graph.EdgeKind{
 }
 
 // cobolSQLTable is the one edge a statement gets for one physical table and
-// edge kind: aliases are the statement's alias texts for it in source order.
+// edge kind: aliases are the statement's alias texts for it in source order,
+// and raw is the table name as first written in the statement.
 type cobolSQLTable struct {
 	to       string
 	kind     graph.EdgeKind
 	aliases  []string
 	location string
+	raw      string
 }
 
 // cobolSQLOrientation holds the FETCH orientation and option keywords that
@@ -74,6 +76,7 @@ func cobolSQL(w *cobolWalk, data *cobolDataIndex) {
 		e := w.relationEdge(from, t.to, t.kind, stmt)
 		e.Meta["sql_verb"] = verb
 		e.Meta["cobol_name_norm"] = cobolNameNormRule
+		e.Meta["cobol_resource_raw"] = t.raw
 		if len(t.aliases) > 0 {
 			e.Meta["sql_aliases"] = t.aliases
 		}
@@ -235,11 +238,12 @@ func cobolSQLTables(w *cobolWalk, stmt int, n *graph.Node) []cobolSQLTable {
 			continue
 		}
 		var parts []string
-		alias := ""
+		alias, raw := "", ""
 		for _, c := range w.children[j] {
 			switch obs[c].Kind {
 			case "sql_table_name":
-				parts = cobolSQLParts(w.text(c))
+				raw = w.text(c)
+				parts = cobolSQLParts(raw)
 			case "sql_table_alias":
 				alias = cobolSQLAlias(w.text(c))
 			}
@@ -252,15 +256,16 @@ func cobolSQLTables(w *cobolWalk, stmt int, n *graph.Node) []cobolSQLTable {
 			cteRefs = append(cteRefs, table)
 			continue
 		}
-		meta := map[string]any{"table": table, "dialect": "db2", "cobol_name_norm": cobolNameNormRule}
+		name := cobolSQLName(table)
+		meta := map[string]any{"table": name, "dialect": "db2", "cobol_name_norm": cobolNameNormRule}
 		schemaKey, location := "_unqualified", ""
 		if len(parts) >= 2 {
-			schema := parts[len(parts)-2]
+			schema := cobolSQLName(parts[len(parts)-2])
 			meta["schema"] = schema
-			schemaKey = cobolIDSegment(cobolSQLName(schema))
+			schemaKey = cobolIDSegment(schema)
 			location = strings.Join(parts[:len(parts)-2], ".")
 		}
-		to := w.resourceNode("db2::"+schemaKey+"/"+cobolIDSegment(cobolSQLName(table)), table, graph.KindTable, meta)
+		to := w.resourceNode("db2::"+schemaKey+"/"+cobolIDSegment(name), name, graph.KindTable, meta)
 		kind, ok := cobolSQLKinds[obs[p].Kind]
 		if !ok {
 			kind = graph.EdgeReferences
@@ -270,7 +275,7 @@ func cobolSQLTables(w *cobolWalk, stmt int, n *graph.Node) []cobolSQLTable {
 		if !seen {
 			k = len(tables)
 			index[key] = k
-			tables = append(tables, cobolSQLTable{to: to, kind: kind, location: location})
+			tables = append(tables, cobolSQLTable{to: to, kind: kind, location: location, raw: raw})
 		}
 		if alias != "" && !slices.Contains(tables[k].aliases, alias) {
 			tables[k].aliases = append(tables[k].aliases, alias)

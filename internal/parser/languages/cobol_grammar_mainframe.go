@@ -82,9 +82,11 @@ func cobolIDMS(w *cobolWalk, from string, stmt int) {
 			if obs[c].Kind == "idms_set_name" {
 				role, kind = "set", kinds[1]
 			}
-			to := w.resourceNode("idms::_unqualified/"+role+"/"+key, w.text(c), graph.KindResource,
+			to := w.resourceNode("idms::_unqualified/"+role+"/"+key, cobolNameNorm(w.text(c)), graph.KindResource,
 				map[string]any{"resource_type": "idms_" + role, "cobol_name_norm": cobolNameNormRule})
-			edges = append(edges, w.relationEdge(from, to, kind, stmt))
+			edge := w.relationEdge(from, to, kind, stmt)
+			edge.Meta["cobol_resource_raw"] = w.text(c)
+			edges = append(edges, edge)
 		case "idms_scope_name":
 			edge := w.relationEdge(from, "unresolved::cobol::idms_scope::_unqualified/"+key, graph.EdgeReferences, stmt)
 			edge.Meta["cobol_unresolved_reason"] = "scope_role_unknown"
@@ -185,9 +187,11 @@ func cobolCICS(w *cobolWalk, data *cobolDataIndex, from, programID string, stmt 
 		key := cobolIDSegment(cobolNameNorm(raw))
 		switch {
 		case literal(operand):
-			to := w.resourceNode(prefix+key, cobolUnquote(raw), graph.KindResource,
+			to := w.resourceNode(prefix+key, cobolNameNorm(raw), graph.KindResource,
 				map[string]any{"resource_type": "cics_" + role, "cobol_name_norm": cobolNameNormRule})
-			edges = append(edges, w.relationEdge(from, to, kind, stmt))
+			edge := w.relationEdge(from, to, kind, stmt)
+			edge.Meta["cobol_resource_raw"] = raw
+			edges = append(edges, edge)
 		case obs[operand].Kind == "WORD":
 			edge := w.relationEdge(from, "unresolved::cobol::dynamic::"+role+"::"+programID+"::"+key, kind, stmt)
 			edge.Meta["cobol_unresolved_reason"] = "dynamic"

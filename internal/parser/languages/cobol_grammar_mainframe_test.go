@@ -76,8 +76,33 @@ func cobolResourceIDs(result *parser.ExtractionResult) []string {
 	return ids
 }
 
+// cobolDocumentOnlyKeys are the provenance keys that differ by writer, so
+// a shared resource node never carries them (D-18).
+var cobolDocumentOnlyKeys = []string{
+	"prov_source_path", "prov_source_id", "prov_revision_content_id",
+	"prov_document_grade", "prov_document_grade_reasons", "prov_grade_policy",
+	"prov_parse_config_id", "prov_transform_config_id", "prov_vcs_commit", "prov_vcs_commit_absence",
+}
+
+// assertCobolSharedProvenance checks the writer-independent provenance of
+// shared resource node n (D-18): FilePath is its own ID, the retained
+// identity keys are present, and no document-only key is.
+func assertCobolSharedProvenance(t *testing.T, n *graph.Node) {
+	t.Helper()
+	assert.Equal(t, n.ID, n.FilePath)
+	assert.Equal(t, false, n.Meta["prov_range_exact"])
+	assert.Equal(t, "shared_resource", n.Meta["prov_range_absence"])
+	for _, key := range cobolSharedResourceKeys {
+		assert.Contains(t, n.Meta, key, n.ID)
+	}
+	for _, key := range cobolDocumentOnlyKeys {
+		assert.NotContains(t, n.Meta, key, n.ID)
+	}
+}
+
 // assertCobolResource checks the shared-resource node contract: one node
-// per document, the document provenance, no range, and no defines edge.
+// per document, Name the normalized key, writer-independent provenance, no
+// range, and no defines edge.
 func assertCobolResource(t *testing.T, result *parser.ExtractionResult, id, name, resourceType string) {
 	t.Helper()
 	var found []*graph.Node
@@ -94,11 +119,7 @@ func assertCobolResource(t *testing.T, result *parser.ExtractionResult, id, name
 	assert.Equal(t, 0, n.StartLine)
 	assert.Equal(t, resourceType, n.Meta["resource_type"])
 	assert.Equal(t, cobolNameNormRule, n.Meta["cobol_name_norm"])
-	assert.Equal(t, false, n.Meta["prov_range_exact"])
-	assert.Equal(t, "shared_resource", n.Meta["prov_range_absence"])
-	for _, key := range cobolDocumentKeys {
-		assert.Contains(t, n.Meta, key)
-	}
+	assertCobolSharedProvenance(t, n)
 	for _, e := range result.Edges {
 		assert.False(t, e.To == id && (e.Kind == graph.EdgeDefines || e.Kind == graph.EdgeMemberOf),
 			"structural %s edge to shared resource %s", e.Kind, id)
