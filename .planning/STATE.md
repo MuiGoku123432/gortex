@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
-status: executing
-stopped_at: Completed 04-16-PLAN.md
-last_updated: "2026-10-13T05:30:35.171Z"
+status: verifying
+stopped_at: Completed 04-10-PLAN.md
+last_updated: "2026-10-13T06:00:49.103Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 832feb47c8002f8c11e32a6decbf25c1fb585d2d
+state_head: c6e8d11671517bbfb1c6b19357ff6e81049ef36a
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 45
+  completed_plans: 46
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
 Plan: 16 of 16
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-12 — Phase 04 execution started
 
 Progress: [██░░░░░░░░] 20%
@@ -106,6 +106,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P15 | 23 min | 2 tasks | 7 files |
 | Phase 04 P09 | 15 min | 1 tasks | 5 files |
 | Phase 04 P16 | 20 min | 2 tasks | 9 files |
+| Phase 04 P10 | 28min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -208,6 +209,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-09: COBOL material fingerprint = 48-bit BLAKE3 of CobolGrammarExtractor.MaterialIdentity plus the index.cobol JSON, stored as reserved key _cobol_material in RepoIndexState ExtractorVersions (no schema migration). Inequality marks cobol stale on the next full-root reconcile. The cobol extractorVersions entry is removed. The MCP freshness rider keeps the global snapshot. — D-06/D-07: the stamp and the invalidation trigger share one source, and only index.cobol (not the whole config hash) invalidates COBOL
 - [Phase 04]: 04-16: In Merkle mode the persisted leaf salt (|cobol-material@fp) is the record of the COBOL material fingerprint; the RepoIndexState _cobol_material row is read and re-stamped only on the non-Merkle path
 - [Phase 04]: 04-16: HEAD-move re-stamp (D-17) runs in reconcileRepoIndexState when HEAD differs from the stored IndexedSHA, grouping rows by prov_source_path and deciding from transforms.run bytes; graphdump-volatile/3 renders an emptied Meta as null
+- [Phase 04]: 04-10: TestCobolScope_CrossSurface calls get_symbol_source from the directory above both checkouts so only the explicit repo argument narrows the read; from repository A's checkout the session binding alone already excluded B
+- [Phase 04]: 04-10: callCobolTracerTool delegates to callCobolToolResult (text, isError) so tests read tool-error results without a second relay helper
+- [Phase 04]: 04-10: SEC-03 placeholder collision closed by proof - the shared unresolved dynamic CALL target has no node and each edge keeps its repository-prefixed From
 
 ### Pending Todos
 
@@ -236,6 +240,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T05:30:35.116Z
-Stopped at: Completed 04-16-PLAN.md
+Last session: 2026-10-13T06:00:49.048Z
+Stopped at: Completed 04-10-PLAN.md
 Resume file: None
