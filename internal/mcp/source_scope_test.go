@@ -303,6 +303,8 @@ func newNestedCheckoutServer(t *testing.T, trackBetaLater bool) (*Server, string
 		[]byte("package main\n\nfunc AlphaThing() {}\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(betaDir, "main.go"),
 		[]byte("package main\n\nfunc ZebraWidget() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(betaDir, "deploy.yaml"),
+		[]byte("ZEBRA_SECRET_TOKEN: "+exploreSecret+"\nreplicas: 3\n"), 0o644))
 
 	alpha := config.RepoEntry{Path: alphaDir, Name: "alpha", Workspace: "shared"}
 	beta := config.RepoEntry{Path: betaDir, Name: "beta", Workspace: "shared"}
@@ -368,6 +370,11 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 			res := callSourceTool(t, srv, ctx, srv.handleBatchSymbols, "batch_symbols",
 				map[string]any{"ids": []any{nestedID}, "include_source": true, "repo": "alpha"})
 			assert.NotContains(t, sourceScopeText(res), zebraSource)
+
+			// Positive control: the owning repository still reads the body.
+			res = callSourceTool(t, srv, ctx, srv.handleBatchSymbols, "batch_symbols",
+				map[string]any{"ids": []any{"beta/main.go::ZebraWidget"}, "include_source": true, "repo": "beta"})
+			assert.Contains(t, sourceScopeText(res), zebraSource)
 		})
 		t.Run("search_text", func(t *testing.T) {
 			res := callSourceTool(t, srv, ctx, srv.handleSearchText, "search_text",
@@ -390,6 +397,29 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 						"an alpha-scoped use site from beta's nested checkout (regex=%v): %s %q", isRegex, m.Path, m.Text)
 				}
 			}
+
+			// Positive control: the owning repository still finds its use sites.
+			betaCtx := withSourceScopeRequest(ctx, makeReq("find_declaration", map[string]any{"repo": "beta"}))
+			for _, isRegex := range []bool{false, true} {
+				matches, err := srv.findUseSiteMatches(betaCtx, "Zebra", isRegex, "", 100)
+				require.NoError(t, err)
+				found := false
+				for _, m := range matches {
+					found = found || strings.HasPrefix(m.Path, "beta/")
+				}
+				assert.Truef(t, found, "a beta-scoped find_declaration must find beta's use site (regex=%v): %v", isRegex, matches)
+			}
+		})
+		t.Run("explore", func(t *testing.T) {
+			res := callSourceTool(t, srv, ctx, srv.handleExplore, "explore",
+				map[string]any{"task": exploreSecretTask, "repo": "alpha", "format": "json"})
+			require.Falsef(t, res.IsError, "an alpha-scoped explore must succeed: %s", sourceScopeText(res))
+			assert.NotContains(t, sourceScopeText(res), exploreSecret, "an alpha-scoped explore must not return beta's deploy.yaml")
+
+			res = callSourceTool(t, srv, ctx, srv.handleExplore, "explore",
+				map[string]any{"task": exploreSecretTask, "repo": "beta", "format": "json"})
+			require.Falsef(t, res.IsError, "a beta-scoped explore must succeed: %s", sourceScopeText(res))
+			assert.Contains(t, sourceScopeText(res), exploreSecret)
 		})
 		t.Run("rename_symbol", func(t *testing.T) {
 			betaMain := filepath.Join(betaDir, "main.go")
