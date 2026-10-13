@@ -75,13 +75,13 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 - [x] **ID-01**: Source-file and declaration identities MUST extend Gortex's existing repository-prefixed identity convention.
 - [x] **ID-02**: Stable declaration identity MUST NOT use source line number as its sole discriminator.
-- [x] **ID-03**: Paragraph identity MUST include its owning program context.
-- [x] **ID-04**: Resource identity MUST include the minimum available namespace needed to avoid merging distinct same-named artifacts.
-- [x] **ID-05**: Multiple source occurrences supporting the same semantic relationship MUST retain distinguishable provenance.
-- [x] **ID-06**: Reindexing identical source, parser, extractor, and material configuration MUST produce the same active deterministic node, edge, and finding identities.
-- [x] **ID-07**: Incremental reconciliation for a changed or deleted file MUST remove stale active observations owned by the prior file generation.
-- [x] **ID-08**: A parser, extractor, retrieval, or material configuration change MUST invalidate affected observations even when source bytes are unchanged.
-- [x] **ID-09**: For identical final inputs, incremental reconciliation MUST produce the same canonical active deterministic subgraph as a clean rebuild.
+- [ ] **ID-03**: Paragraph identity MUST include its owning program context.
+- [ ] **ID-04**: Resource identity MUST include the minimum available namespace needed to avoid merging distinct same-named artifacts.
+- [ ] **ID-05**: Multiple source occurrences supporting the same semantic relationship MUST retain distinguishable provenance.
+- [ ] **ID-06**: Reindexing identical source, parser, extractor, and material configuration MUST produce the same active deterministic node, edge, and finding identities.
+- [ ] **ID-07**: Incremental reconciliation for a changed or deleted file MUST remove stale active observations owned by the prior file generation.
+- [ ] **ID-08**: A parser, extractor, retrieval, or material configuration change MUST invalidate affected observations even when source bytes are unchanged.
+- [ ] **ID-09**: For identical final inputs, incremental reconciliation MUST produce the same canonical active deterministic subgraph as a clean rebuild.
 
 ### Explicit Unresolved Evidence
 
@@ -163,14 +163,14 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Security and Scope
 
-- [x] **SEC-01**: Extraction, resolution, query, AI context, claim storage, logging, and export MUST enforce the same workspace/project/repository scope.
-- [x] **SEC-02**: Ambiguous or absent scope MUST fail closed for source reads and AI context assembly.
-- [x] **SEC-03**: Cross-repository resolution MUST NOT bind same-named programs, copybooks, or resources without explicit allowed scope and deterministic resolution evidence.
+- [ ] **SEC-01**: Extraction, resolution, query, AI context, claim storage, logging, and export MUST enforce the same workspace/project/repository scope.
+- [ ] **SEC-02**: Ambiguous or absent scope MUST fail closed for source reads and AI context assembly.
+- [ ] **SEC-03**: Cross-repository resolution MUST NOT bind same-named programs, copybooks, or resources without explicit allowed scope and deterministic resolution evidence.
 - [ ] **SEC-04**: Raw prompts, source context, and model responses MUST NOT be written to logs by default.
 - [ ] **SEC-05**: Persisted AI audit metadata MUST use restrictive file permissions and bounded retention defined by policy.
 - [ ] **SEC-06**: Canary tests MUST verify that protected source does not appear in unauthorized provider requests, logs, claims, temporary files, or Cypher exports.
 - [ ] **SEC-07**: AI provider or audit-path health failures MUST be observable without echoing protected source.
-- [x] **SEC-08**: Repository ownership health MUST report zero unowned or misprefixed nodes for the acceptance corpus before AI context or export acceptance.
+- [ ] **SEC-08**: Repository ownership health MUST report zero unowned or misprefixed nodes for the acceptance corpus before AI context or export acceptance.
 
 ## Future Requirements
 
@@ -250,13 +250,13 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | DET-12 | Phase 3 | Gaps Found |
 | ID-01 | Phase 2 | Complete |
 | ID-02 | Phase 2 | Complete |
-| ID-03 | Phase 4 | Complete |
-| ID-04 | Phase 4 | Complete |
-| ID-05 | Phase 4 | Complete |
-| ID-06 | Phase 4 | Complete |
-| ID-07 | Phase 4 | Complete |
-| ID-08 | Phase 4 | Complete |
-| ID-09 | Phase 4 | Complete |
+| ID-03 | Phase 4 | Gaps Found |
+| ID-04 | Phase 4 | Gaps Found |
+| ID-05 | Phase 4 | Gaps Found |
+| ID-06 | Phase 4 | Gaps Found |
+| ID-07 | Phase 4 | Gaps Found |
+| ID-08 | Phase 4 | Gaps Found |
+| ID-09 | Phase 4 | Gaps Found |
 | GAP-01 | Phase 5 | Pending |
 | GAP-02 | Phase 5 | Pending |
 | GAP-03 | Phase 5 | Pending |
@@ -314,11 +314,11 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | EVAL-07 | Phase 9 | Pending |
 | EVAL-08 | Phase 9 | Pending |
 | EVAL-09 | Phase 9 | Pending |
-| SEC-01 | Phase 4 | Complete |
-| SEC-02 | Phase 4 | Complete |
-| SEC-03 | Phase 4 | Complete |
+| SEC-01 | Phase 4 | Gaps Found |
+| SEC-02 | Phase 4 | Gaps Found |
+| SEC-03 | Phase 4 | Gaps Found |
 | SEC-04 | Phase 7 | Pending |
 | SEC-05 | Phase 7 | Pending |
 | SEC-06 | Phase 9 | Pending |
 | SEC-07 | Phase 7 | Pending |
-| SEC-08 | Phase 4 | Complete |
+| SEC-08 | Phase 4 | Gaps Found |
