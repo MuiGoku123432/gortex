@@ -186,6 +186,10 @@ func TestOpenPurgesLegacyCoverageSpellings(t *testing.T) {
 // store shape: no repo prefix means the whole FilePath is the path
 // portion, so any forward slash marks the legacy twin on a
 // backslash-keyed store.
+//
+// It opens the store as a v21 binary would: v22 (D-14) purges every
+// unprefixed file-backed row, which would hide what v19 alone does to this
+// shape. TestMigrationV22_PurgesUnprefixedRows covers v22.
 func TestOpenPurgesLegacyCoverageSpellingsSingleRepo(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.sqlite")
 
@@ -213,7 +217,13 @@ func TestOpenPurgesLegacyCoverageSpellingsSingleRepo(t *testing.T) {
 		require.NoError(t, err, "reset to the pre-purge version")
 	})
 
-	s2, err := Open(path)
+	var throughV21 []schemaMigration
+	for _, m := range schemaMigrations {
+		if m.version <= 21 {
+			throughV21 = append(throughV21, m)
+		}
+	}
+	s2, err := openWith(path, 21, throughV21, false)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s2.Close() })
 

@@ -1274,9 +1274,9 @@ func logWarmupSummary(logger *zap.Logger, warmup *warmupTimings, queryable, tota
 // subset, or two copies of one repo under different IDs, and every other
 // health signal stays green. This is the only place that says so out loud.
 //
-// A wholly-unowned graph is single-repo mode, not a defect, and logs at Info.
-// Both populations coexisting, or a stamped prefix the node ID does not
-// carry, is a real inconsistency and logs at Error with named samples.
+// Single-repo mode is a workspace of one (D-14): any unowned node, or a
+// stamped prefix the node ID does not carry, is a real inconsistency and logs
+// at Error with named samples. Only a clean audit logs at Info.
 func logRepoOwnershipAudit(g graph.Store, logger *zap.Logger) {
 	if logger == nil || g == nil {
 		return
@@ -1301,7 +1301,7 @@ func logRepoOwnershipAudit(g graph.Store, logger *zap.Logger) {
 		fields = append(fields, zap.Strings("misprefixed_samples", d.MisprefixedSamples))
 	}
 	logger.Error("daemon: repo ownership is inconsistent — repo-scoped reads will silently return a subset of the graph; "+
-		"the store holds both prefixed and unprefixed copies of the same code, or a node's stamped repo differs from its id",
+		"the store holds code nodes no repository owns, or a node's stamped repo differs from its id",
 		fields...)
 }
 

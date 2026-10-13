@@ -3481,7 +3481,14 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 		}
 	}
 	if prefixAuditOK {
+		// D-15: status is reported, never enforced — an unhealthy store still
+		// answers every query. Phases 6 and 7 decide what to refuse.
+		status := "healthy"
+		if !prefixAudit.Clean() {
+			status = "unhealthy"
+		}
 		ownership := map[string]any{
+			"status":             status,
 			"owned_code_nodes":   prefixAudit.OwnedCodeNodes,
 			"unowned_code_nodes": prefixAudit.UnownedCodeNodes,
 			"consistent":         prefixAudit.Clean(),
@@ -3490,12 +3497,14 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 			ownership["misprefixed_nodes"] = prefixAudit.MisprefixedNodes
 			ownership["misprefixed_samples"] = prefixAudit.MisprefixedSamples
 		}
-		// Only surface samples when they point at a defect; on a
-		// single-repo daemon every node is legitimately unowned and a
-		// sample list would read as an error.
+		// Every unowned node is a defect (D-14: single-repo mode is a
+		// workspace of one), so name them whenever there are any. Mixed
+		// marks the sharper ghost-graph case on top of that.
+		if prefixAudit.UnownedCodeNodes > 0 {
+			ownership["unowned_samples"] = prefixAudit.UnownedSamples
+		}
 		if prefixAudit.Mixed() {
 			ownership["mixed"] = true
-			ownership["unowned_samples"] = prefixAudit.UnownedSamples
 		}
 		result["repo_ownership"] = ownership
 	}

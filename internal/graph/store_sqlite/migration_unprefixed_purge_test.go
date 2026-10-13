@@ -175,6 +175,10 @@ func TestPurgeUnprefixedRepoRowsIsIdempotent(t *testing.T) {
 // v21 that still holds an unprefixed file-backed row (written by the
 // embedded single-repo index path) loses it on open, while an empty-path
 // dep:: global survives, and reopening the migrated store changes nothing.
+//
+// v22 runs on current stores, so the rows that carry an empty repo_prefix
+// legitimately WITH a path must survive too: a semantic external's module
+// under an external:: path, and a workspace-scoped memory's rationale node.
 func TestMigrationV22_PurgesUnprefixedRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.sqlite")
 	s, err := Open(path)
@@ -186,10 +190,15 @@ func TestMigrationV22_PurgesUnprefixedRows(t *testing.T) {
 	}
 
 	withRawDB(t, path, func(db *sql.DB) {
-		for _, n := range [][2]string{{"main.go::main", "main.go"}, {"dep::go.uber.org/zap::Logger", ""}} {
+		for _, n := range [][3]string{
+			{"main.go::main", "main.go", "function"},
+			{"dep::go.uber.org/zap::Logger", "", "function"},
+			{"module::go:github.com/pkg/errors@v0.9.1", "external::go:github.com/pkg/errors", "module"},
+			{"rationale::mem1", ".gortex/rationale", "rationale"},
+		} {
 			if _, err := db.Exec(
-				`INSERT INTO nodes (id, kind, name, file_path, repo_prefix) VALUES (?, 'function', ?, ?, '')`,
-				n[0], n[0], n[1]); err != nil {
+				`INSERT INTO nodes (id, kind, name, file_path, repo_prefix) VALUES (?, ?, ?, ?, '')`,
+				n[0], n[2], n[0], n[1]); err != nil {
 				t.Fatalf("seed node %q: %v", n[0], err)
 			}
 		}
@@ -204,7 +213,7 @@ func TestMigrationV22_PurgesUnprefixedRows(t *testing.T) {
 			t.Fatalf("open %d: %v", open, err)
 		}
 		assertStringsEqual(t, "nodes after open", queryIDs(t, s.db, `SELECT id FROM nodes ORDER BY id`),
-			[]string{"dep::go.uber.org/zap::Logger"})
+			[]string{"dep::go.uber.org/zap::Logger", "module::go:github.com/pkg/errors@v0.9.1", "rationale::mem1"})
 		if v, err := readUserVersion(s.db); err != nil || v != 22 {
 			t.Fatalf("open %d: user_version = %d (err %v), want 22", open, v, err)
 		}
