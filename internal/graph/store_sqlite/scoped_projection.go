@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"iter"
-	"sort"
 	"strings"
 	"sync"
 
@@ -20,34 +19,16 @@ type scopedProjectionSnapshot struct {
 }
 
 func (s *Store) OpenScopedProjectionSnapshot(ctx context.Context, scope graph.ProjectionScope) (graph.ScopedProjectionSnapshot, error) {
-	if len(scope.Repositories) == 0 {
-		return nil, fmt.Errorf("scoped projection: repository allow-set is required")
+	validated, err := graph.NewScope(scope.Workspace, scope.Project, scope.Repositories)
+	if err != nil {
+		return nil, fmt.Errorf("scoped projection: %w", err)
 	}
-	scope.Workspace = strings.TrimSpace(scope.Workspace)
-	scope.Project = strings.TrimSpace(scope.Project)
-	if scope.Workspace == "" || scope.Project == "" {
-		return nil, fmt.Errorf("scoped projection: workspace and project are required")
+	if err := validated.RequireWorkspaceProject(); err != nil {
+		return nil, fmt.Errorf("scoped projection: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	seen := make(map[string]struct{}, len(scope.Repositories))
-	repos := make([]string, 0, len(scope.Repositories))
-	for _, repo := range scope.Repositories {
-		repo = strings.TrimSpace(repo)
-		if repo == "" {
-			return nil, fmt.Errorf("scoped projection: repository allow-set contains an empty value")
-		}
-		if _, ok := seen[repo]; ok {
-			continue
-		}
-		seen[repo] = struct{}{}
-		repos = append(repos, repo)
-	}
-	if len(repos) == 0 {
-		return nil, fmt.Errorf("scoped projection: repository allow-set is required")
-	}
-	sort.Strings(repos)
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("scoped projection: begin read snapshot: %w", err)
@@ -56,7 +37,7 @@ func (s *Store) OpenScopedProjectionSnapshot(ctx context.Context, scope graph.Pr
 		tx: tx,
 		descriptor: graph.ProjectionSnapshotDescriptor{
 			SourceGeneration: s.viewGen,
-			Scope:            graph.ProjectionScope{Workspace: scope.Workspace, Project: scope.Project, Repositories: repos},
+			Scope:            validated,
 		},
 	}, nil
 }

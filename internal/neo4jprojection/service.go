@@ -135,15 +135,15 @@ func NormalizeRequest(request Request) (Request, error) {
 	request.Namespace = strings.TrimSpace(request.Namespace)
 	request.Workspace = strings.TrimSpace(request.Workspace)
 	request.Project = strings.TrimSpace(request.Project)
-	for i := range request.Repositories {
-		request.Repositories[i] = strings.TrimSpace(request.Repositories[i])
-	}
-	request.Repositories = slices.DeleteFunc(request.Repositories, func(repo string) bool { return repo == "" })
-	sort.Strings(request.Repositories)
-	request.Repositories = slices.Compact(request.Repositories)
 	if request.Profile == "" || request.Namespace == "" || request.Workspace == "" || request.Project == "" || len(request.Repositories) == 0 {
 		return Request{}, fmt.Errorf("neo4j profile, namespace, workspace, project, and at least one repository are required")
 	}
+	// A blank repository entry fails closed instead of being dropped (D-16).
+	scope, err := graph.NewScope(request.Workspace, request.Project, request.Repositories)
+	if err != nil {
+		return Request{}, fmt.Errorf("neo4j projection scope: %w", err)
+	}
+	request.Repositories = slices.Clone(scope.Repositories)
 	if request.BatchSize == 0 {
 		request.BatchSize = defaultBatchSize
 	}
@@ -170,10 +170,7 @@ func NormalizeRequest(request Request) (Request, error) {
 		}
 	}
 	request.Timeout = operationTimeout
-	request.Scope = graph.ProjectionScope{
-		Workspace: request.Workspace, Project: request.Project,
-		Repositories: append([]string(nil), request.Repositories...),
-	}
+	request.Scope = scope
 	request.Owner = projectionOwnerKey(request.Namespace, request.Workspace, request.Project, request.Repositories)
 	if request.OperationID == "" {
 		request.OperationID = request.Owner

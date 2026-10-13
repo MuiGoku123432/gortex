@@ -15,12 +15,8 @@ type ScopedEdgeRow struct {
 	Target *Node
 }
 
-// ProjectionScope is the exact non-empty source boundary for a projection.
-type ProjectionScope struct {
-	Workspace    string
-	Project      string
-	Repositories []string
-}
+// ProjectionScope is the projection's name for Scope (D-16).
+type ProjectionScope = Scope
 
 // ProjectionSnapshotDescriptor records the source generation and exact scope.
 type ProjectionSnapshotDescriptor struct {
