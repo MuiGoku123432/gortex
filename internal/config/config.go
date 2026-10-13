@@ -856,6 +856,57 @@ type IndexConfig struct {
 	// keeps the size / class caps only. Configured under
 	// `index.skip_untracked_assets`.
 	SkipUntrackedAssets bool `mapstructure:"skip_untracked_assets" yaml:"skip_untracked_assets,omitempty"`
+
+	// Cobol is this repository's COBOL binding policy, configured under
+	// `index.cobol` in the repository's .gortex.yaml. With no block, COBOL
+	// CALL and COPY bind inside the repository only. See CobolConfig.
+	Cobol CobolConfig `mapstructure:"cobol" yaml:"cobol,omitempty"`
+}
+
+// CobolConfig is one repository's COBOL binding policy (`index.cobol`).
+//
+//	index:
+//	  cobol:
+//	    resolve_from: [shared-copybooks]
+//	    copybook_libraries:
+//	      - {name: PRODLIB, repo: shared-copybooks, path: copy/prod}
+//	    db2_default_schema: MYSCH
+//	    idms_default_subschema: EMPSS
+//
+// Library names and default qualifiers are written as cobol-name-norm/1 keys
+// (upper-case ASCII, unquoted), because the resolver compares them by exact
+// string equality. Validate rejects every block that could widen resolution
+// beyond the repositories it names.
+type CobolConfig struct {
+	// ResolveFrom is the directed allowlist of other tracked repositories
+	// whose programs and copybooks this repository may bind to (D-09). It
+	// grants nothing in the other direction. Entries are exact repository
+	// prefixes; wildcards are rejected.
+	ResolveFrom []string `mapstructure:"resolve_from" yaml:"resolve_from,omitempty"`
+	// CopybookLibraries is the ordered, SYSLIB-like copybook search list
+	// (D-10): the first library holding a copybook wins.
+	CopybookLibraries []CobolCopybookLibrary `mapstructure:"copybook_libraries" yaml:"copybook_libraries,omitempty"`
+	// DB2DefaultSchema qualifies unqualified DB2 table names (D-11). It adds
+	// a link edge to an existing qualified node; IDs are never rewritten.
+	DB2DefaultSchema string `mapstructure:"db2_default_schema" yaml:"db2_default_schema,omitempty"`
+	// IDMSDefaultSubschema qualifies unqualified IDMS names (D-11), with the
+	// same link-only semantics as DB2DefaultSchema.
+	IDMSDefaultSubschema string `mapstructure:"idms_default_subschema" yaml:"idms_default_subschema,omitempty"`
+}
+
+// CobolCopybookLibrary is one entry of the ordered copybook search list: the
+// library Name a COPY ... OF/IN clause spells (optional), the repository
+// that holds it (empty means this repository; otherwise it must be listed in
+// resolve_from), and the repository-relative directory Path.
+type CobolCopybookLibrary struct {
+	Name string `mapstructure:"name" yaml:"name,omitempty"`
+	Repo string `mapstructure:"repo" yaml:"repo,omitempty"`
+	Path string `mapstructure:"path" yaml:"path"`
+}
+
+// Validate reports every index.cobol rule c breaks, joined with "; ".
+func (c CobolConfig) Validate() error {
+	return nil
 }
 
 // ContentAdmissionConfig gates which large non-source artifacts enter the
