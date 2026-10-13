@@ -3,17 +3,25 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
+	"github.com/zzet/gortex/internal/config"
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
+	"github.com/zzet/gortex/internal/parser"
+	"github.com/zzet/gortex/internal/parser/languages"
 	"github.com/zzet/gortex/internal/testutil/graphdump"
 )
 
@@ -78,7 +86,7 @@ func (env *cobolLifecycleEnv) reindex(t *testing.T, repo string) {
 func (env *cobolLifecycleEnv) requireCleanEquivalent(t *testing.T) graphdump.Result {
 	t.Helper()
 	got := env.dump(t)
-	requireSameDump(t, cleanCobolDump(t, env.repos, "lifea", "lifeb"), got)
+	requireSameDump(t, cleanCobolDump(t, env.repos, slices.Sorted(maps.Keys(env.repos))...), got)
 	for _, line := range got.Rows {
 		require.NotContains(t, line, "restub_prev_")
 	}
@@ -207,4 +215,138 @@ func TestCobolLifecycle_Restore(t *testing.T) {
 	got := env.requireCleanEquivalent(t)
 	requireSameDump(t, want, got)
 	assert.Equal(t, want.Rows, got.Rows)
+}
+
+// TestCobolLifecycle_CrossFile changes another file of lifea; the unchanged
+// CALL 'SUBPGM' in main.cbl is decided again, and each step equals its
+// clean build (D-04).
+func TestCobolLifecycle_CrossFile(t *testing.T) {
+	const callSub = "unresolved::cobol::program::SUBPGM"
+	callEdge := func(t *testing.T, res graphdump.Result) cobolDumpEdge {
+		t.Helper()
+		return cobolPlaceholderEdge(t, cobolDumpEdges(t, res), "lifea", callSub)
+	}
+
+	t.Run("new_candidate", func(t *testing.T) {
+		env := newCobolIncrementalEnv(t)
+		bound := callEdge(t, env.dump(t)).to
+		require.Equal(t, "lifea/cobol/sub.cbl::SUBPGM", bound)
+
+		env.write(t, "lifea", "cobol/sub2.cbl", cobolLifecycleRepoA["cobol/sub.cbl"])
+		env.reindex(t, "lifea")
+		call := callEdge(t, env.requireCleanEquivalent(t))
+		assert.Equal(t, callSub, call.to)
+		assert.Equal(t, "ambiguous", call.meta["cobol_unresolved_reason"])
+
+		env.remove(t, "lifea", "cobol/sub2.cbl")
+		env.reindex(t, "lifea")
+		assert.Equal(t, bound, callEdge(t, env.requireCleanEquivalent(t)).to)
+	})
+
+	t.Run("target_edited", func(t *testing.T) {
+		env := newCobolIncrementalEnv(t)
+		bound := callEdge(t, env.dump(t)).to
+
+		renamed := strings.Replace(cobolLifecycleRepoA["cobol/sub.cbl"],
+			"PROGRAM-ID. SUBPGM.", "PROGRAM-ID. SUBPGX.", 1)
+		env.write(t, "lifea", "cobol/sub.cbl", renamed)
+		env.reindex(t, "lifea")
+		call := callEdge(t, env.requireCleanEquivalent(t))
+		assert.Equal(t, callSub, call.to)
+		assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+
+		env.write(t, "lifea", "cobol/sub.cbl", cobolLifecycleRepoA["cobol/sub.cbl"])
+		env.reindex(t, "lifea")
+		assert.Equal(t, bound, callEdge(t, env.requireCleanEquivalent(t)).to)
+	})
+}
+
+// TestCobolLifecycle_CrossRepoIncremental adds and deletes XPGM in crossb
+// through an incremental reindex of crossb alone; crossa's unchanged CALL,
+// allowed by its resolve_from, binds and returns to missing (D-09).
+func TestCobolLifecycle_CrossRepoIncremental(t *testing.T) {
+	const callX = "unresolved::cobol::program::XPGM"
+	repos := cobolCrossRepos(map[string]string{".gortex.yaml": cobolCrossAllowlist})
+	repos["crossb"] = maps.Clone(repos["crossb"])
+	xpgm := repos["crossb"]["cobol/xpgm.cbl"]
+	delete(repos["crossb"], "cobol/xpgm.cbl")
+	env := newCobolLifecycleEnv(t, repos)
+	env.track(t, "crossa", "crossb")
+	callEdge := func() cobolDumpEdge {
+		return cobolPlaceholderEdge(t, cobolDumpEdges(t, env.requireCleanEquivalent(t)), "crossa", callX)
+	}
+	call := callEdge()
+	require.Equal(t, callX, call.to)
+	require.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+
+	env.write(t, "crossb", "cobol/xpgm.cbl", xpgm)
+	env.reindex(t, "crossb")
+	call = callEdge()
+	assert.Equal(t, "crossb/cobol/xpgm.cbl::XPGM", call.to)
+	assert.NotContains(t, call.meta, "cobol_unresolved_reason")
+
+	env.remove(t, "crossb", "cobol/xpgm.cbl")
+	env.reindex(t, "crossb")
+	call = callEdge()
+	assert.Equal(t, callX, call.to)
+	assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+}
+
+// TestCobolLifecycle_Interrupted interrupts a reindex after parse, evict, and
+// AddBatch but before its resolver tail: the store holds placeholders, never
+// a wrong binding, and a warm restart over the same SQLite file converges to
+// the clean build of the edited files (ID-07).
+func TestCobolLifecycle_Interrupted(t *testing.T) {
+	env := newCobolIncrementalEnv(t)
+	idx := env.mi.GetIndexer("lifea")
+	require.NotNil(t, idx)
+	idx.incrementalResolveFilesHook = func([]string) {}
+
+	env.write(t, "lifea", "cobol/main.cbl", cobolLifecycleEdits["cobol/main.cbl"])
+	env.reindex(t, "lifea")
+
+	clean := cleanCobolDump(t, env.repos, "lifea", "lifeb")
+	got := env.dump(t)
+	require.NotEqual(t, clean.Digest, got.Digest, "the interrupted reindex left no placeholder")
+	bound := map[string]string{}
+	for _, e := range cobolDumpEdges(t, clean) {
+		if p, _ := e.meta["cobol_placeholder"].(string); p != "" {
+			bound[e.from+"\x00"+p] = e.to
+		}
+	}
+	for _, e := range cobolDumpEdges(t, got) {
+		p, _ := e.meta["cobol_placeholder"].(string)
+		if p == "" || e.to == p {
+			continue
+		}
+		assert.Equal(t, bound[e.from+"\x00"+p], e.to, "binding of %s %s", e.from, p)
+	}
+
+	// Daemon restart: drop the stack, open a fresh one over the same SQLite
+	// file, and reconcile each repository from its persisted mtimes.
+	require.NoError(t, env.mi.Close(context.Background()))
+	require.NoError(t, env.store.Close())
+	// note: the same store and MultiIndexer wiring as newCobolLifecycleEnv
+	// (two occurrences in this package).
+	store, err := store_sqlite.Open(filepath.Join(env.dir, "g.sqlite"))
+	require.NoError(t, err)
+	reg := parser.NewRegistry()
+	languages.RegisterAll(reg)
+	cm, err := config.NewConfigManager(filepath.Join(env.dir, "config.yaml"))
+	require.NoError(t, err)
+	mi := NewMultiIndexer(store, reg, New(store, reg, config.Default().Index, zap.NewNop()).Search(), cm, zap.NewNop())
+	t.Cleanup(func() {
+		_ = mi.Close(context.Background())
+		_ = store.Close()
+	})
+	env.store, env.cm, env.mi = store, cm, mi
+	for _, name := range []string{"lifea", "lifeb"} {
+		prior := store.LoadFileMtimes(name)
+		require.NotEmpty(t, prior, name)
+		_, err := mi.ReconcileRepoCtx(context.Background(), config.RepoEntry{
+			Path: env.roots[name], Name: name, Workspace: "phase4", Project: "phase4",
+		}, prior)
+		require.NoError(t, err)
+	}
+	requireSameDump(t, clean, env.requireCleanEquivalent(t))
 }
