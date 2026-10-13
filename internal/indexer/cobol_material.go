@@ -68,3 +68,8 @@ func (idx *Indexer) repoExtractorVersionsSnapshot() map[string]int {
 	}
 	return out
 }
+
+// merkleSaltFor is a RED stub; the COBOL material salt is not wired yet.
+func (idx *Indexer) merkleSaltFor(rel string) string {
+	return merkleSaltFor(rel)
+}

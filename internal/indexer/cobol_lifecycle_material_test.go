@@ -4,12 +4,16 @@ package indexer
 
 import (
 	"encoding/json"
+	"maps"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/indexer/merkle"
 )
 
 // The material half of the Phase 4 lifecycle harness (D-04, D-06): an
@@ -133,4 +137,90 @@ func TestCobolLifecycle_UnrelatedConfig(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, before, after)
 	env.requireCleanEquivalent(t)
+}
+
+// TestCobolLifecycle_VersionChange proves D-07 for an extractor or parser
+// identity change. That identity is pinned at compile time, so the test
+// plays the store an older binary left behind: a different stored
+// _cobol_material (and, in Merkle mode, a different fingerprint in every
+// COBOL leaf salt) plus one program node carrying the previous
+// prov_extractor_version. One full-root reindex must restage exactly the
+// COBOL files, restore the current values, re-stamp the stored key, and
+// equal the clean build.
+func TestCobolLifecycle_VersionChange(t *testing.T) {
+	for _, mode := range []string{"mtime", "merkle"} {
+		t.Run(mode, func(t *testing.T) {
+			if mode == "merkle" {
+				t.Setenv("GORTEX_MERKLE", "1")
+			}
+			repos := map[string]map[string]string{
+				"lifea": maps.Clone(cobolLifecycleRepoA),
+				"lifeb": maps.Clone(cobolLifecycleRepoB),
+			}
+			env := newCobolLifecycleEnv(t, repos)
+			env.track(t, "lifea", "lifeb")
+			idx := env.mi.GetIndexer("lifea")
+			require.NotNil(t, idx)
+			require.Equal(t, mode == "merkle", idx.merkleEnabled())
+			current, ok := idx.cobolMaterial()
+			require.True(t, ok, "COBOL material fingerprint available")
+			older := current + 1
+
+			st, found, err := env.store.GetRepoIndexState("lifea")
+			require.NoError(t, err)
+			require.True(t, found)
+			versions := decodeExtractorVersions(st.ExtractorVersions)
+			versions[cobolMaterialKey] = int(older)
+			encoded, err := json.Marshal(versions)
+			require.NoError(t, err)
+			st.ExtractorVersions = string(encoded)
+			require.NoError(t, env.store.SetRepoIndexState(st))
+
+			treePath := merkleTreeFile(env.roots["lifea"])
+			if mode == "merkle" {
+				tree, err := merkle.Load(treePath)
+				require.NoError(t, err)
+				require.NotNil(t, tree)
+				for rel, leaf := range tree.Files {
+					if ExtractorLangForFile(rel) != "cobol" {
+						continue
+					}
+					want := "|cobol-material@" + strconv.FormatInt(current, 10)
+					require.Contains(t, leaf.Salt, want, "salt of %s", rel)
+					leaf.Salt = strings.Replace(leaf.Salt, want, "|cobol-material@"+strconv.FormatInt(older, 10), 1)
+					tree.Files[rel] = leaf
+				}
+				require.NoError(t, merkle.MergeScope(nil, tree, nil).Save(treePath))
+			}
+
+			const programID = "lifea/cobol/main.cbl::MAINPGM"
+			program := env.store.GetNode(programID)
+			require.NotNil(t, program)
+			currentVersion, _ := program.Meta["prov_extractor_version"].(string)
+			prefix, number, ok := strings.Cut(currentVersion, "/")
+			require.True(t, ok, "extractor version %q", currentVersion)
+			n, err := strconv.Atoi(number)
+			require.NoError(t, err)
+			stale := *program
+			stale.Meta = maps.Clone(program.Meta)
+			stale.Meta["prov_extractor_version"] = prefix + "/" + strconv.Itoa(n-1)
+			env.store.AddBatch([]*graph.Node{&stale}, nil)
+
+			res, err := env.mi.IncrementalReindexRepo("lifea", nil)
+			require.NoError(t, err)
+			assert.Equal(t, env.cobolFileCount("lifea"), res.StaleFileCount)
+			restored := env.store.GetNode(programID)
+			require.NotNil(t, restored)
+			assert.Equal(t, currentVersion, restored.Meta["prov_extractor_version"])
+			stored, ok := env.storedCobolMaterial(t, "lifea")
+			require.True(t, ok)
+			assert.Equal(t, int(current), stored)
+			if mode == "merkle" {
+				tree, err := merkle.Load(treePath)
+				require.NoError(t, err)
+				assert.Contains(t, tree.Files["cobol/main.cbl"].Salt, "|cobol-material@"+strconv.FormatInt(current, 10))
+			}
+			env.requireCleanEquivalent(t)
+		})
+	}
 }
