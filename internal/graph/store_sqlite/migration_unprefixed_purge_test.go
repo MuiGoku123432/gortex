@@ -171,6 +171,49 @@ func TestPurgeUnprefixedRepoRowsIsIdempotent(t *testing.T) {
 	})
 }
 
+// TestMigrationV22_PurgesUnprefixedRows is the D-14 rollout: a store at
+// v21 that still holds an unprefixed file-backed row (written by the
+// embedded single-repo index path) loses it on open, while an empty-path
+// dep:: global survives, and reopening the migrated store changes nothing.
+func TestMigrationV22_PurgesUnprefixedRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.sqlite")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	withRawDB(t, path, func(db *sql.DB) {
+		for _, n := range [][2]string{{"main.go::main", "main.go"}, {"dep::go.uber.org/zap::Logger", ""}} {
+			if _, err := db.Exec(
+				`INSERT INTO nodes (id, kind, name, file_path, repo_prefix) VALUES (?, 'function', ?, ?, '')`,
+				n[0], n[0], n[1]); err != nil {
+				t.Fatalf("seed node %q: %v", n[0], err)
+			}
+		}
+		if _, err := db.Exec(`PRAGMA user_version = 21`); err != nil {
+			t.Fatalf("reset user_version: %v", err)
+		}
+	})
+
+	for open := 1; open <= 2; open++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", open, err)
+		}
+		assertStringsEqual(t, "nodes after open", queryIDs(t, s.db, `SELECT id FROM nodes ORDER BY id`),
+			[]string{"dep::go.uber.org/zap::Logger"})
+		if v, err := readUserVersion(s.db); err != nil || v != 22 {
+			t.Fatalf("open %d: user_version = %d (err %v), want 22", open, v, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatalf("close %d: %v", open, err)
+		}
+	}
+}
+
 func queryIDs(t *testing.T, db *sql.DB, query string) []string {
 	t.Helper()
 	rows, err := db.Query(query)
