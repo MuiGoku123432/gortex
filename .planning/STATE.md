@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-14-PLAN.md
-last_updated: "2026-10-13T03:39:00.332Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-10-13T03:53:48.072Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 4d1e64a67e589d5bca895f925cc16788c4ad503f
+state_head: 1b5812188a401cd3d9ca9c7c4ba67f8d33d73c07
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 39
+  completed_plans: 40
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 10 of 16
+Plan: 11 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -100,6 +100,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P12 | 19 min | 1 tasks | 7 files |
 | Phase 04 P05 | 49 min | 2 tasks | 12 files |
 | Phase 04 P14 | 9min | 2 tasks | 6 files |
+| Phase 04 P07 | 13 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -193,6 +194,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-05: purgeUnprefixedRepoRows (v7, re-run as v22) deletes only the audit's unowned file-backed rows so external::-path modules and workspace rationale survive
 - [Phase 04]: 04-14: COBOL cross-repository binding is a directed ResolveFrom allowlist with one candidate union (same-repository never shadows an allowed repository); copybook libraries rank by first matching library and record cobol_copy_search_rank
 - [Phase 04]: 04-14: reconcileCobolResources evicts shared resources (FilePath == ID) with none or alias-only in-edges, then keeps one cobol-default-qualifier/1 alias per _unqualified resource to an existing qualified node; default qualifiers compare as configured, so 04-07 must pass them normalized
+- [Phase 04]: 04-07: COBOL policy lookup treats a repository as tracked when registered or holding a live mutation lane, read per call; TrackRepoCtx registers after its own resolve pass, so a registered-only check loses crossa->crossb bindings
+- [Phase 04]: 04-07: index.cobol library names and default qualifiers must already be cobol-name-norm/1 keys; an invalid index.cobol block rejects the whole .gortex.yaml read and keeps the last good parse
 
 ### Pending Todos
 
@@ -221,6 +224,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T03:38:43.722Z
-Stopped at: Completed 04-14-PLAN.md
+Last session: 2026-10-13T03:53:48.018Z
+Stopped at: Completed 04-07-PLAN.md
 Resume file: None
