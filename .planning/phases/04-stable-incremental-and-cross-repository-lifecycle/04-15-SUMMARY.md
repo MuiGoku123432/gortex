@@ -132,7 +132,7 @@ status: complete
 
 ## Accomplishments
 
-- Warm restart: `mi.reconcileCobolRepos(map[string]struct{}{prefix: {}})` runs at the end of `ReconcileRepoCtx`, after the resolve and derived tails, on every route (ID-07, T-04-34).
+- Warm restart: `mi.reconcileCobolRepos(map[string]struct{}{prefix: {}})` runs at the end of `ReconcileRepoCtx`, after the resolve and derived tails, on every route (ID-07, T-04-61).
 - Cross-repository parallel edges: the reconcile's rebound batch goes through `DetectCrossRepoEdgesForReindexes`, so a COBOL CALL bound across repositories carries `cross_repo_calls` on the clean track path as well as on the incremental path.
 - D-08: `reresolveAffectedBy` and `planAffectedByStages` log `affected-by: cap exceeded, resolving full affected set` at Info with `file`, `affected`, and `cap`, and no longer slice the set. The `AffectedByReresolveMax` doc describes the escalation.
 - Five tests close the remaining D-04 incremental sequences.
@@ -209,7 +209,7 @@ None - no external service configuration required.
 ## Next Phase Readiness
 
 - 04-16 (D-17 HEAD movement) can rely on the warm-restart reconcile and on full affected-by re-resolution.
-- Threat register: T-04-32 is covered by `CrossFile/target_edited`. T-04-34 is covered by the warm-restart reconcile plus `Interrupted`. T-04-35 is accepted, and the Info log carries the counts. T-04-36: the escalation log carries only the repository-relative path and counts.
+- Threat register: T-04-60 is covered by `CrossFile/target_edited`. T-04-61 is covered by the warm-restart reconcile plus `Interrupted`. T-04-35 is accepted, and the Info log carries the counts. T-04-62: the escalation log carries only the repository-relative path and counts.
 
 ---
 *Phase: 04-stable-incremental-and-cross-repository-lifecycle*
