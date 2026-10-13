@@ -357,7 +357,9 @@ func TestCobolGrammar_ProgramNestedStamp(t *testing.T) {
 		nested    map[string]any // program QualName -> cobol_nested
 	}{
 		{"top_level", cobolDemoFixture, map[string]any{"DEMOPGM": false}},
-		{"literal_slash_name", cobolProgram(`"A/B"`, ""), map[string]any{`"A/B"`: false}},
+		// The '/' is percent-encoded in the symbol (ID-03), so the literal
+		// cannot even look like a containment path.
+		{"literal_slash_name", cobolProgram(`"A/B"`, ""), map[string]any{`"A%2FB"`: false}},
 		{
 			"stolen_marker",
 			cobolProgram("APGM", "") + cobolProgram("BPGM", "BPGM") + cobolProgram("APGM", "APGM"),

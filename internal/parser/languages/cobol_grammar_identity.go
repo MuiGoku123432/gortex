@@ -14,7 +14,7 @@ import (
 type cobolProgramSymbol struct {
 	index  int    // program_definition index in h.Facts.Observations
 	name   string // verbatim program_name bytes from h.Generated
-	symbol string // containment path joined by "/", plus "#k" for k >= 2
+	symbol string // cobolIDSegment-encoded names joined by "/", plus "#k" for k >= 2
 	// nested: the program was opened inside another program, so its symbol
 	// has a container segment; COBOL scoping makes it callable only from its
 	// directly containing program, whose symbol is container.
@@ -40,7 +40,9 @@ type cobolProgramSymbol struct {
 //     "#k" in observation order. The first occurrence has no ordinal.
 //
 // Names in symbols are the verbatim program_name bytes, never case-folded
-// (D-20). END PROGRAM markers match a program the way COBOL compares
+// (D-20), each passed through cobolIDSegment so a literal PROGRAM-ID such
+// as 'A/B' or 'X#2' cannot alias a containment path or a #k ordinal
+// (ID-03); name keeps the bytes unencoded. END PROGRAM markers match a program the way COBOL compares
 // user-defined words: case-insensitively and ignoring the quotes of a
 // literal name, so `PROGRAM-ID. Outer.` is closed by `END PROGRAM OUTER.`.
 // A program_definition with no program_name is counted in unnamed and gets
@@ -104,10 +106,10 @@ func cobolProgramSymbols(h handoff.Handoff) (programs []cobolProgramSymbol, cont
 				}
 				open = open[:len(open)-1]
 			}
-			base, container := name, ""
+			base, container := cobolIDSegment(name), ""
 			if len(open) > 0 {
 				container = open[len(open)-1].symbol
-				base = container + "/" + name
+				base = container + "/" + cobolIDSegment(name)
 				open[len(open)-1].hasChildren = true
 			}
 			occurrences[base]++
