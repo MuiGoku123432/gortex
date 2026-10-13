@@ -170,3 +170,236 @@ func TestCobolReconcile_CallerUnowned(t *testing.T) {
 		assert.NotContains(t, e.Meta, "cobol_candidate_ids", "line %d", line)
 	}
 }
+
+// cobolPolicies returns a policy lookup over a fixed per-repository map.
+func cobolPolicies(m map[string]CobolPolicy) CobolPolicyLookup {
+	return func(repo string) CobolPolicy { return m[repo] }
+}
+
+func TestCobolReconcile_Allowlist(t *testing.T) {
+	const caller = "repoA/main.cbl::MAINPGM"
+	const callX = "unresolved::cobol::program::XPGM"
+	const copyX = "unresolved::cobol::copybook::XCPY"
+	allowB := cobolPolicies(map[string]CobolPolicy{"repoA": {ResolveFrom: []string{"repoB"}}})
+
+	seed := func() *graph.Graph {
+		g := graph.New()
+		seedCobol(g, "repoA", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "repoB", "repoB/x.cbl::XPGM", graph.KindFunction, "program", "XPGM")
+		seedCobol(g, "repoB", "repoB/copy/xcpy.cpy", graph.KindFile, "copybook", "XCPY")
+		cobolEdge(g, caller, 1, graph.EdgeCalls, callX, placeholderMeta(callX))
+		cobolEdge(g, caller, 2, graph.EdgeImports, copyX, placeholderMeta(copyX))
+		return g
+	}
+
+	t.Run("no_policy", func(t *testing.T) {
+		g := seed()
+		New(g).ReconcileCobol(nil)
+		for _, line := range []int{1, 2} {
+			e := cobolEdgeAt(t, g, caller, line)
+			assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"], "line %d binds only inside repoA", line)
+			assert.False(t, e.CrossRepo)
+		}
+	})
+
+	t.Run("allowed", func(t *testing.T) {
+		g := seed()
+		r := New(g)
+		r.SetCobolPolicyLookup(allowB)
+		r.ReconcileCobol(nil)
+		call := cobolEdgeAt(t, g, caller, 1)
+		assert.Equal(t, "repoB/x.cbl::XPGM", call.To)
+		assert.True(t, call.CrossRepo)
+		assert.NotContains(t, call.Meta, "cobol_unresolved_reason")
+		cp := cobolEdgeAt(t, g, caller, 2)
+		assert.Equal(t, "repoB/copy/xcpy.cpy", cp.To)
+		assert.True(t, cp.CrossRepo)
+	})
+
+	t.Run("union_ambiguous", func(t *testing.T) {
+		g := seed()
+		const callSub = "unresolved::cobol::program::SUBPGM"
+		seedCobol(g, "repoA", "repoA/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		seedCobol(g, "repoB", "repoB/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		cobolEdge(g, caller, 3, graph.EdgeCalls, callSub, placeholderMeta(callSub))
+		r := New(g)
+		r.SetCobolPolicyLookup(allowB)
+		r.ReconcileCobol(nil)
+		e := cobolEdgeAt(t, g, caller, 3)
+		assert.Equal(t, callSub, e.To, "the same-repository candidate does not shadow the allowed one")
+		assert.Equal(t, "ambiguous", e.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, []string{"repoA/sub.cbl::SUBPGM", "repoB/sub.cbl::SUBPGM"}, e.Meta["cobol_candidate_ids"])
+	})
+
+	t.Run("directed", func(t *testing.T) {
+		g := seed()
+		r := New(g)
+		r.SetCobolPolicyLookup(cobolPolicies(map[string]CobolPolicy{"repoB": {ResolveFrom: []string{"repoA"}}}))
+		r.ReconcileCobol(nil)
+		for _, line := range []int{1, 2} {
+			e := cobolEdgeAt(t, g, caller, line)
+			assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"], "line %d: repoB's list does not widen repoA", line)
+		}
+	})
+
+	t.Run("foreign_nested_excluded", func(t *testing.T) {
+		g := seed()
+		const callNested = "unresolved::cobol::program::INNER"
+		seedCobol(g, "repoB", "repoB/x.cbl::XPGM/INNER", graph.KindFunction, "program", "INNER")
+		inner := g.GetNode("repoB/x.cbl::XPGM/INNER")
+		inner.Meta["cobol_nested"] = true
+		inner.Meta["cobol_container"] = "repoB/x.cbl::XPGM"
+		meta := placeholderMeta(callNested)
+		meta["cobol_caller_program"] = "repoB/x.cbl::XPGM"
+		cobolEdge(g, caller, 3, graph.EdgeCalls, callNested, meta)
+		r := New(g)
+		r.SetCobolPolicyLookup(allowB)
+		r.ReconcileCobol(nil)
+		e := cobolEdgeAt(t, g, caller, 3)
+		assert.Equal(t, callNested, e.To, "a nested program in another repository is never a candidate")
+		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
+	})
+
+	t.Run("reverse_fanout", func(t *testing.T) {
+		g := graph.New()
+		seedCobol(g, "repoA", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "repoB", "repoB/main.cbl::BMAIN", graph.KindFunction, "program", "BMAIN")
+		cobolEdge(g, caller, 1, graph.EdgeCalls, callX, placeholderMeta(callX))
+		r := New(g)
+		r.SetCobolPolicyLookup(allowB)
+		r.ReconcileCobol(nil)
+		require.Equal(t, "missing", cobolEdgeAt(t, g, caller, 1).Meta["cobol_unresolved_reason"])
+
+		seedCobol(g, "repoB", "repoB/x.cbl::XPGM", graph.KindFunction, "program", "XPGM")
+		r.ReconcileCobol(map[string]struct{}{"repoB": {}})
+		e := cobolEdgeAt(t, g, caller, 1)
+		assert.Equal(t, "repoB/x.cbl::XPGM", e.To, "a change in repoB re-decides repoA, which resolves from repoB")
+		assert.True(t, e.CrossRepo)
+	})
+
+	t.Run("unknown_repo", func(t *testing.T) {
+		g := seed()
+		const callSub = "unresolved::cobol::program::SUBPGM"
+		seedCobol(g, "repoA", "repoA/sub.cbl::SUBPGM", graph.KindFunction, "program", "SUBPGM")
+		cobolEdge(g, caller, 3, graph.EdgeCalls, callSub, placeholderMeta(callSub))
+		r := New(g)
+		r.SetCobolPolicyLookup(cobolPolicies(map[string]CobolPolicy{"repoA": {ResolveFrom: []string{"ghost", " "}}}))
+		r.ReconcileCobol(nil)
+		assert.Equal(t, "missing", cobolEdgeAt(t, g, caller, 1).Meta["cobol_unresolved_reason"])
+		assert.Equal(t, "missing", cobolEdgeAt(t, g, caller, 2).Meta["cobol_unresolved_reason"])
+		assert.Equal(t, "repoA/sub.cbl::SUBPGM", cobolEdgeAt(t, g, caller, 3).To, "same-repository binding is unchanged")
+	})
+}
+
+func TestCobolReconcile_SearchOrder(t *testing.T) {
+	const caller = "repoA/main.cbl::MAINPGM"
+	const copyCust = "unresolved::cobol::copybook::CUSTREC"
+	const prod = "repoA/copy/prod/custrec.cpy"
+	const test = "repoA/copy/test/custrec.cpy"
+	libs := func(l ...CobolLibrary) CobolPolicyLookup {
+		return cobolPolicies(map[string]CobolPolicy{"repoA": {CopybookLibraries: l}})
+	}
+	seed := func(g graph.Store, members ...string) {
+		seedCobol(g, "repoA", caller, graph.KindFunction, "program", "MAINPGM")
+		for _, m := range members {
+			seedCobol(g, graph.RepoPrefixOfID(m), m, graph.KindFile, "copybook", "CUSTREC")
+		}
+	}
+	assertRanked := func(t *testing.T, e *graph.Edge, to string, rank int) {
+		t.Helper()
+		assert.Equal(t, to, e.To)
+		assert.NotContains(t, e.Meta, "cobol_unresolved_reason")
+		assert.EqualValues(t, rank, e.Meta["cobol_copy_search_rank"])
+		assert.Equal(t, "cobol-copy-search/1", e.Meta["cobol_copy_search_rule"])
+	}
+
+	t.Run("rank_wins", func(t *testing.T) {
+		opened, err := store_sqlite.Open(filepath.Join(t.TempDir(), "cobol.sqlite"))
+		require.NoError(t, err)
+		store := &cobolWriteCounter{Store: opened}
+		t.Cleanup(func() { require.NoError(t, opened.Close()) })
+		seed(store, prod, test)
+		cobolEdge(store, caller, 2, graph.EdgeImports, copyCust, placeholderMeta(copyCust))
+		r := New(store)
+		r.SetCobolPolicyLookup(libs(CobolLibrary{Path: "copy/prod"}, CobolLibrary{Path: "copy/test/"}))
+		r.ReconcileCobol(nil)
+		assertRanked(t, cobolEdgeAt(t, store, caller, 2), prod, 0)
+
+		store.reindexes, store.persists = 0, 0
+		r.ReconcileCobol(nil)
+		assertRanked(t, cobolEdgeAt(t, store, caller, 2), prod, 0)
+		assert.Zero(t, store.reindexes, "no second reindex")
+		assert.Zero(t, store.persists, "no second Meta write")
+	})
+
+	t.Run("of_qualifier", func(t *testing.T) {
+		g := graph.New()
+		seed(g, prod, test)
+		meta := placeholderMeta(copyCust)
+		meta["cobol_copy_library_key"] = "TESTLIB"
+		cobolEdge(g, caller, 2, graph.EdgeImports, copyCust, meta)
+		r := New(g)
+		r.SetCobolPolicyLookup(libs(CobolLibrary{Name: "PRODLIB", Path: "copy/prod"}, CobolLibrary{Name: "TESTLIB", Path: "copy/test"}))
+		r.ReconcileCobol(nil)
+		assertRanked(t, cobolEdgeAt(t, g, caller, 2), test, 1)
+	})
+
+	t.Run("unranked_dropped", func(t *testing.T) {
+		g := graph.New()
+		seed(g, "repoA/other/custrec.cpy")
+		cobolEdge(g, caller, 2, graph.EdgeImports, copyCust, placeholderMeta(copyCust))
+		r := New(g)
+		r.SetCobolPolicyLookup(libs(CobolLibrary{Path: "copy/prod"}))
+		r.ReconcileCobol(nil)
+		e := cobolEdgeAt(t, g, caller, 2)
+		assert.Equal(t, copyCust, e.To, "a copybook outside every library is not a candidate")
+		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
+		assert.NotContains(t, e.Meta, "cobol_copy_search_rank")
+	})
+
+	t.Run("tie_ambiguous", func(t *testing.T) {
+		g := graph.New()
+		seed(g, prod, "repoA/copy/prod/CUSTREC.cpy")
+		cobolEdge(g, caller, 2, graph.EdgeImports, copyCust, placeholderMeta(copyCust))
+		r := New(g)
+		r.SetCobolPolicyLookup(libs(CobolLibrary{Path: "copy/prod"}))
+		r.ReconcileCobol(nil)
+		e := cobolEdgeAt(t, g, caller, 2)
+		assert.Equal(t, copyCust, e.To)
+		assert.Equal(t, "ambiguous", e.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, []string{"repoA/copy/prod/CUSTREC.cpy", prod}, e.Meta["cobol_candidate_ids"])
+		assert.NotContains(t, e.Meta, "cobol_copy_search_rank")
+		assert.NotContains(t, e.Meta, "cobol_copy_search_rule")
+	})
+
+	t.Run("cross_repo_library", func(t *testing.T) {
+		g := graph.New()
+		seed(g, "repoB/copy/custrec.cpy")
+		cobolEdge(g, caller, 2, graph.EdgeImports, copyCust, placeholderMeta(copyCust))
+		r := New(g)
+		r.SetCobolPolicyLookup(cobolPolicies(map[string]CobolPolicy{"repoA": {
+			ResolveFrom:       []string{"repoB"},
+			CopybookLibraries: []CobolLibrary{{Path: "copy"}, {Repo: "repoB", Path: "copy"}},
+		}}))
+		r.ReconcileCobol(nil)
+		e := cobolEdgeAt(t, g, caller, 2)
+		assertRanked(t, e, "repoB/copy/custrec.cpy", 1)
+		assert.True(t, e.CrossRepo)
+	})
+
+	t.Run("no_libraries", func(t *testing.T) {
+		g := graph.New()
+		seed(g, prod, test)
+		meta := placeholderMeta(copyCust)
+		meta["cobol_copy_search_rank"] = 0
+		meta["cobol_copy_search_rule"] = "cobol-copy-search/1"
+		cobolEdge(g, caller, 2, graph.EdgeImports, prod, meta)
+		New(g).ReconcileCobol(nil)
+		e := cobolEdgeAt(t, g, caller, 2)
+		assert.Equal(t, copyCust, e.To)
+		assert.Equal(t, "ambiguous", e.Meta["cobol_unresolved_reason"])
+		assert.Equal(t, []string{prod, test}, e.Meta["cobol_candidate_ids"])
+		assert.NotContains(t, e.Meta, "cobol_copy_search_rank", "a decision that is not a library bind drops the rank")
+		assert.NotContains(t, e.Meta, "cobol_copy_search_rule")
+	})
+}
