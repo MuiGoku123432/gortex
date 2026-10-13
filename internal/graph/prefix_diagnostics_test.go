@@ -112,13 +112,15 @@ func TestPrefixDiagnosticsMixed(t *testing.T) {
 		}
 	})
 
-	t.Run("wholly unprefixed is single-repo mode, not a defect", func(t *testing.T) {
+	// D-14: single-repo mode is a workspace of one, so a wholly unprefixed
+	// graph is not mixed but is no longer clean either.
+	t.Run("wholly unprefixed is not mixed but is not clean", func(t *testing.T) {
 		d := AuditNodePrefixes([]*Node{unowned, global}, 3)
 		if d.Mixed() {
 			t.Fatalf("Mixed() = true for a wholly-unprefixed graph (%s)", d.Summary())
 		}
-		if !d.Clean() {
-			t.Fatalf("Clean() = false for single-repo mode (%s)", d.Summary())
+		if d.Clean() {
+			t.Fatalf("Clean() = true for a wholly-unowned graph (%s)", d.Summary())
 		}
 		if d.UnownedCodeNodes != 1 {
 			t.Fatalf("unowned = %d, want 1", d.UnownedCodeNodes)
@@ -151,6 +153,71 @@ func TestPrefixDiagnosticsMixed(t *testing.T) {
 			t.Fatalf("samples = %d, want 3 (the limit)", len(d.UnownedSamples))
 		}
 	})
+}
+
+// TestPrefixDiagnostics_StrictClean pins D-14: Clean holds only when the
+// audit found neither an unowned nor a misprefixed node. A wholly unowned
+// graph used to pass as single-repo mode; it no longer does.
+func TestPrefixDiagnostics_StrictClean(t *testing.T) {
+	owned := &Node{ID: "r1/a.go::A", FilePath: "r1/a.go", RepoPrefix: "r1"}
+	unowned := &Node{ID: "a.go::A", FilePath: "a.go"}
+	misprefixed := &Node{ID: "a.go::A", FilePath: "a.go", RepoPrefix: "r1"}
+	global := &Node{ID: "dep::zap::Logger"}
+
+	d := AuditNodePrefixes([]*Node{unowned, global}, 3)
+	if d.UnownedCodeNodes != 1 || d.Clean() {
+		t.Fatalf("unowned=%d clean=%v, want 1/false (%s)", d.UnownedCodeNodes, d.Clean(), d.Summary())
+	}
+	d = AuditNodePrefixes([]*Node{owned, global}, 3)
+	if !d.Clean() {
+		t.Fatalf("Clean() = false for a wholly owned graph (%s)", d.Summary())
+	}
+	d = AuditNodePrefixes([]*Node{owned, misprefixed, global}, 3)
+	if d.MisprefixedNodes != 1 || d.Clean() {
+		t.Fatalf("misprefixed=%d clean=%v, want 1/false (%s)", d.MisprefixedNodes, d.Clean(), d.Summary())
+	}
+}
+
+// TestPrefixDiagnostics_EnumeratedExemptions pins the D-14 exemption list:
+// an empty-FilePath node escapes the audit only through an enumerated global
+// namespace (unowned) or its own repo's "<prefix>::" namespace (owned).
+// Every other empty-FilePath node is audited like a file-backed one.
+func TestPrefixDiagnostics_EnumeratedExemptions(t *testing.T) {
+	exempt := []*Node{
+		{ID: "dep::x", Kind: KindFunction},
+		{ID: "module::x", Kind: KindModule},
+		{ID: "stdlib::x", Kind: KindFunction},
+		{ID: "external::x", Kind: KindFunction},
+		{ID: "builtin::x", Kind: KindBuiltin},
+		{ID: "string::x", Kind: KindConstant},
+		{ID: "r1::builtin::len", Kind: KindBuiltin, RepoPrefix: "r1"},
+		{ID: "contract::http::GET::/x", Kind: KindContract, FilePath: "r1/api.go", RepoPrefix: "r1"},
+		{ID: "contract-bridge::a::b", Kind: KindContractBridge, FilePath: "contracts://bridges", RepoPrefix: "r1"},
+		{ID: "topic::nats::x", Kind: KindTopic, FilePath: "r1/main.go", RepoPrefix: "r1"},
+		{ID: "rationale::m1", Kind: KindRationale, FilePath: ".gortex/rationale", RepoPrefix: "r1"},
+		{ID: "external::go:fmt::Println", Kind: KindFunction, FilePath: "external::go:fmt"},
+		{ID: "external-call::npm:lodash", Kind: KindModule, FilePath: "external-call::npm:lodash"},
+	}
+	for _, n := range exempt {
+		if got := ClassifyNodePrefix(n); got != "" {
+			t.Errorf("ClassifyNodePrefix(%s) = %q, want exempt", n.ID, got)
+		}
+	}
+
+	mystery := &Node{ID: "mystery::x", Kind: KindFunction}
+	if got := ClassifyNodePrefix(mystery); got != PrefixIssueUnowned {
+		t.Errorf("ClassifyNodePrefix(%s) = %q, want %q", mystery.ID, got, PrefixIssueUnowned)
+	}
+	foreign := &Node{ID: "other::x", Kind: KindFunction, RepoPrefix: "r1"}
+	if got := ClassifyNodePrefix(foreign); got != PrefixIssueMisprefixed {
+		t.Errorf("ClassifyNodePrefix(%s) = %q, want %q", foreign.ID, got, PrefixIssueMisprefixed)
+	}
+
+	d := AuditNodePrefixes(append(append([]*Node{}, exempt...), mystery, foreign), 5)
+	if d.UnownedCodeNodes != 1 || d.MisprefixedNodes != 1 || d.OwnedCodeNodes != 0 {
+		t.Fatalf("owned=%d unowned=%d misprefixed=%d, want 0/1/1 (%s)",
+			d.OwnedCodeNodes, d.UnownedCodeNodes, d.MisprefixedNodes, d.Summary())
+	}
 }
 
 // TestGraphPrefixDiagnostics exercises the in-memory shard walk against the

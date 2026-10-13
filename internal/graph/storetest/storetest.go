@@ -222,6 +222,12 @@ func testPrefixDiagnostics(t *testing.T, factory Factory) {
 	// never carry its prefix. Auditing it reported a misprefixed node on every
 	// healthy graph that had a repo-scoped memory.
 	s.AddNode(mkRepoNode("rationale::mem3539475d73f80040", "why the resolver stubs res://", ".gortex/rationale", "r1", graph.KindRationale))
+	// D-14: an empty-FilePath node is exempt only through an enumerated
+	// global namespace (unowned) or its own repo's "<prefix>::" namespace
+	// (owned). An unlisted namespace is audited, so mystery:: counts as
+	// unowned while the r1:: synthetic builtin changes nothing.
+	s.AddNode(mkNode("mystery::Ghost", "Ghost", "", graph.KindFunction))
+	s.AddNode(mkRepoNode("r1::builtin::go::len", "len", "", "r1", graph.KindBuiltin))
 
 	d, ok := graph.ReadPrefixDiagnostics(s, 5)
 	if !ok {
@@ -231,8 +237,8 @@ func testPrefixDiagnostics(t *testing.T, factory Factory) {
 	if d.OwnedCodeNodes != 1 {
 		t.Errorf("OwnedCodeNodes = %d, want 1 (%s)", d.OwnedCodeNodes, d.Summary())
 	}
-	if d.UnownedCodeNodes != 1 {
-		t.Errorf("UnownedCodeNodes = %d, want 1 — synthetic virtual paths must not count (%s)",
+	if d.UnownedCodeNodes != 2 {
+		t.Errorf("UnownedCodeNodes = %d, want 2 — synthetic virtual paths must not count, an unlisted empty-path namespace must (%s)",
 			d.UnownedCodeNodes, d.Summary())
 	}
 	if d.MisprefixedNodes != 1 {
@@ -244,8 +250,10 @@ func testPrefixDiagnostics(t *testing.T, factory Factory) {
 	if d.Clean() {
 		t.Errorf("Clean() = true for a mixed, misprefixed graph (%s)", d.Summary())
 	}
-	if len(d.UnownedSamples) != 1 || d.UnownedSamples[0] != "b.go::Unowned" {
-		t.Errorf("UnownedSamples = %v, want [b.go::Unowned]", d.UnownedSamples)
+	samples := append([]string(nil), d.UnownedSamples...)
+	sort.Strings(samples)
+	if len(samples) != 2 || samples[0] != "b.go::Unowned" || samples[1] != "mystery::Ghost" {
+		t.Errorf("UnownedSamples = %v, want [b.go::Unowned mystery::Ghost]", d.UnownedSamples)
 	}
 }
 
