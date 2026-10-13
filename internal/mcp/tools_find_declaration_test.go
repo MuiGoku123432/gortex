@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -274,4 +275,18 @@ func consumer() int { return uniqueDecl() + uniqueDecl() }
 	names := declNames(payload)
 	require.Contains(t, names, "uniqueDecl")
 	require.Equal(t, 2, names["uniqueDecl"], "two use sites must group under one declaration")
+}
+
+// TestFindDeclaration_RegexFiltersBeforeLimit: the regex branch filters by
+// scope before it caps at limit, so each repository's scoped search finds its
+// own use site even when the other repository's hit comes first (WR-05).
+func TestFindDeclaration_RegexFiltersBeforeLimit(t *testing.T) {
+	srv, _ := newTwoRepoServer(t)
+	for _, repo := range []string{"alpha", "beta"} {
+		ctx := withSourceScopeRequest(context.Background(), makeReq("find_declaration", map[string]any{"repo": repo}))
+		matches, err := srv.findUseSiteMatches(ctx, "func ", true, "", 1)
+		require.NoError(t, err)
+		require.Lenf(t, matches, 1, "a %s-scoped regex search with limit 1 must keep its own match", repo)
+		assert.Truef(t, strings.HasPrefix(matches[0].Path, repo+"/"), "%s-scoped match %s", repo, matches[0].Path)
+	}
 }

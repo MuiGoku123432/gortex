@@ -170,8 +170,13 @@ func (s *Server) findUseSiteMatches(ctx context.Context, useSite string, isRegex
 			matches []trigram.Match
 			err     error
 		)
+		// Filter before limit, as the literal branch does: GrepRegexp's
+		// global cap ran before the scope filter, so a scoped caller whose
+		// first raw hits were out of scope got "no use sites matched". Each
+		// repository is still capped at limit, so the scan cost is unchanged
+		// (WR-05).
 		if s.multiIndexer != nil {
-			matches, err = s.multiIndexer.GrepRegexp(useSite, pathPrefix, limit)
+			matches, err = s.multiIndexer.GrepRegexpForRepos(useSite, pathPrefix, nil, limit)
 		} else if s.indexer != nil {
 			matches, err = s.indexer.GrepRegexp(useSite, pathPrefix, limit)
 		}
@@ -182,6 +187,9 @@ func (s *Server) findUseSiteMatches(ctx context.Context, useSite string, isRegex
 		for _, m := range matches {
 			if allowed(m) {
 				kept = append(kept, m)
+			}
+			if len(kept) >= limit {
+				break
 			}
 		}
 		return kept, nil
