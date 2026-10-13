@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-19-PLAN.md
-last_updated: "2026-10-13T21:06:08.567Z"
+stopped_at: Completed 04-20-PLAN.md
+last_updated: "2026-10-13T21:31:55.760Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 04 execution started
-state_head: 9900a27be3d2c0eeb47227cc513828203b878625
+state_head: 13d9d1eb6e66c9801fcf3016d6b93f66e1b21476
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 52
-  completed_plans: 49
+  completed_plans: 50
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 2 of 22
+Plan: 3 of 22
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 04 execution started
 
@@ -110,6 +110,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P17 | 45min | 2 tasks | 8 files |
 | Phase 04 P18 | 24min | 2 tasks | 6 files |
 | Phase 04 P19 | 19min | 3 tasks | 3 files |
+| Phase 04 P20 | 35min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -220,6 +221,7 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-18: Kept the live RLock read over pushing roots to Indexers at publication points — the watcher needs later-tracked roots on already-built Indexers
 - [Phase 04]: 04-19: explore refuses unbound multi-repo artifact-probe requests from task text alone (D-13) and admits lane matches through filterTextMatchesByResolvedScope (D-16)
 - [Phase 04]: 04-19: source-channel inventory is a parse-level test (Grep* calls + filesystem walks keyed by enclosing function)
+- [Phase 04]: 04-20: nested-root pruning reads only live MultiIndexer state (mi.repos + reference-counted mi.pendingRoots declared by indexMultiRepo and the daemon warmup via DeclarePendingRoots) under one mi.mu.RLock; the per-Indexer config copy is removed (CR-01, WR-01)
 
 ### Pending Todos
 
@@ -248,6 +250,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T21:06:08.509Z
-Stopped at: Completed 04-19-PLAN.md
+Last session: 2026-10-13T21:31:55.702Z
+Stopped at: Completed 04-20-PLAN.md
 Resume file: None
