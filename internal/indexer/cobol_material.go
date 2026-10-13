@@ -3,6 +3,7 @@ package indexer
 import (
 	"encoding/binary"
 	"encoding/json"
+	"strconv"
 
 	"github.com/zeebo/blake3"
 
@@ -69,7 +70,28 @@ func (idx *Indexer) repoExtractorVersionsSnapshot() map[string]int {
 	return out
 }
 
-// merkleSaltFor is a RED stub; the COBOL material salt is not wired yet.
+// merkleSaltFor is the Merkle leaf salt for one repository-relative path:
+// the package-level merkleSaltFor plus, for a COBOL file, this repository's
+// material fingerprint (D-06).
+//
+// PURPOSE — Merkle mode never consults the stored _cobol_material, so
+// without this an index.cobol edit or an extractor or parser identity change
+// with unchanged bytes would keep serving stale COBOL observations there.
+//
+// RATIONALE — the salt is part of the leaf, so a fingerprint change re-flags
+// exactly the COBOL leaves without re-reading them, and the next pass saves
+// the new salt, so the restage happens once. Other languages' salts are
+// unchanged.
+//
+// KEYWORDS — merkle, salt, cobol, material, fingerprint, restage
 func (idx *Indexer) merkleSaltFor(rel string) string {
-	return merkleSaltFor(rel)
+	salt := merkleSaltFor(rel)
+	if ExtractorLangForFile(rel) != "cobol" {
+		return salt
+	}
+	fp, ok := idx.cobolMaterial()
+	if !ok {
+		return salt
+	}
+	return salt + "|cobol-material@" + strconv.FormatInt(fp, 10)
 }

@@ -145,8 +145,9 @@ func TestCobolLifecycle_UnrelatedConfig(t *testing.T) {
 // _cobol_material (and, in Merkle mode, a different fingerprint in every
 // COBOL leaf salt) plus one program node carrying the previous
 // prov_extractor_version. One full-root reindex must restage exactly the
-// COBOL files, restore the current values, re-stamp the stored key, and
-// equal the clean build.
+// COBOL files, restore the current values, re-stamp the mode's record of
+// the fingerprint, and equal the clean build; a second pass restages
+// nothing.
 func TestCobolLifecycle_VersionChange(t *testing.T) {
 	for _, mode := range []string{"mtime", "merkle"} {
 		t.Run(mode, func(t *testing.T) {
@@ -212,15 +213,21 @@ func TestCobolLifecycle_VersionChange(t *testing.T) {
 			restored := env.store.GetNode(programID)
 			require.NotNil(t, restored)
 			assert.Equal(t, currentVersion, restored.Meta["prov_extractor_version"])
-			stored, ok := env.storedCobolMaterial(t, "lifea")
-			require.True(t, ok)
-			assert.Equal(t, int(current), stored)
+			// Each mode re-stamps its own record: the row on the mtime path,
+			// the leaf salt in Merkle mode (which never reads the row).
 			if mode == "merkle" {
 				tree, err := merkle.Load(treePath)
 				require.NoError(t, err)
 				assert.Contains(t, tree.Files["cobol/main.cbl"].Salt, "|cobol-material@"+strconv.FormatInt(current, 10))
+			} else {
+				stored, ok := env.storedCobolMaterial(t, "lifea")
+				require.True(t, ok)
+				assert.Equal(t, int(current), stored)
 			}
 			env.requireCleanEquivalent(t)
+			again, err := env.mi.IncrementalReindexRepo("lifea", nil)
+			require.NoError(t, err)
+			assert.Zero(t, again.StaleFileCount, "the restage happens once")
 		})
 	}
 }
