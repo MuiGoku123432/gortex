@@ -321,8 +321,10 @@ func TestFilterTextMatchesByResolvedScope_FailsClosed(t *testing.T) {
 
 	// Active narrowing (workspace ceiling + repo allow-set): the
 	// unattributable ghost match is dropped; the node-backed real match
-	// survives.
-	narrowed := srv.filterTextMatchesByResolvedScope(context.Background(), in, ResolvedScope{
+	// survives. The middleware stores the request; the per-path source gate
+	// reads it.
+	betaCtx := withSourceScopeRequest(context.Background(), makeReq("search_text", map[string]any{"repo": "beta"}))
+	narrowed := srv.filterTextMatchesByResolvedScope(betaCtx, in, ResolvedScope{
 		WorkspaceID: "shared",
 		RepoAllow:   map[string]bool{"beta": true},
 	})

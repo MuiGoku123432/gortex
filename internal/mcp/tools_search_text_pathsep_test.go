@@ -121,8 +121,10 @@ func TestFilterTextMatchesByResolvedScope_BelowRepoRoot(t *testing.T) {
 		require.NotNil(t, g.GetNode(nodeKey),
 			"fixture invariant: several tracked repos mint prefixed node ids")
 
+		// The middleware stores the request; the per-path source gate reads it.
+		ctx := withSourceScopeRequest(context.Background(), makeReq("search_text", map[string]any{"repo": "beta"}))
 		got := srv.filterTextMatchesByResolvedScope(
-			context.Background(),
+			ctx,
 			[]trigram.Match{{Path: "beta/pkg/sub/main.go", Line: 3, Text: "// marker"}},
 			ResolvedScope{WorkspaceID: "shared", RepoAllow: map[string]bool{"beta": true}},
 		)
