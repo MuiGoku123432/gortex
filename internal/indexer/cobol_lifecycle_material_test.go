@@ -3,8 +3,10 @@
 package indexer
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -230,4 +232,132 @@ func TestCobolLifecycle_VersionChange(t *testing.T) {
 			assert.Zero(t, again.StaleFileCount, "the restage happens once")
 		})
 	}
+}
+
+// newCobolGitEnv tracks lifea as a git repository whose one commit holds the
+// corpus; edits are written to the working tree after that commit, before
+// tracking, so they start out uncommitted.
+func newCobolGitEnv(t *testing.T, edits map[string]string) *cobolLifecycleEnv {
+	t.Helper()
+	requireGit(t)
+	env := newCobolLifecycleEnv(t, map[string]map[string]string{"lifea": maps.Clone(cobolLifecycleRepoA)})
+	root := env.roots["lifea"]
+	gitInitRepo(t, root)
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-q", "-m", "init")
+	for rel, src := range edits {
+		env.write(t, "lifea", rel, src)
+	}
+	env.track(t, "lifea")
+	return env
+}
+
+// headMoveTail runs what the git watcher and the poller run after HEAD
+// moves: lifea's reconcileRepoIndexState.
+func (env *cobolLifecycleEnv) headMoveTail(t *testing.T) {
+	t.Helper()
+	idx := env.mi.GetIndexer("lifea")
+	require.NotNil(t, idx)
+	idx.reconcileRepoIndexState(context.Background(), idx.RootPath())
+}
+
+// requireRootCleanEquivalent requires env's dump to equal a clean build, in
+// a fresh store, of the same repository roots, so the clean build sees the
+// same git HEAD and working tree.
+func (env *cobolLifecycleEnv) requireRootCleanEquivalent(t *testing.T) {
+	t.Helper()
+	clean := newCobolLifecycleEnv(t, nil)
+	clean.roots, clean.repos = env.roots, env.repos
+	clean.track(t, slices.Sorted(maps.Keys(env.repos))...)
+	requireSameDump(t, clean.dump(t), env.dump(t))
+}
+
+// requireRevision checks the one revision stamp a node carries: commit, or
+// the absence reason when commit is "".
+func (env *cobolLifecycleEnv) requireRevision(t *testing.T, id, commit, absence string) {
+	t.Helper()
+	n := env.store.GetNode(id)
+	require.NotNil(t, n, id)
+	if commit != "" {
+		assert.Equal(t, commit, n.Meta["prov_vcs_commit"], id)
+		assert.NotContains(t, n.Meta, "prov_vcs_commit_absence", id)
+		return
+	}
+	assert.Equal(t, absence, n.Meta["prov_vcs_commit_absence"], id)
+	assert.NotContains(t, n.Meta, "prov_vcs_commit", id)
+}
+
+// TestCobolLifecycle_HeadMove proves D-17: when HEAD moves and a file's
+// bytes do not, the HEAD-move tail re-stamps prov_vcs_commit or
+// prov_vcs_commit_absence without re-extraction, and the dump (which
+// compares prov_vcs_commit) equals a clean build at the new HEAD.
+func TestCobolLifecycle_HeadMove(t *testing.T) {
+	const mainID, subID = "lifea/cobol/main.cbl::MAINPGM", "lifea/cobol/sub.cbl::SUBPGM"
+
+	t.Run("commit_other_file", func(t *testing.T) {
+		env := newCobolGitEnv(t, nil)
+		root := env.roots["lifea"]
+		env.write(t, "lifea", "cobol/sub.cbl", cobolLifecycleEdits["cobol/sub.cbl"])
+		runGit(t, root, "commit", "-q", "-am", "edit sub")
+		env.reindex(t, "lifea")
+		env.headMoveTail(t)
+		head := headCommit(t, root)
+		env.requireRevision(t, mainID, head, "")
+		env.requireRevision(t, subID, head, "")
+		env.requireRootCleanEquivalent(t)
+	})
+
+	t.Run("commit_without_change", func(t *testing.T) {
+		env := newCobolGitEnv(t, map[string]string{"cobol/main.cbl": cobolLifecycleEdits["cobol/main.cbl"]})
+		env.requireRevision(t, mainID, "", "working_tree_differs_from_head")
+		root := env.roots["lifea"]
+		runGit(t, root, "commit", "-q", "-am", "commit main")
+		env.headMoveTail(t)
+		env.requireRevision(t, mainID, headCommit(t, root), "")
+		env.requireRootCleanEquivalent(t)
+	})
+
+	t.Run("dirty_file_stays_absent", func(t *testing.T) {
+		env := newCobolGitEnv(t, map[string]string{"cobol/sub.cbl": cobolLifecycleEdits["cobol/sub.cbl"]})
+		root := env.roots["lifea"]
+		runGit(t, root, "commit", "-q", "--allow-empty", "-m", "move head")
+		env.headMoveTail(t)
+		env.requireRevision(t, mainID, headCommit(t, root), "")
+		env.requireRevision(t, subID, "", "working_tree_differs_from_head")
+		env.requireRootCleanEquivalent(t)
+	})
+
+	t.Run("no_reextraction", func(t *testing.T) {
+		env := newCobolGitEnv(t, nil)
+		before := env.dump(t)
+		runGit(t, env.roots["lifea"], "commit", "-q", "--allow-empty", "-m", "move head")
+		env.headMoveTail(t)
+		after := env.dump(t)
+		require.Len(t, after.Rows, len(before.Rows))
+		split := func(rows []string) map[string]map[string]any {
+			out := make(map[string]map[string]any, len(rows))
+			for _, row := range rows {
+				cut := strings.LastIndex(row, "\x1f")
+				var meta map[string]any
+				require.NoError(t, json.Unmarshal([]byte(row[cut+1:]), &meta))
+				out[row[:cut]] = meta
+			}
+			return out
+		}
+		was, now := split(before.Rows), split(after.Rows)
+		changed := 0
+		for id, old := range was {
+			cur, ok := now[id]
+			require.True(t, ok, "row %q kept", id)
+			if old["prov_vcs_commit"] != cur["prov_vcs_commit"] {
+				changed++
+			}
+			for _, key := range []string{"prov_vcs_commit", "prov_vcs_commit_absence"} {
+				delete(old, key)
+				delete(cur, key)
+			}
+			assert.Equal(t, old, cur, "row %q changed beyond its revision stamp", id)
+		}
+		assert.Positive(t, changed, "the tail re-stamps at least one row")
+	})
 }
