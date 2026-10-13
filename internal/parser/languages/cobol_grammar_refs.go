@@ -48,8 +48,10 @@ func cobolReferences(w *cobolWalk, data *cobolDataIndex) {
 // unresolved::cobol::dynamic::program::<programID>::<key>[/<qualifier key>…]
 // with reason dynamic, plus a cobolDataReference with cobol_ref_role role. A
 // function_ is dynamic too, keyed by its text, with no data reference. Every
-// call edge records cobol_target_raw (as written) and cobol_name_norm. CICS
-// LINK, XCTL, and PROGRAM operands reuse it (03-08).
+// call edge records cobol_target_raw (as written) and cobol_name_norm. A
+// literal edge also keeps its original target in cobol_placeholder, so the
+// resolver can re-decide and the indexer restub it without re-normalizing
+// the name (D-18). CICS LINK, XCTL, and PROGRAM operands reuse it (03-08).
 func cobolCallTarget(w *cobolWalk, data *cobolDataIndex, from string, occurrence int, programID string, target int, kind graph.EdgeKind, role string) []*graph.Edge {
 	raw := w.text(target)
 	dynamic := "unresolved::cobol::dynamic::program::" + programID + "::"
@@ -83,6 +85,7 @@ func cobolCallTarget(w *cobolWalk, data *cobolDataIndex, from string, occurrence
 	} else {
 		// The resolver binds a nested program only from its container.
 		edge.Meta["cobol_caller_program"] = programID
+		edge.Meta["cobol_placeholder"] = to
 	}
 	edges := []*graph.Edge{edge}
 	if name != "" {
@@ -97,7 +100,10 @@ func cobolCallTarget(w *cobolWalk, data *cobolDataIndex, from string, occurrence
 // is copy, inc (the original bytes begin with -INC, which the Endevor
 // transform rewrote to COPY), idms (COPY IDMS [kind] name, keyed
 // idms/<kind key or _>/<key> with reason idms_dictionary_member), or
-// sql_include (SQLCA and SQLDA set sql_include_builtin).
+// sql_include (SQLCA and SQLDA set sql_include_builtin). Every form but
+// idms keeps its original target in cobol_placeholder, and an OF/IN library
+// adds cobol_copy_library_key (cobol-name-norm/1), so the resolver re-decides
+// and the indexer restubs from the original target (D-18, D-10).
 //
 // A COPY is a grammar extra whose Parent is arbitrary (Pitfall 3), so its
 // program is the innermost named program whose generated span contains its
@@ -167,6 +173,9 @@ func cobolCopy(w *cobolWalk, i int) {
 	edge.Meta["cobol_copy_form"] = form
 	edge.Meta["cobol_copy_member_raw"] = member
 	edge.Meta["cobol_name_norm"] = cobolNameNormRule
+	if form != "idms" {
+		edge.Meta["cobol_placeholder"] = to
+	}
 	switch {
 	case form == "idms":
 		edge.Meta["cobol_unresolved_reason"] = "idms_dictionary_member"
@@ -179,6 +188,7 @@ func cobolCopy(w *cobolWalk, i int) {
 		}
 	case len(words) > 1:
 		edge.Meta["cobol_copy_library"] = words[1]
+		edge.Meta["cobol_copy_library_key"] = cobolNameNorm(words[1])
 	}
 }
 
