@@ -186,7 +186,7 @@ Plans:
   4. Incremental reconciliation and a clean rebuild produce the same canonical active deterministic subgraph for identical final inputs.
   5. Resolution and all downstream surfaces fail closed on missing scope, reject unsupported same-name cross-repository binding, and report zero unowned or misprefixed active nodes for the acceptance corpus.
 
-**Plans**: 11/16 plans executed
+**Plans**: 12/16 plans executed
 
 Plans 04-11 to 04-16 are the second halves of 04-01, 04-03, 04-05, 04-06, 04-08, and 04-09, split so every plan fits the 100k smart-zone budget; run them in wave order, not number order.
 
@@ -216,7 +216,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 04-08-PLAN.md -- Incremental tracer: CR-01 restub, reconcile at every mutation tail, rerun/edit/delete/restore sequences
+- [x] 04-08-PLAN.md -- Incremental tracer: CR-01 restub, reconcile at every mutation tail, rerun/edit/delete/restore sequences
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -340,7 +340,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | 1. General Neo4j Projection Command | 7/7 | Complete    | 2026-09-22 |
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
 | 3. Deterministic COBOL and Mainframe Breadth | 17/17 | In Progress|  |
-| 4. Stable Incremental and Cross-Repository Lifecycle | 11/16 | In Progress|  |
+| 4. Stable Incremental and Cross-Repository Lifecycle | 12/16 | In Progress|  |
 | 5. Explicit Unresolved Evidence | 0/TBD | Deferred: Phase 4 | - |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |
 | 7. AI Contract, Policy, and Evaluation Foundation | 0/TBD | Deferred: Phase 6 | - |
