@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -554,4 +555,9 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "\n[gortex] received %s, shutting down\n", sig)
 		return nil
 	}
+}
+
+// indexEmbeddedRepo is RED scaffolding; the GREEN commit implements it.
+func indexEmbeddedRepo(ctx context.Context, mi *indexer.MultiIndexer, path string) (*indexer.IndexResult, string, error) {
+	return nil, "", nil
 }
