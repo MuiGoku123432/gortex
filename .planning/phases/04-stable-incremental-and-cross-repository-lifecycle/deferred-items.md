@@ -9,3 +9,8 @@
   status: open
   **What:** In `CrossRepoResolver.resolveEdge`, `tryRemoteStitch` runs whenever `resolveFunctionCall` leaves `e.To` unchanged, and that includes the new D-12 ambiguity refusal. Its evidence gate refuses bare names. Proxy-edge minting is off by default.
   **Why deferred:** This is behavior that already existed and sits outside D-12's local fallback. Decide whether local ambiguity should block the remote stitch when cross-daemon proxy edges are in scope.
+
+- Stale cross_repo_calls parallel edge when a cross-repository COBOL CALL unbinds without eviction (found during 04-15)
+  status: open
+  **What:** 04-15 makes `Resolver.reconcileCobol` run `DetectCrossRepoEdgesForReindexes` on its rebound batch, so a CALL bound across repositories gets its `cross_repo_calls` edge on both the clean and incremental paths. When such a CALL later returns to its placeholder and neither endpoint file is evicted, the parallel edge stays. For example, crossa adds its own XPGM, so the CALL becomes ambiguous. The parallel layer has always relied on `EvictFile` to drop stale edges, and generic cross-repository rebinds behave the same way.
+  **Why deferred:** No D-04 sequence in 04-15 reaches this case. Deleting the target evicts the parallel edge. A fix needs a store-level removal of the old `(From, Line, cross_repo_calls, OldTo)` edge on unbind. It belongs with the Phase 6 generic cross-repository re-check (research Open Question 4).
