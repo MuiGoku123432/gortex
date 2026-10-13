@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zzet/gortex/internal/config"
+	"github.com/zzet/gortex/internal/excludes"
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/graph/store_sqlite"
 	"github.com/zzet/gortex/internal/search"
@@ -93,6 +94,11 @@ func TestNestedTrackedRoot_IndexedOnce(t *testing.T) {
 			require.True(t, alphaIdx.shouldExclude(betaDir, alphaDir, true))
 			require.True(t, alphaIdx.shouldExclude(filepath.Join(betaDir, "main.go"), alphaDir, false))
 			require.False(t, alphaIdx.shouldExclude(filepath.Join(alphaDir, "main.go"), alphaDir, false))
+			// The explicit-path probe skips directory pruning and takes the
+			// regular-file fast path, so it must refuse the nested file too.
+			skip, ok := alphaIdx.PathIndexability("nested/main.go")
+			require.True(t, ok)
+			require.True(t, skip.Skipped && skip.ByRule, "alpha must report beta's file as excluded")
 
 			betaIdx := mi.GetIndexer("beta")
 			require.NotNil(t, betaIdx)
@@ -100,4 +106,49 @@ func TestNestedTrackedRoot_IndexedOnce(t *testing.T) {
 				"an ancestor root must never exclude the nested repository's own files")
 		})
 	}
+}
+
+// trackNestedLater indexes alpha alone (beta is not in the config, so alpha's
+// config seed does not list it), then tracks beta without touching the
+// config.
+func trackNestedLater(t *testing.T) (mi *MultiIndexer, store *store_sqlite.Store, alphaDir, betaDir string) {
+	t.Helper()
+	alphaDir, betaDir = writeNestedTrackedRepos(t)
+	mi, store = newNestedTrackedMulti(t, []config.RepoEntry{
+		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+	})
+	_, err := mi.IndexScoped("", "")
+	require.NoError(t, err)
+	require.NotNil(t, store.GetNode("alpha/nested/main.go::ZebraWidget"),
+		"precondition: alpha indexed the nested files before beta was tracked")
+	_, err = mi.TrackRepoCtx(context.Background(),
+		config.RepoEntry{Path: betaDir, Name: "beta", Workspace: "shared"})
+	require.NoError(t, err)
+	return mi, store, alphaDir, betaDir
+}
+
+// TestNestedTrackedRoot_OuterReindexDropsDuplicates: alpha was indexed before
+// beta was tracked, so it holds duplicates of beta's file. Its next full
+// reindex consults the registered roots live and drops them (D-16, SEC-01).
+func TestNestedTrackedRoot_OuterReindexDropsDuplicates(t *testing.T) {
+	mi, store, _, _ := trackNestedLater(t)
+	_, err := mi.IndexRepo("alpha")
+	require.NoError(t, err)
+	requireNestedIndexedOnce(t, store)
+}
+
+// TestNestedTrackedRoot_WatcherRefusesNestedEvents: the live path does not
+// route through shouldExclude, so alpha's watcher must refuse beta's paths on
+// its own, immediately after beta is tracked and without an alpha reindex.
+func TestNestedTrackedRoot_WatcherRefusesNestedEvents(t *testing.T) {
+	mi, _, alphaDir, betaDir := trackNestedLater(t)
+
+	wa := &Watcher{indexer: mi.GetIndexer("alpha"), excludes: excludes.New(excludes.Builtin)}
+	require.True(t, wa.isExcluded(betaDir))
+	require.True(t, wa.isExcluded(filepath.Join(betaDir, "main.go")))
+	require.False(t, wa.isExcluded(filepath.Join(alphaDir, "main.go")))
+
+	wb := &Watcher{indexer: mi.GetIndexer("beta"), excludes: excludes.New(excludes.Builtin)}
+	require.False(t, wb.isExcluded(filepath.Join(betaDir, "main.go")),
+		"beta's own watcher must keep admitting its files")
 }
