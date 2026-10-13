@@ -350,3 +350,60 @@ func TestCobolLifecycle_Interrupted(t *testing.T) {
 	}
 	requireSameDump(t, clean, env.requireCleanEquivalent(t))
 }
+
+// TestCobolLifecycle_OverCap caps lifea's affected-by fan-out at one file.
+// Three programs include CUSTREC and call SUBPGM. Editing the copybook's
+// member layout never reaches the affected-by pass (a program references a
+// copybook only through its imports edge, which the COBOL reconcile owns);
+// renaming SUBPGM removes a symbol three files reference, which exceeds the
+// cap. Either way the pass must not truncate (D-08) and each dump equals the
+// clean build of the edited files.
+func TestCobolLifecycle_OverCap(t *testing.T) {
+	repos := make(map[string]map[string]string, len(cobolLifecycleRepos))
+	for name, files := range cobolLifecycleRepos {
+		repos[name] = maps.Clone(files)
+	}
+	repos["lifea"][".gortex.yaml"] = "index:\n  affected_by_reresolve_max: 1\n"
+	for _, name := range []string{"PROGB", "PROGC"} {
+		repos["lifea"]["cobol/"+strings.ToLower(name)+".cbl"] = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ` + name + `.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CUSTREC.
+       PROCEDURE DIVISION.
+       ` + name + `-PARA.
+           CALL 'SUBPGM'.
+           GOBACK.
+`
+	}
+	env := newCobolLifecycleEnv(t, repos)
+	env.track(t, "lifea", "lifeb")
+	idx := env.mi.GetIndexer("lifea")
+	require.NotNil(t, idx)
+	var mu sync.Mutex
+	var affected []string
+	idx.incrementalCatchupHook = func(kind string, files []string) {
+		if kind != "affected_by" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		affected = append(affected, files...)
+	}
+
+	env.write(t, "lifea", "copy/custrec.cpy", `       01 CUST-REC.
+          05 CUST-KEY PIC X(8).
+          05 CUST-ID PIC X(12).
+`)
+	env.reindex(t, "lifea")
+	env.requireCleanEquivalent(t)
+
+	env.write(t, "lifea", "cobol/sub.cbl", strings.Replace(cobolLifecycleRepoA["cobol/sub.cbl"],
+		"PROGRAM-ID. SUBPGM.", "PROGRAM-ID. SUBPGX.", 1))
+	env.reindex(t, "lifea")
+	env.requireCleanEquivalent(t)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"lifea/cobol/main.cbl", "lifea/cobol/progb.cbl", "lifea/cobol/progc.cbl"},
+		appendUniqueSorted(nil, affected...), "the affected set above the cap of 1 must not be truncated")
+}

@@ -201,10 +201,11 @@ func TestAffectedBy_SidecarDiscovery_SQLite(t *testing.T) {
 		"the sidecar-discovered caller must be re-resolved to the fresh F")
 }
 
-// TestAffectedBy_CapBoundsFanout configures a fan-out cap of 1 with
-// three referencing files. The live truncation warning must report the
-// exact bounded set and the two files it dropped.
-func TestAffectedBy_CapBoundsFanout(t *testing.T) {
+// TestAffectedBy_CapEscalates configures a fan-out cap of 1 with three
+// referencing files. Above the cap the pass resolves the full affected set
+// instead of truncating it (D-08): one Info entry reports the counts, and
+// every caller binds to the fresh F.
+func TestAffectedBy_CapEscalates(t *testing.T) {
 	dir := t.TempDir()
 	aPath := filepath.Join(dir, "a.go")
 	writeFile(t, aPath, "package p\n\nfunc F(x int) int { return x }\n")
@@ -227,12 +228,18 @@ func TestAffectedBy_CapBoundsFanout(t *testing.T) {
 	_, err = idx.IncrementalReindexPaths(dir, []string{aPath})
 	require.NoError(t, err)
 
-	entries := observed.FilterMessage("affected-by: re-resolve set truncated").All()
+	entries := observed.FilterMessage("affected-by: cap exceeded, resolving full affected set").All()
 	require.Len(t, entries, 1)
+	assert.Equal(t, zap.InfoLevel, entries[0].Level)
 	fields := entries[0].ContextMap()
 	assert.EqualValues(t, 3, fields["affected"])
 	assert.EqualValues(t, 1, fields["cap"])
-	assert.EqualValues(t, 2, fields["dropped"])
+	assert.Equal(t, "a.go", fields["file"])
+
+	newFID := fnNodeID(t, g, "a.go", "F")
+	for file, caller := range map[string]string{"b.go": "CallerB", "c.go": "CallerC", "d.go": "CallerD"} {
+		assert.Equal(t, newFID, callTargetFrom(t, g, fnNodeID(t, g, file, caller)), caller)
+	}
 }
 
 // TestAffectedBy_DeferredBatchPath_NoFanout proves the batch guard: a
@@ -261,6 +268,6 @@ func TestAffectedBy_DeferredBatchPath_NoFanout(t *testing.T) {
 	bumpMtime(t, aPath, "package p\n\nfunc F(x int, y int) int { return x + y }\n")
 	require.NoError(t, idx.IndexFile(aPath))
 
-	assert.Empty(t, observed.FilterMessage("affected-by: re-resolve set truncated").All(),
+	assert.Empty(t, observed.FilterMessage("affected-by: cap exceeded, resolving full affected set").All(),
 		"deferred-batch indexing must not fan out per file — the batch caller resolves once at the end")
 }
