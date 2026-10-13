@@ -3,6 +3,7 @@ package resolver
 import (
 	"iter"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -650,5 +651,104 @@ func TestCrossRepoResolveAll_Ambiguous(t *testing.T) {
 		assert.Equal(t, "unresolved::Helper", e.To)
 		assert.Equal(t, "ambiguous", e.Meta["resolution_unresolved_reason"], "ambiguity stamp persisted")
 		assert.Len(t, e.Meta["resolution_candidate_ids"], 2)
+	})
+}
+
+// TestCrossRepoResolveAll_AmbiguousMethod applies D-12 to every
+// cross-repository tier of resolveMethodCall: an ambiguous tier refuses and
+// stops the walk instead of falling through to a weaker tier.
+func TestCrossRepoResolveAll_AmbiguousMethod(t *testing.T) {
+	const callerID = "repoA/pkg/a.go::Caller"
+	addNode := func(g graph.Store, id string, kind graph.NodeKind, repo, receiver string) {
+		filePath, _, _ := strings.Cut(id, "::")
+		n := &graph.Node{ID: id, Kind: kind, Name: "Run", FilePath: filePath, Language: "go", RepoPrefix: repo}
+		if receiver != "" {
+			n.Meta = map[string]any{"receiver": receiver}
+		}
+		g.AddNode(n)
+	}
+	newGraph := func(reachable ...string) graph.Store {
+		g := graph.New()
+		g.AddNode(&graph.Node{ID: callerID, Kind: graph.KindFunction, Name: "Caller", FilePath: "repoA/pkg/a.go", Language: "go", RepoPrefix: "repoA"})
+		for _, repo := range reachable {
+			wireImport(g, "repoA/pkg/a.go", repo, repo+"/lib/import.go")
+		}
+		return g
+	}
+	callEdge := func(g graph.Store, receiverType string) *graph.Edge {
+		e := &graph.Edge{From: callerID, To: "unresolved::*.Run", Kind: graph.EdgeCalls, FilePath: "repoA/pkg/a.go", Line: 10}
+		if receiverType != "" {
+			e.Meta = map[string]any{"receiver_type": receiverType}
+		}
+		g.AddEdge(e)
+		return e
+	}
+
+	t.Run("exact_type", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoB/lib/b.go::T.Run", graph.KindMethod, "repoB", "T")
+		addNode(g, "repoC/lib/c.go::T.Run", graph.KindMethod, "repoC", "T")
+		// A weaker-tier candidate: falling through to the method-name tier
+		// would add this ID to the recorded candidates.
+		addNode(g, "repoB/lib/u.go::U.Run", graph.KindMethod, "repoB", "U")
+		edge := callEdge(g, "T")
+
+		stats := NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::*.Run", edge.To)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, []string{"repoB/lib/b.go::T.Run", "repoC/lib/c.go::T.Run"}, edge.Meta["resolution_candidate_ids"])
+		assert.Equal(t, 0, stats.Resolved)
+		assert.Equal(t, 1, stats.Unresolved)
+	})
+
+	t.Run("method_name", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoB/lib/b.go::S.Run", graph.KindMethod, "repoB", "S")
+		addNode(g, "repoC/lib/c.go::S.Run", graph.KindMethod, "repoC", "S")
+		edge := callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::*.Run", edge.To)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, []string{"repoB/lib/b.go::S.Run", "repoC/lib/c.go::S.Run"}, edge.Meta["resolution_candidate_ids"])
+
+		g = newGraph("repoB")
+		addNode(g, "repoB/lib/z.go::S.Run", graph.KindMethod, "repoB", "S")
+		addNode(g, "repoB/lib/a.go::S.Run", graph.KindMethod, "repoB", "S")
+		edge = callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "repoB/lib/a.go::S.Run", edge.To, "one repository binds the lowest ID")
+		assert.True(t, edge.CrossRepo)
+	})
+
+	t.Run("function_tier", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoB/lib/b.go::Run", graph.KindFunction, "repoB", "")
+		addNode(g, "repoC/lib/c.go::Run", graph.KindFunction, "repoC", "")
+		edge := callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::*.Run", edge.To)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, []string{"repoB/lib/b.go::Run", "repoC/lib/c.go::Run"}, edge.Meta["resolution_candidate_ids"])
+	})
+
+	t.Run("same_repo_unchanged", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoA/pkg/s.go::S.Run", graph.KindMethod, "repoA", "S")
+		addNode(g, "repoB/lib/b.go::S.Run", graph.KindMethod, "repoB", "S")
+		addNode(g, "repoC/lib/c.go::S.Run", graph.KindMethod, "repoC", "S")
+		edge := callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "repoA/pkg/s.go::S.Run", edge.To, "same-repository candidate binds first")
+		assert.False(t, edge.CrossRepo)
+		assert.NotContains(t, edge.Meta, "resolution_unresolved_reason")
 	})
 }
