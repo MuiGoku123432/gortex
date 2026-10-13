@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 04
-current_phase_name: stable-incremental-and-cross-repository-lifecycle
+current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-18-PLAN.md
-last_updated: "2026-10-13T20:24:39.687Z"
+stopped_at: Completed 04-19-PLAN.md
+last_updated: "2026-10-13T21:06:08.567Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 04 execution started
-state_head: 8068522adfe1b8882a4a49f23f82a7857566d241
+state_head: 9900a27be3d2c0eeb47227cc513828203b878625
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 52
-  completed_plans: 48
+  completed_plans: 49
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 ## Current Position
 
-Phase: 04 (stable-incremental-and-cross-repository-lifecycle) — READY TO EXECUTE
-Plan: 3 of 18
+Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
+Plan: 2 of 22
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 04 execution started
 
@@ -109,6 +109,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P10 | 28min | 3 tasks | 6 files |
 | Phase 04 P17 | 45min | 2 tasks | 8 files |
 | Phase 04 P18 | 24min | 2 tasks | 6 files |
+| Phase 04 P19 | 19min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -217,6 +218,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-17: every source surface admits paths only via requirePathSourceScope (lexical + physical owner); gate is independent of the 04-18 walk fix because pre-tracked duplicate nodes persist
 - [Phase 04]: 04-18: Nested tracked roots are pruned in shouldExclude, admitWalkFileKnownType's regular-file fast path, and Watcher.isExcluded; config roots seeded once per Indexer, registered roots read live under mi.mu.RLock (audited: no caller holds mi.mu)
 - [Phase 04]: 04-18: Kept the live RLock read over pushing roots to Indexers at publication points — the watcher needs later-tracked roots on already-built Indexers
+- [Phase 04]: 04-19: explore refuses unbound multi-repo artifact-probe requests from task text alone (D-13) and admits lane matches through filterTextMatchesByResolvedScope (D-16)
+- [Phase 04]: 04-19: source-channel inventory is a parse-level test (Grep* calls + filesystem walks keyed by enclosing function)
 
 ### Pending Todos
 
@@ -245,6 +248,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T19:01:42.462Z
-Stopped at: Completed 04-18-PLAN.md
+Last session: 2026-10-13T21:06:08.509Z
+Stopped at: Completed 04-19-PLAN.md
 Resume file: None
