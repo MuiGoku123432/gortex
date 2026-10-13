@@ -1,245 +1,217 @@
 ---
 phase: 04-stable-incremental-and-cross-repository-lifecycle
-reviewed: 2026-10-13T16:14:12Z
+reviewed: 2026-10-13T19:23:03Z
 depth: standard
-review_kind: incremental re-review of fix commits (diff base fec9f8e9)
-files_reviewed: 15
+review_kind: incremental re-review of gap-closure plans 04-17 and 04-18 (diff base d1d1a688)
+files_reviewed: 14
 files_reviewed_list:
-  - internal/graph/store_sqlite/migration_unprefixed_purge.go
-  - internal/graph/store_sqlite/migration_unprefixed_purge_test.go
-  - internal/indexer/cobol_lifecycle_incremental_test.go
-  - internal/indexer/cobol_lifecycle_material_test.go
+  - internal/indexer/indexer.go
   - internal/indexer/multi.go
-  - internal/indexer/repository_untrack.go
+  - internal/indexer/nested_tracked_root_test.go
+  - internal/indexer/walk_source.go
+  - internal/indexer/watcher.go
+  - internal/indexer/workspace_resolve.go
   - internal/mcp/source_scope.go
   - internal/mcp/source_scope_test.go
+  - internal/mcp/tools_coding.go
   - internal/mcp/tools_fileops.go
   - internal/mcp/tools_find_declaration.go
-  - internal/mcp/tools_find_declaration_test.go
   - internal/mcp/tools_search_text.go
   - internal/mcp/tools_search_text_test.go
-  - internal/resolver/cobol_references.go
-  - internal/resolver/resolver.go
+  - internal/mcp/tools_search_text_pathsep_test.go
 findings:
   critical: 1
-  warning: 4
-  info: 7
+  warning: 5
+  info: 6
   total: 12
 status: issues_found
 ---
 
-# Phase 4: Code Review Report (re-review after fixes)
+# Phase 4: Code Review Report (re-review of 04-17 / 04-18)
 
-**Reviewed:** 2026-10-13T16:14:12Z
-**Depth:** standard (incremental: `git diff fec9f8e9..HEAD`, with call chains followed into `resolveNodePath`, `Indexer.shouldPruneDir`, `store_sqlite.ReindexEdges`, `reach.BeginTopologyMutation`, `Store.ResolveMutex`, and the daemon warmup batch end)
-**Files Reviewed:** 15
+**Reviewed:** 2026-10-13T19:23:03Z
+**Depth:** standard (incremental: `git diff d1d1a688..HEAD`, with call chains followed into `GlobalConfig.ReposSnapshot`, `ConfigManager.ActiveRepos`, `MultiIndexer.indexMultiRepo`, `UntrackRepo`, `RepoForFile`, `LinkedWorktreeRoots`, `worktreeRootedPath`, and the explore text lanes)
+**Files Reviewed:** 14
 **Status:** issues_found
 
 ## Narrative Findings (AI reviewer)
 
 ## Summary
 
-This pass checked each fix commit against the finding it claims to close, then looked for new defects introduced by the fixes.
+Plan 04-17 adds a physical-owner check (`requirePathSourceScope`) to `resolveNodePath`, the relative branch of `resolveGraphPath`, `search_text`/`search_symbols` content fallback (`filterTextMatchesByResolvedScope`), and `find_declaration` (`findUseSiteMatches`). Plan 04-18 stops an outer repository's walk, admission probe, and watcher at a nested tracked root.
 
-| Prior finding | Verdict |
+**What holds:**
+
+- **Read gating.** The prior CR-01 read bypass is closed for every graph-backed reader that goes through `resolveNodePath` or `resolveGraphPath`: `get_symbol_source`, `batch_symbols`, `smart_context`, `get_editing_context`, nav, cfg, dataflow, manifest, and `rename_symbol`/scaffold. `search_text` and `find_declaration` are closed as well. All four new tests pass.
+- **Refusal text.** Refusals do not reveal whether an out-of-scope file exists. `errSourceOutOfScope` is the same generic not-found text whether the lexical gate or the physical-owner gate refuses, and `get_symbol_source` maps it to `symbol not found`.
+- **Lock order.** The new `mi.mu.RLock` in `nestedTrackedRootContains` is safe. I checked every `mi.mu.Lock` and `mi.mu.RLock` critical section in `internal/indexer`. None of them walks or calls `shouldExclude`, `PathIndexability`, or `Watcher.isExcluded`. The cold-index collector no longer holds `mi.mu` across the result channel (`multi.go:2297-2314`). `MultiWatcher.EnqueueFileMutation` releases `mw.mu` before it calls into the per-repo watcher. Nothing enforces this, though (IN-05).
+
+**What does not hold:** the walk-pruning half (04-18) takes its roots from the wrong source, and its state goes stale. I wrote throwaway probe tests and ran them with `go test -overlay`, so the tree was not modified. They show that:
+
+1. A nested repository defined under `projects:` is still indexed twice.
+2. An inactive config entry makes the nested files disappear from the graph entirely.
+3. After `UntrackRepo("beta")`, alpha keeps excluding beta's former files.
+
+The tests only exercise the config shape where the seed happens to be correct.
+
+### Status of prior findings (base fec9f8e9 review)
+
+| Prior finding | Status after 04-17/04-18 |
 |---|---|
-| CR-01: symlink and nested-checkout scope bypass | **Partially closed.** The symlink case is closed on `resolveFilePath` and on the absolute branch of `resolveGraphPath`. The nested-checkout case is closed only for `read_file`, `edit_file`, and `write_file`. It is still open on every graph-backed source surface. I confirmed this with a probe test run through `go test -overlay`, which left the tree untouched. See CR-01 below. |
-| CR-02: `search_text` and `find_declaration` scope gating | **Closed for unbound requests.** Both tools now refuse before searching. Bound narrowing is correct apart from the nested-checkout attribution (CR-01) and a truncation bug in the `find_declaration` regex branch (WR-03). |
-| CR-03: untrack restub and reconcile | **Closed on the normal path.** The restub uses a best-effort write that can silently drop the batch, after which the purge still deletes the edges (WR-01). |
-| WR-01: COBOL reconcile serialization, `ResetBatch`/`EndBatch` deferral | **The deferral is closed.** The new lock order holds: `r.mu` (store `ResolveMutex`), then `cobolReconcileMu`, then `mi.mu.RLock` and `repositoryMutationMu`. No caller takes `cobolReconcileMu` before any of those. I found no deadlock or lock-order inversion. The serialization half was already provided: every resolver on a store shares `store.ResolveMutex()` (`resolver.go:519-525`), so the new mutex is redundant for same-store passes (IN-07). The new deferred and reload call sites run outside the topology gate (WR-02). |
-| WR-02: v22 sidecar sweep | **Closed.** The `RowsAffected` early return matches the narrowed node rule, and the regression test asserts that the sidecar row survives. |
-| WR-03: reload re-decision | **Closed functionally.** The new reconcile runs outside the batch gate and the reach topology gate (WR-02). |
-| WR-04: `rename_symbol` existence oracle | **Not fixed.** Carried forward as accepted risk (04-12). |
-| IN-01..IN-06 | **Not addressed.** Carried forward; line numbers updated where code moved. |
+| CR-01: nested-checkout bypass on graph-backed reads, text search, rename writes | **Closed for the source-byte gate.** Root-cause pruning is only partial (see CR-01, WR-01..WR-03 below). One residual source surface is outside the changed files (WR-04). |
+| WR-01: untrack restub is best-effort before a destructive purge | **Open.** `repository_untrack.go` was not touched. |
+| WR-02: new COBOL reconcile call sites run outside the reach topology gate and batch gate | **Open.** Not touched. |
+| WR-03: `find_declaration` regex branch caps before the scope filter | **Open, and worse.** Re-raised as WR-05. |
+| WR-04: `rename_symbol` existence oracle (accepted risk, 04-12) | **Open (accepted).** It now also reveals whether a *nested* physical owner holds a reference. |
+| IN-01..IN-07 | **Open.** None of the touched code addresses them (IN-06 `get_editing_context` view branch still gates only `anchor.RepoPrefix`, `tools_coding.go:571-576`). |
 
 ## Critical Issues
 
-### CR-01: Nested-checkout scope bypass is still open on graph-backed source reads, text search, and rename writes (incomplete fix of prior CR-01)
+### CR-01: The nested-root walk seed comes from the wrong repository list: project-defined repos are still double-indexed, and inactive entries make files disappear
 
-**File:** `internal/mcp/tools_fileops.go:509` (`resolveNodePath`), `internal/mcp/tools_fileops.go:596-598` (relative branch of `resolveGraphPath`), `internal/mcp/tools_search_text.go:240-275` (`filterTextMatchesByResolvedScope`), `internal/mcp/tools_find_declaration.go:150-162` (`allowed`). Root cause: `internal/indexer/indexer.go:5819-5835` (`shouldPruneDir`).
+**File:** `internal/indexer/multi.go:376-392` (seed), consumed by `internal/indexer/indexer.go:5697-5710` (`inNestedTrackedRoot`)
 
-**Issue:** The fix added `requirePathSourceScope` only to `resolveFilePath` and to the absolute branch of `resolveGraphPath`. The outer repository's indexer still walks into a nested tracked root, because `shouldPruneDir` has no tracked-root check. Beta's files are therefore indexed a second time as **alpha-owned** nodes, for example `alpha/nested/main.go::ZebraWidget` with `RepoPrefix=alpha`. Every surface that gets its repository from the node or from the lexical match path then attributes beta's bytes to alpha:
+**Issue:** The seed is built from `mi.configMgr.Global().ReposSnapshot()`, which copies only the top-level `gc.Repos` (`config/global.go:456-463`). The set a warmup actually indexes is `ConfigManager.ActiveRepos()` (`config/manager.go:447-459`), optionally narrowed by `filterReposByScope`. During a parallel warmup the live fallback (`nestedTrackedRootContains`) sees nothing, because `mi.repos` is published only after every worker has drained (`multi.go:2314-2322`). The seed is therefore the **only** guard on the cold path, and the two lists disagree in both directions:
 
-- `resolveNodePath` gates only `node.RepoPrefix`. This path serves `get_symbol_source`, `batch_symbols`, `get_editing_context`, and `smart_context` bodies.
-- The relative branch of `resolveGraphPath` gates only `matchedRepoPrefix(graphPath)`. This path serves `rename_symbol` reads and **writes**, and scaffold.
-- `search_text` and `find_declaration` attribute trigram matches with `strings.Cut(m.Path, "/")` and `matchedRepoPrefix(m.Path)`.
+- **Under-prune (SEC-08 still open).** When `active_project` names a `projects:` entry, `ActiveRepos` returns `gc.Projects[p].Repos`, which are not in `gc.Repos`. Alpha's walk then descends into beta. Probe result: `repos=[alpha beta]`, `alpha/nested/main.go::ZebraWidget present: true`, so one file has two owners. This is the exact CR-01/SEC-08 state the plan claims to close.
+- **Over-prune (graph data loss).** `gc.Repos` lists entries that are not being indexed: another project's entries when `active_project` is set, entries filtered out by `IndexScoped(workspace, project)`, and entries that fail to open or index (`resolveErrors`). Alpha still prunes their roots, so nobody indexes those files. Probe result: `active_project: p1`, beta tagged `p2`, so `repos=[alpha]`, `alpha/nested node present: false`, `beta node present: false`. Meanwhile `RepoForFile` attributes `alpha/nested/main.go` to alpha, so `read_file` serves it while every graph tool says it does not exist.
 
-I ran a probe with the same fixture as `TestSourceScope_NestedCheckoutRefused`: alpha at `<tmp>/alpha`, beta at `<tmp>/alpha/nested`. It was injected with `go test -overlay`, so the tree was not modified. Results:
-
-```
-NODE alpha/nested/main.go::ZebraWidget repo=alpha file=alpha/nested/main.go
-NODE beta/main.go::ZebraWidget repo=beta file=beta/main.go
-search_text {repo:alpha, query:Zebra}  -> err=false {"matches":[{"path":"alpha/nested/main.go","text":"func ZebraWidget() {}",...}]}
-get_symbol_source {repo:alpha, id:alpha/nested/main.go::ZebraWidget} -> err=false {"source":"package main\n\nfunc ZebraWidget() {}",...}
-```
-
-So `read_file alpha/nested/main.go` with `repo:alpha` is refused, but `get_symbol_source` on the same file returns the same bytes. This is the D-13/D-20 bypass the prior CR-01 described, now reachable through other tools. The regression test passes only because it exercises `read_file` alone. The double ownership is also a SEC-08 gap: the ownership audit counts these rows as correctly prefixed alpha nodes, so `index_health` stays green while one file has two owners.
-
-**Fix:** Close it at the root by not letting a per-repository walk descend into another tracked root. The MultiIndexer knows every root, so it can hand each per-repo Indexer the sibling roots to prune. This also removes the double ownership:
+**Fix:** Seed from the list the batch is actually indexing, not from the raw config. Do it once, before the workers start, and pass it in:
 ```go
-// indexer.go shouldPruneDir, before the exclude rules:
-if idx.isOtherTrackedRoot(path) { // set by MultiIndexer: absolute roots of every other tracked repo
-    return true
-}
+// indexMultiRepo, after `resolved` is built (absPath already filepath.Abs'd and Stat'd):
+roots := make([]string, 0, len(resolved))
+for _, r := range resolved { roots = append(roots, filepath.Clean(r.absPath)) }
+// newPerRepoIndexerGuardedWithMode(cfg, mode, roots) -> idx.trackedRepoRoots = roots
 ```
-If that is too invasive for fork hygiene, apply the physical-owner check at the remaining choke points instead:
-```go
-// resolveNodePath, after computing abs:
-if err := s.requirePathSourceScope(ctx, node.RepoPrefix, abs); err != nil { return "", err }
-// resolveGraphPath relative branch, after computing abs: same call with matchedRepoPrefix(graphPath)
-// search_text / find_declaration: attribute a match with
-//   s.multiIndexer.RepoForFile(s.multiIndexer.ResolveFilePath(m.Path))
-// and require both the lexical and the physical repository to be in scope.
-```
-Add `get_symbol_source`, `search_text` (bound to alpha), and `rename_symbol` cases to `TestSourceScope_NestedCheckoutRefused`.
+Seed `TrackRepoCtx`/`IndexRepo` constructors from the registered `mi.repos` roots, taken before construction under `mi.mu.RLock`. Drop `ReposSnapshot()` from the constructor. Add tests for a `projects:`-map config, an `active_project` that excludes the nested entry, and a `filterReposByScope` run that excludes it.
 
 ## Warnings
 
-### WR-01: The untrack restub is best-effort, but the purge after it is destructive, so prior CR-03 can still recur
+### WR-01: The seed never refreshes, so after untracking the nested repository the outer repository keeps excluding its files
 
-**File:** `internal/indexer/repository_untrack.go:209-221,232-275`; `internal/graph/store_sqlite/store.go:1918-1931`
+**File:** `internal/indexer/indexer.go:529-533,5701-5705`; `internal/indexer/watcher.go:2953`
 
-**Issue:** `restubCobolEdgesInto` returns the cross-repository edges to their placeholders with `mi.graph.ReindexEdges(batch)`. On SQLite, `ReindexEdges` deliberately **swallows** `errReindexWriterGateContended` and drops the whole batch (store.go:1924-1927). The design assumes "a later resolve pass rebinds them". That holds when the targets survive. Here, `PurgeRepo(repoPrefix)` runs straight afterwards and deletes every edge whose `to_id` is in the purged repository. A dropped restub batch therefore leaves A's CALL/COPY edges pointing at B, and the purge deletes them. The deferred reconcile then has nothing to decide. This is the original CR-03 loss: the statement-occurrence edge is gone until A's file is re-extracted, and incremental no longer equals clean. The contention window is a checkpoint or a sibling writer holding `writeMu`, which is plausible during the purge's own heavy writes.
+**Issue:** `trackedRepoRoots` is documented as "read-only after construction". `UntrackRepo` deletes beta from `mi.repos` and from the config (`multi.go:3449`), but alpha's long-lived `Indexer` keeps its seed, and so does the `Watcher` that points at that Indexer. Probe result after `mi.UntrackRepo("beta")`: `repos=[alpha]`, same alpha Indexer, `shouldExclude(betaDir/main.go) == true`.
 
-Two smaller gaps:
-- The restub does not hold `store.ResolveMutex()`, so a reconcile running at the same time can read the bound edge before the restub and write the binding back afterwards. `RefreshRepoConfigs` is not excluded by the untrack's topology gate (see WR-02).
-- When `PurgeRepo` fails, the restubbed edges keep their bound-decision meta on a placeholder target until a retry succeeds, because the reconcile runs only on `err == nil`.
+As a result:
+- Alpha's watcher refuses every create or edit under `alpha/nested/`.
+- Nothing re-adopts the files. The untrack path does not reindex the enclosing repository.
+- The files are absent from the graph until alpha's Indexer is rebuilt by a full `IndexRepo` or a daemon restart. `RepoForFile` still says alpha owns them, which is the same inconsistency as CR-01's over-prune.
 
-**Fix:** Make the restub part of the destructive step, or make it fail closed:
+The same staleness applies to a config reload that removes an entry.
+
+**Fix:** Drop the per-Indexer copy and keep the live `mi.repos` check as the only source after warmup. Have warmup pass its batch roots (CR-01) in a field that `indexMultiRepo` clears once it publishes `mi.repos`. Then, on untrack of a root nested in another tracked root, schedule a scoped reindex of the enclosing repository for that subtree, or at least of the files under it. Add a regression test: track both, untrack beta, then assert that alpha's watcher admits `betaDir/main.go` and that alpha's next incremental pass indexes it.
+
+### WR-02: Tracking a nested repository later freezes the outer repository's stale duplicates, because the watcher now refuses their update and delete events
+
+**File:** `internal/indexer/watcher.go:2945-2955`; `internal/indexer/nested_tracked_root_test.go:127-136`
+
+**Issue:** When beta is tracked after alpha was indexed, `alpha/nested/*` nodes remain in the graph (`trackNestedLater` asserts this precondition). After 04-18, alpha's watcher refuses every event under beta's root, including deletes. Those alpha-owned duplicates can therefore never be updated or evicted until alpha's next full reindex or warm-restart census. In the meantime:
+- `search_symbols`, `find_usages` and the other graph-metadata tools, which are not source-gated, keep returning `alpha/nested/...` symbols that drift from disk.
+- The ownership audit counts them as correctly prefixed alpha nodes, so `index_health` stays green while one file has two owners.
+
+`TestNestedTrackedRoot_OuterReindexDropsDuplicates` passes only because it calls `mi.IndexRepo("alpha")` by hand. No production track path does that.
+
+**Fix:** In `TrackRepoCtx`, after beta is registered, evict the enclosing repository's file nodes under beta's root. Every outer repository whose root strictly contains beta's root needs this, for example `EvictFile` for each `GetFileNodes` path with prefix `<outer>/<rel(beta)>/`. Do it under the same topology gate the track already holds. Assert this in `trackNestedLater` without the manual `IndexRepo`.
+
+### WR-03: Nested-root containment is lexical only, so a symlinked or alternate spelling of the nested root is not pruned
+
+**File:** `internal/indexer/indexer.go:5701-5705`; `internal/indexer/workspace_resolve.go:152-168`; `internal/indexer/multi.go:386-390`
+
+**Issue:** Both checks use `pathkey.HasPathPrefix` on `filepath.Abs` spellings, which folds case only. If beta is tracked through a symlink to `alpha/nested`, or through any alternate spelling (`/var` vs `/private/var`, a bind mount), the check does not match. Probe result: alpha at `<tmp>/alpha`, beta tracked as `<tmp2>/betalink -> <tmp>/alpha/nested`, and `alpha/nested/main.go::ZebraWidget` is present. Elsewhere the codebase already treats roots by canonical identity: `pathkey.SamePathIdentity` in duplicate-root detection (`multi.go:2187`), and `CanonicalHasPathPrefix`/`CanonicalPath` in `bestRepoPrefixForPathLocked`.
+
+**Fix:** Canonicalize the roots once when seeding or registering them, and compare with the canonical form:
 ```go
-// Option A (preferred): inside PurgeRepo's transaction, before the edge delete,
-//   UPDATE edges SET to_id = json_extract(meta, '$.cobol_placeholder'), cross_repo = 0
-//   WHERE to_id IN (<B node ids>) AND repo_prefix_of(from_id) <> ? AND json_extract(meta,'$.cobol_placeholder') <> ''
-// Option B: use a ReindexEdges variant that returns the contention error, and
-// abort purgeRepositoryPayload (return the error so the saga retries) when the
-// restub did not land. Hold mi.graph.ResolveMutex() across restub + PurgeRepo,
-// releasing it before the deferred reconcileCobolRepos runs.
+// seed / registration: r := pathkey.CanonicalPath(abs)
+// check: compare on canonical root identity, keeping the walk path lexical-fast:
+if pathkey.HasPathPrefix(path, r) || pathkey.CanonicalHasPathPrefix(path, r) { ... }
 ```
+At minimum, also store `filepath.EvalSymlinks(root)` for each tracked root and test against both spellings.
 
-### WR-02: The new reconcile call sites run outside the reach topology gate and the batch gate
+### WR-04: The explore artifact lane emits matched source lines without any source gate, so the physical-owner fix is not applied everywhere
 
-**File:** `internal/indexer/multi.go:2528-2532` (`RefreshRepoConfigs`), `internal/indexer/multi.go:1643-1648` (`ResetBatch`), `internal/indexer/multi.go:1608-1611` (`EndBatch`, before `runGlobalGraphPasses` takes the gate)
+**File:** `internal/mcp/explore_artifact_intent.go:386-410,431` (outside the changed files; the review brief asked whether every source surface is consistent)
 
-**Issue:** Every reconcile that existed before the fixes runs inside `reach.BeginTopologyMutation`: the watcher tails at `incremental_watcher_batch.go:241/296`, `ReconcileRepoCtx` through `beginRepositoryTopologyMutation`, and untrack. That gate is the only thing that calls `reach.InvalidateIndex()` (reach.go:276-301), and it keeps reach builders from seeing half-applied rewires. The three new call sites take neither the gate nor `batchMutationGate`:
+**Issue:** The artifact probe runs `GrepTextForRepos`/`GrepText`, enriches the matches, and stores `truncateExploreArtifactSnippet(match.Text)` as the target's `source`. No `explore*.go` file calls `requireSourceScope` or `requirePathSourceScope`. Attribution goes only through `enrichTextMatchesContext`'s lexical node scope. In the `outer_indexed_first` state, which WR-02 keeps alive indefinitely, an alpha-scoped `explore` returns snippet bytes from beta's file through the `alpha/nested/...` node. When `scope.RepoAllow` is nil, the search fans out across all repositories with no unbound refusal at all.
 
-- **Reload (`RefreshRepoConfigs`).** On a running daemon, a reload that changes `resolve_from` rebinds COBOL CALL/COPY edges and can `EvictFile`/`AddNode` D-11 alias resources. The precomputed `reach_d1..d3` tiers are never invalidated, so impact answers stay stale until an unrelated topology mutation. A reload during a parallel warmup (`deferResolve`) also decides immediately, before every repository is registered. The policy drops the unregistered repository, and bindings into it are rewritten to `missing`. That is the exact WR-01 registration-order bug, through a new door.
-- **`ResetBatch`.** The warm fast path rebinds the edges of an interrupted reindex and never invalidates reach.
-- **`EndBatch`.** Invalidation follows from `runGlobalGraphPasses`, but reach readers can still see the reconcile half-applied.
-
-**Fix:** Run each of these under the same gates the watcher uses. Take `mi.batchMutationGate.RLock()` first, then the topology gate, which is the same order watchers use, so no inversion is introduced. Under `deferResolve`, record the repositories in `batchCobolRepos` instead of reconciling:
+**Fix:** Route the matches through the same gate as `search_text` before taking snippets:
 ```go
-// RefreshRepoConfigs, replacing the direct call:
-if len(cobolChanged) > 0 {
-    mi.batchMutationGate.RLock()
-    defer mi.batchMutationGate.RUnlock()
-    mi.mu.Lock()
-    if mi.deferResolve {
-        if mi.batchCobolRepos == nil { mi.batchCobolRepos = map[string]struct{}{} }
-        maps.Copy(mi.batchCobolRepos, cobolChanged)
-        mi.mu.Unlock()
-        return len(roots)
-    }
-    mi.mu.Unlock()
-    finish := reach.BeginTopologyMutation(mi.graph)
-    mi.reconcileCobolRepos(cobolChanged)
-    finish(true)
-}
-// ResetBatch / EndBatch (already hold batchMutationGate.Lock):
-finish := reach.BeginTopologyMutation(mi.graph)
-mi.reconcileCobolRepos(cobolRepos)
-finish(true)
+matches = s.filterTextMatchesByResolvedScope(ctx, matches, ResolvedScope{WorkspaceID: scope.WorkspaceID, ProjectID: scope.ProjectID, RepoAllow: scope.RepoAllow})
 ```
+Refuse up front with `requireSourceScope(ctx, "")`, as `search_text` does. Add `explore` to `TestSourceScope_NestedCheckoutRefused`.
 
-### WR-03: `find_declaration`'s regex branch applies `limit` before the scope filter, so a bound caller can get "no use sites matched" when matches exist
+### WR-05: `find_declaration`'s regex branch still caps before filtering, and the new physical-owner filter makes false "no use sites matched" answers more likely (prior WR-03)
 
-**File:** `internal/mcp/tools_find_declaration.go:164-184`
+**File:** `internal/mcp/tools_find_declaration.go:169-185`
 
-**Issue:** In the regex branch, `s.multiIndexer.GrepRegexp(useSite, pathPrefix, limit)` searches **every** repository and stops at `limit`, which defaults to 20. The new `allowed` filter runs only afterwards. A request bound to alpha, in a workspace where beta holds more than `limit` matches that sort first, gets zero or few use sites back. The tool then answers `"note": "no use sites matched"`. That is a silent wrong answer, and the fix report acknowledges the order ("the regex branch filters after"). The literal branch is correct because it scans with limit 0 and caps after filtering. `search_text` avoids the problem with `GrepRegexpForRepos(..., resolved.RepoAllow, limit)` plus `limitTextMatches`.
+**Issue:** `GrepRegexp(useSite, pathPrefix, limit)` stops at `limit` (default 20) across every repository. `allowed` runs afterwards and now also drops matches whose physical owner is out of scope. A bound caller whose first `limit` raw hits are out of scope gets `"no use sites matched"` even though in-scope matches exist. The literal branch avoids this by scanning with limit 0 and capping after the filter.
 
-**Fix:** Narrow the search itself, as `search_text` does, or filter before capping:
+**Fix:** Mirror the literal branch:
 ```go
-if s.multiIndexer != nil {
-    matches, err = s.multiIndexer.GrepRegexp(useSite, pathPrefix, 0) // or GrepRegexpForRepos with the resolved allow-set
-}
-...
+matches, err = s.multiIndexer.GrepRegexp(useSite, pathPrefix, 0) // or GrepRegexpForRepos with the resolved allow-set
 kept := matches[:0]
 for _, m := range matches {
-    if allowed(m) {
-        kept = append(kept, m)
-        if len(kept) >= limit { break }
-    }
+    if allowed(m) { kept = append(kept, m); if len(kept) >= limit { break } }
 }
 ```
-Add a test where the out-of-scope repository holds more than `limit` regex matches.
-
-### WR-04: The `rename_symbol` refusal reveals that out-of-scope references exist. Accepted risk (04-12), not fixed
-
-**File:** `internal/mcp/tools_coding.go:2864-2867`
-
-**Issue:** Unchanged from the prior review. When any reference lies outside the resolved scope, `rename_symbol` returns a distinct message: "some references lie outside the resolved scope; widen it with repo, project, or workspace…". A caller scoped to `alpha` can run a `dry_run` rename of an alpha symbol and learn whether other repositories reference it. This is recorded as an accepted risk in plan 04-12's Threat Flags and was intentionally skipped by the fixer. It is carried forward only so the risk stays visible.
-
-**Fix (if the acceptance is revisited):** Return the generic `errSourceScopeRequired` guidance, or the not-found text that `get_symbol_source` returns for an out-of-scope target.
+Add a test where an out-of-scope repository holds more than `limit` regex matches.
 
 ## Info
 
-### IN-01: `cobolPolicyLookup` logs a Warn for each repository on every reconcile pass
+### IN-01: Scope is re-resolved and `EvalSymlinks` runs once per unique match path
 
-**File:** `internal/indexer/workspace_resolve.go:749-754`
+**File:** `internal/mcp/tools_find_declaration.go:153-167`; `internal/mcp/tools_search_text.go:252-284`; `internal/mcp/tools_fileops.go:513-548`; `internal/mcp/source_scope.go:107-128`
 
-**Issue:** Unchanged. The fixes add more reconcile entry points (`EndBatch`, `ResetBatch`, `RefreshRepoConfigs`, untrack), so a repository whose `resolve_from` names an untracked repository now repeats the Warn more often.
+**Issue:** The cache moved from per-repository to per-path. Each new path pays `resolveScopeForRequest` once or twice, plus `EvalSymlinks` and `RepoForFile` when the lexical repository is in scope. That cost is invariant per request. The literal `find_declaration` branch calls `GrepText(useSite, 0)`, so the number of unique paths is unbounded. `resolveNodePath` also runs `requireSourceScope` twice per node, once early and once inside `requirePathSourceScope`, for every `withAbsPaths` listing row. The comment at `tools_search_text.go:270` ("the searcher stops at limit, so the cache is bounded") does not hold for the `find_declaration` copy.
 
-**Fix:** Log once per (repo, untracked-set) change with a `sync.Map` keyed by `repo+"\x00"+strings.Join(dropped, ",")`, or demote repeats to Debug.
+**Fix:** Resolve the allowed repository set once per request (a small `sourceScopeChecker` closure built from `requireSourceScope`'s allow computation) and reuse it for both the lexical and the physical check. Skip `EvalSymlinks` when `RepoForFile(abs)` already equals the lexical repository and `os.Lstat` shows a non-symlink.
 
-### IN-02: Untrimmed `lib.Repo`/`lib.Path` in `cobolLibraryRank` disagree with the trimmed validation and tracking checks
+### IN-02: View-routed `search_text` matches are anchored to the canonical root, not the view's checkout
 
-**File:** `internal/resolver/cobol_references.go:420-424`
+**File:** `internal/mcp/tools_search_text.go:274-279`
 
-**Issue:** Unchanged; the lines moved. `" shared"` or `copy\prod` passes validation and then never ranks, so every COPY silently resolves to `missing`.
+**Issue:** `searchTextInView` returns matches from the view's working copy. The new gate anchors them with `ResolveFilePath`, which joins against the primary root, and never applies `requestViewPathRoot(ctx).rooted(...)` the way `resolveGraphPath` does. Suppose a path is a nested tracked root in the primary checkout but not in the worktree. The view's own bytes are then refused as beta's, which is a false refusal. The error goes in the fail-closed direction, but it is inconsistent with `resolveGraphPath`.
 
-**Fix:** Normalize once in `cobolPolicyFromConfig`: `Repo: strings.TrimSpace(lib.Repo)`, `Path: path.Clean(filepath.ToSlash(strings.TrimSpace(lib.Path)))`.
+**Fix:** Re-root with `requestViewPathRoot(ctx).rooted(abs, root)` before calling `requirePathSourceScope`, as `resolveGraphPath` does at `tools_fileops.go:626-635`.
 
-### IN-03: The material fingerprint truncates on 32-bit builds and depends on list order
+### IN-03: Graph-backed reads now require the linked worktree's prefix to be in scope when the worktree fallback re-roots
 
-**File:** `internal/indexer/cobol_material.go:38-42,68`
+**File:** `internal/mcp/tools_fileops.go:540-548` (with `worktreeRootedPath`, `tools_fileops.go:274-308`)
 
-**Issue:** Unchanged. `RefreshRepoConfigs` now compares fingerprints too (`multi.go:2520-2523`). Reordering `resolve_from` in a reload therefore also triggers a needless reconcile pass, on top of the restage.
+**Issue:** `worktreeRootedPath` re-roots a missing main-checkout file onto a registered linked worktree (`LinkedWorktreeRoots` lists `mi.repos` entries with `IsWorktree`). `RepoForFile` then returns the worktree's prefix, which differs from `node.RepoPrefix`, so a request scoped to `repo: alpha` now needs `alpha@wt` in scope as well. Otherwise `get_symbol_source` answers "symbol not found". `resolveFilePath` already behaved this way. The graph-backed surfaces newly inherit the behavior, and no test covers it.
 
-**Fix:** Sort a clone of `ResolveFrom` before hashing. Keep the stored value as `int64` or a string.
+**Fix:** Confirm that `repo: alpha` expands to its worktree instances. If it does not, treat a worktree of the same main repository as the lexical owner in `requirePathSourceScope`. Add a test either way.
 
-### IN-04: The canonical dump omits edge and node fields that the reconcile pass mutates
+### IN-04: Test gaps let the CR-01, WR-01, WR-02 and WR-03 defects pass
 
-**File:** `internal/testutil/graphdump/graphdump.go:101,115`
+**File:** `internal/indexer/nested_tracked_root_test.go:74-154`; `internal/mcp/source_scope_test.go:328-355`
 
-**Issue:** Unchanged. The new untrack restub sets `CrossRepo=false`, and the new equivalence tests (`TestCobolLifecycle_CrossRepoUntrack`, `TestCobolLifecycle_ParallelWarmRestart`, `TestCobolLifecycle_ConfigReloadRedecides`) cannot see a stale `CrossRepo` or `Origin`.
+**Issue:**
+- `IndexedOnce` lists both repositories in top-level `repos:`, the only shape where the seed is right. No test covers a `projects:` map, an inactive entry, untrack, a symlinked spelling, or the live `mi.repos` path during a walk. The 04-18 summary concedes that `OuterReindexDropsDuplicates` "passes on the config seed alone".
+- The `find_declaration` subtest only asserts that no surviving match is nested. With no positive control (for example, a beta-scoped call returns `beta/main.go`), an empty result passes, including the `tracked_together` case where pruning leaves nothing to gate.
+- The `batch_symbols` subtest only asserts `NotContains`.
+- The search_symbols content-fallback behavior change flagged in 04-17-SUMMARY (fail-closed drop for Reach-unbound requests) has no test.
 
-**Fix:** Add `Origin`, `CrossRepo`, and `RepoPrefix` to the rows under a new `graphdump-volatile/4` version.
+**Fix:** Add the probes described in CR-01, WR-01, WR-02 and WR-03 as tests. Add positive controls to the `find_declaration` and `batch_symbols` subtests. Add one test that asserts the content fallback's behavior under an unbound multi-repo request.
 
-### IN-05: Bare unprefixed `Indexer` paths no longer bind any COBOL CALL or COPY
+### IN-05: The "caller must not hold mi.mu" invariant on walk and watcher admission is documented but not enforced
 
-**File:** `internal/indexer/indexer.go:598-603`, `internal/resolver/cobol_references.go` (`caller_unowned` branch of `decideCobol`)
+**File:** `internal/indexer/workspace_resolve.go:146-154`; `internal/indexer/indexer.go:5706-5708`
 
-**Issue:** Unchanged. `gortex eval-server --index` and the `init` temporary store still index through a bare `indexer.New`.
+**Issue:** The audit above found no caller holding `mi.mu`. But `shouldExclude` is now a hidden `mi.mu.RLock` acquisition on every walked entry. `sync.RWMutex` read locks are not reentrant once a writer is queued. Any future helper that walks or probes `PathIndexability` under `mi.mu.RLock`, which is a natural thing to write in `multi.go`, would deadlock intermittently under load.
 
-**Fix:** Route those paths through `indexEmbeddedRepo` / MultiIndexer, or document the behavior.
+**Fix:** State the invariant on `shouldExclude`, `PathIndexability` and `Watcher.isExcluded`, not only on the helper. Alternatively, publish registered roots as an `atomic.Pointer[[]string]` that is updated wherever `mi.repos` is written, and drop the lock from the per-file path entirely. That also resolves WR-01's staleness.
 
-### IN-06: `get_editing_context` gates the anchor's repository but reads view bytes from the view's repository
+### IN-06: Carried-forward accepted risk: the `rename_symbol` refusal now also reveals nested physical owners (prior WR-04)
 
-**File:** `internal/mcp/tools_coding.go:571-590`
+**File:** `internal/mcp/tools_coding.go:2705-2730` (`resolvePath` / `scopeErr`)
 
-**Issue:** Unchanged.
+**Issue:** An alpha-scoped `dry_run` rename of an alpha symbol now also tells the caller whether a file under a nested out-of-scope root references it, through the distinct "some references lie outside the resolved scope" refusal. This is still the 04-12 accepted risk, now with a slightly wider surface.
 
-**Fix:** In the view branch, also call `s.requireSourceScope(ctx, files.repoPrefix)` before `readViewFile`.
-
-### IN-07: `cobolReconcileMu` duplicates the store-wide resolve mutex for same-store passes, and its regression test only proves the duplicate is taken
-
-**File:** `internal/indexer/multi.go:146-152,394,981`; `internal/resolver/cobol_references.go:128-131`; `internal/indexer/cobol_lifecycle_incremental_test.go:479-515`
-
-**Issue:** `resolver.New(g)` sets `r.mu = g.ResolveMutex()`. The SQLite store and the in-memory `Graph` each return one mutex per store (`store.go:391-396`, `graph.go:693-695`). The master resolver and every per-repository resolver over `mi.graph` therefore already serialize `ReconcileCobol` and `ResolveAll` end to end. The premise of the prior WR-01, that a new master resolver excludes nothing, was wrong for the shared store. The new mutex changes behavior in only one case: a per-repository pass running on an in-memory **shadow** store during a cold index. That pass now blocks reconciles on the disk store, which it never touches. The CR-03 fix also adds a new lock edge: `vectorUpdateMu` → `ResolveMutex` → `cobolReconcileMu`, because the deferred reconcile runs inside `SerializeVectorUpdate`. I found no inverse acquisition, so this is not a deadlock today. It is still coupling a future change could invert. `TestCobolLifecycle_ReconcileSerialized` holds the new mutex directly, so it would also pass with the mutex removed and the store mutex still serializing the passes. It also relies on a 200 ms negative wait.
-
-**Fix:** Either remove `cobolReconcileMu` and rely on `ResolveMutex()`, or keep it and record in the field comment which cross-store case it exists for. Run the untrack reconcile after `SerializeVectorUpdate` returns rather than inside it.
+**Fix:** If the acceptance is revisited, return the generic not-found text.
 
 ---
 
-_Reviewed: 2026-10-13T16:14:12Z_
+_Reviewed: 2026-10-13T19:23:03Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
