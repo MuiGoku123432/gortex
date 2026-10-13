@@ -1506,11 +1506,11 @@ func (idx *Indexer) planAffectedByStages(stages []*incrementalBatchStage) affect
 			files = append(files, filePath)
 		}
 		sort.Strings(files)
+		// note: the same escalation is logged in reresolveAffectedBy (two sites).
 		if maxFiles := idx.affectedByMaxFiles(); len(files) > maxFiles {
-			idx.logger.Debug("affected-by: re-resolve set truncated",
+			idx.logger.Info("affected-by: cap exceeded, resolving full affected set",
 				zap.String("file", changedPath), zap.Int("affected", len(files)),
-				zap.Int("cap", maxFiles), zap.Int("dropped", len(files)-maxFiles))
-			files = files[:maxFiles]
+				zap.Int("cap", maxFiles))
 		}
 		if len(files) == 0 {
 			continue
