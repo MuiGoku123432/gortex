@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 4
+current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-10-12T22:38:37.140Z"
-last_activity: 2026-10-02
-last_activity_desc: Phase 03 execution started
-state_head: 761a92ad67b57004cddf0a56d94a7108fbf67907
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-10-13T01:24:24.182Z"
+last_activity: 2026-10-12
+last_activity_desc: Phase 04 execution started
+state_head: 0cb71f2bca59e64c4dece808cee4b028b48b750d
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 30
+  completed_plans: 31
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -25,14 +25,14 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 See: .planning/PROJECT.md (updated 2026-09-21)
 
 **Core value:** A trustworthy graph representation of a mainframe estate that modernization cutover decisions can be made against -- deterministic and reproducible first, enriched and simulated later.
-**Current focus:** Phase 03 — Deterministic COBOL and Mainframe Breadth
+**Current focus:** Phase 04 — Stable Incremental and Cross-Repository Lifecycle
 
 ## Current Position
 
-Phase: 4 (Stable Incremental and Cross-Repository Lifecycle) — READY TO EXECUTE
-Plan: 13 of 13
+Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
+Plan: 2 of 16
 Status: Ready to execute
-Last activity: 2026-10-02 — Phase 03 execution started
+Last activity: 2026-10-12 — Phase 04 execution started
 
 Progress: [██░░░░░░░░] 20%
 
@@ -91,6 +91,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P15 | 7 min | 2 tasks | 7 files |
 | Phase 03 P16 | 9 min | 2 tasks | 6 files |
 | Phase 03 P17 | 26 min | 3 tasks | 8 files |
+| Phase 04 P01 | 25 min | 1 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-17: IDMS, CICS, and DB2 walkers build From/owner IDs through w.id; cobolCopybook runs cobolMainframe and cobolSQL, so copybook statements emit edges From the paragraph or the copybook file node
 - [Phase 03]: 03-17: a data name a copybook does not declare is not_declared_in_copybook (keyed on w.root); program documents keep not_declared_in_program
 - [Phase 03]: 03-17: WR-04 stays a producer window; the copybook file node records cobol_copybook_wrapper and, when a non-green analysis mapped nothing, prov_analysis_absence=copybook_content_unmapped
+- [Phase 04]: 04-01: Shared COBOL resource nodes keep only nine writer-independent prov keys (cobolSharedResourceKeys); FilePath is the node ID and Name the normalized key; the as-written spelling rides on edges as cobol_resource_raw (D-18) — Program and copybook documents write the same tool ID and handoff schema but a different grade policy and transform config, and the last-writer-wins node upsert made clean builds nondeterministic
+- [Phase 04]: 04-01: graphdump DeterministicVolatile (graphdump-volatile/1) ships empty; add a key only when a harness diff proves it volatile — Two clean builds and opposite track orders matched with no exclusions (D-01)
 
 ### Pending Todos
 
@@ -196,6 +199,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T20:03:24.841Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-CONTEXT.md
+Last session: 2026-10-13T01:24:17.473Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
