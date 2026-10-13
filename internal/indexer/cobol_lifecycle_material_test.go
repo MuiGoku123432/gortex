@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -121,6 +123,33 @@ func TestCobolLifecycle_ConfigChange(t *testing.T) {
 		require.NoError(t, err)
 		assert.Zero(t, res.StaleFileCount)
 	})
+}
+
+// TestCobolLifecycle_ConfigReloadRedecides proves a config reload alone, with
+// no reindex, re-decides the bindings of a repository whose index.cobol
+// fingerprint changed (WR-03): crossa's new resolve_from binds its CALL and
+// COPY into crossb, and dropping it returns them to missing.
+func TestCobolLifecycle_ConfigReloadRedecides(t *testing.T) {
+	const callX = "unresolved::cobol::program::XPGM"
+	env := newCobolLifecycleEnv(t, cobolCrossRepos(nil))
+	env.track(t, "crossa", "crossb")
+	call := cobolPlaceholderEdge(t, cobolDumpEdges(t, env.dump(t)), "crossa", callX)
+	require.Equal(t, callX, call.to)
+
+	// Written straight to disk: the reload, not a reindex, must re-decide.
+	cfgPath := filepath.Join(env.roots["crossa"], ".gortex.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cobolCrossAllowlist), 0o600))
+	env.mi.RefreshRepoConfigs()
+	edges := cobolDumpEdges(t, env.dump(t))
+	assert.Equal(t, "crossb/cobol/xpgm.cbl::XPGM", cobolPlaceholderEdge(t, edges, "crossa", callX).to)
+	assert.Equal(t, "crossb/copy/xcpy.cpy",
+		cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::copybook::XCPY").to)
+
+	require.NoError(t, os.WriteFile(cfgPath, []byte("index:\n  cobol: {}\n"), 0o600))
+	env.mi.RefreshRepoConfigs()
+	call = cobolPlaceholderEdge(t, cobolDumpEdges(t, env.dump(t)), "crossa", callX)
+	assert.Equal(t, callX, call.to)
+	assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
 }
 
 // TestCobolLifecycle_UnrelatedConfig proves the fingerprint reads only the

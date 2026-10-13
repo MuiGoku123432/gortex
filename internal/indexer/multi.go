@@ -2478,8 +2478,10 @@ func (mi *MultiIndexer) indexRepoRaw(repoPrefix string) (*IndexResult, error) {
 }
 
 // RefreshRepoConfigs re-reads every tracked repo's `.gortex.yaml` and
-// pushes the refreshed effective exclude list into that repo's live
-// Indexer. Returns the number of repos whose config was re-read.
+// pushes the refreshed effective exclude list and index.cobol block into
+// that repo's live Indexer, reconciling the COBOL bindings of every repo
+// whose COBOL material fingerprint changed. Returns the number of repos whose
+// config was re-read.
 //
 // This is the deterministic re-read path for an already-tracked repo.
 // Track and index both load the workspace config on their way in, but a
@@ -2502,6 +2504,7 @@ func (mi *MultiIndexer) RefreshRepoConfigs() int {
 	}
 	mi.mu.RUnlock()
 
+	cobolChanged := map[string]struct{}{}
 	for prefix, root := range roots {
 		mi.configMgr.LoadWorkspaceConfig(prefix, root)
 
@@ -2514,8 +2517,18 @@ func (mi *MultiIndexer) RefreshRepoConfigs() int {
 		mi.mu.RUnlock()
 		if idx != nil {
 			idx.SetExcludePatterns(cfg.Index.Exclude)
+			before, _ := idx.cobolMaterial()
 			idx.SetCobolConfig(cfg.Index.Cobol)
+			if after, ok := idx.cobolMaterial(); ok && after != before {
+				cobolChanged[prefix] = struct{}{}
+			}
 		}
+	}
+	// The COBOL policy is read on every reconcile pass, so a changed
+	// index.cobol block (D-06) re-decides those repositories' bindings now
+	// instead of on their next unrelated COBOL mutation.
+	if len(cobolChanged) > 0 {
+		mi.reconcileCobolRepos(cobolChanged)
 	}
 	return len(roots)
 }
