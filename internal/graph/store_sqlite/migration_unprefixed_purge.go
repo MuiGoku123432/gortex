@@ -63,8 +63,17 @@ func purgeUnprefixedRepoRows(tx *sql.Tx) error {
 		return fmt.Errorf("delete unprefixed vectors: %w", err)
 	}
 
-	if _, err := tx.Exec(`DELETE FROM nodes WHERE ` + unprefixedFileBackedNodePredicate); err != nil {
+	res, err := tx.Exec(`DELETE FROM nodes WHERE ` + unprefixedFileBackedNodePredicate)
+	if err != nil {
 		return fmt.Errorf("delete unprefixed nodes: %w", err)
+	}
+	// A store with no unowned file-backed node holds no unprefixed repository
+	// residue, so its empty-prefix sidecar rows belong to the populations kept
+	// above. v22 runs on every current store; leave them alone.
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("count unprefixed nodes: %w", err)
+	} else if n == 0 {
+		return nil
 	}
 
 	// Sidecar residue written under the empty prefix. Both table sets are

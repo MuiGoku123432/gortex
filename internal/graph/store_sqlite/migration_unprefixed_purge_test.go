@@ -223,6 +223,44 @@ func TestMigrationV22_PurgesUnprefixedRows(t *testing.T) {
 	}
 }
 
+// TestMigrationV22_KeepsSidecarsWhenNoNodePurged: v22 runs on every current
+// store, so on a store with no unowned file-backed node it must not sweep the
+// empty-prefix sidecar rows either; the sidecar sweep follows the narrowed
+// node rule rather than every empty-prefix row.
+func TestMigrationV22_KeepsSidecarsWhenNoNodePurged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.sqlite")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	withRawDB(t, path, func(db *sql.DB) {
+		if _, err := db.Exec(
+			`INSERT INTO nodes (id, kind, name, file_path, repo_prefix) VALUES ('dep::x::Y', 'function', 'Y', '', '')`); err != nil {
+			t.Fatalf("seed global external: %v", err)
+		}
+		if _, err := db.Exec(
+			`INSERT INTO file_mtimes (repo_prefix, file_path, mtime_ns) VALUES ('', 'shared/notes.md', 1)`); err != nil {
+			t.Fatalf("seed file_mtimes: %v", err)
+		}
+		if _, err := db.Exec(`PRAGMA user_version = 21`); err != nil {
+			t.Fatalf("reset user_version: %v", err)
+		}
+	})
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("open v21 store: %v", err)
+	}
+	defer s.Close()
+	assertStringsEqual(t, "empty-prefix sidecar rows",
+		queryIDs(t, s.db, `SELECT repo_prefix || ':' || file_path FROM file_mtimes ORDER BY 1`),
+		[]string{":shared/notes.md"})
+}
+
 func queryIDs(t *testing.T, db *sql.DB, query string) []string {
 	t.Helper()
 	rows, err := db.Query(query)
