@@ -101,12 +101,14 @@ func (s *Server) requireSourceScope(ctx context.Context, repoPrefix string) erro
 // accepts a location inside any tracked root, so a symlink or a nested
 // checkout can put another repository's bytes under that spelling; the
 // repository that physically owns the symlink-resolved location must be in
-// scope too.
+// scope too (D-13, D-16, D-20). With one tracked repository no second owner
+// can exist, so the symlink resolution is skipped; resolveNodePath runs this
+// for every withAbsPath listing.
 func (s *Server) requirePathSourceScope(ctx context.Context, lexical, absPath string) error {
 	if err := s.requireSourceScope(ctx, lexical); err != nil {
 		return err
 	}
-	if s.multiIndexer == nil {
+	if s.multiIndexer == nil || !s.multiIndexer.IsMultiRepo() {
 		return nil
 	}
 	real, err := filepath.EvalSymlinks(absPath)

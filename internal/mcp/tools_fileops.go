@@ -496,6 +496,10 @@ func (s *Server) guardRepoRoots(ctx context.Context) []string {
 // error (not a relative path) when no repo root is available, to keep callers
 // from passing a bare-relative path to os.Open and resolving against the
 // daemon process CWD.
+//
+// node.RepoPrefix names only the lexical owner. When a tracked root sits
+// inside another (CR-01 nested checkout), the repository that physically
+// owns the file must be in scope too (D-13, D-16, D-20).
 func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string, error) {
 	if node == nil {
 		return "", errors.New("nil node")
@@ -510,7 +514,13 @@ func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string,
 		return "", err
 	}
 	if filepath.IsAbs(node.FilePath) {
-		return filepath.Clean(node.FilePath), nil
+		abs := filepath.Clean(node.FilePath)
+		if s.multiIndexer != nil {
+			if err := s.requirePathSourceScope(ctx, node.RepoPrefix, abs); err != nil {
+				return "", err
+			}
+		}
+		return abs, nil
 	}
 	if s.multiIndexer != nil {
 		if root, ok := s.multiIndexer.RepoRoot(node.RepoPrefix); ok {
@@ -531,7 +541,11 @@ func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string,
 			// same reasoning as resolveFilePath: worktrees of one repo
 			// share an index identity, so a node's resolved path can
 			// land on a sibling checkout.
-			return s.checkoutRootedPath(ctx, abs, root, node.RepoPrefix), nil
+			path := s.checkoutRootedPath(ctx, abs, root, node.RepoPrefix)
+			if err := s.requirePathSourceScope(ctx, node.RepoPrefix, path); err != nil {
+				return "", err
+			}
+			return path, nil
 		}
 		return "", fmt.Errorf("could not resolve repo root for node %q (repo_prefix=%q)", node.ID, node.RepoPrefix)
 	}

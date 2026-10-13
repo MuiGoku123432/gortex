@@ -1022,6 +1022,11 @@ func (s *Server) handleGetSymbolSource(ctx context.Context, req mcp.CallToolRequ
 		var resolveErr error
 		absPath, resolveErr = s.resolveNodePath(ctx, node)
 		if resolveErr != nil {
+			// A file another repository physically owns answers like the
+			// lexical gate above, so the refusal names no owner (D-13).
+			if errors.Is(resolveErr, errSourceOutOfScope) {
+				return mcp.NewToolResultError("symbol not found: " + id), nil
+			}
 			return mcp.NewToolResultError(resolveErr.Error()), nil
 		}
 		if guardErr := s.guardSymlinkWithinRepo(ctx, absPath); guardErr != nil {

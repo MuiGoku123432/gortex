@@ -251,10 +251,12 @@ func TestSourceScope_SymlinkIntoOtherRepoRefused(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestSourceScope_NestedCheckoutRefused: a tracked repository whose root sits
-// inside another's must not be readable through the outer repository's
-// spelling by a request scoped to the outer repository (CR-01).
-func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
+// newNestedCheckoutServer builds alpha at <tmp>/alpha and beta at
+// <tmp>/alpha/nested, both in workspace "shared", over a real SQLite store.
+// With trackBetaLater, alpha is indexed alone first and beta is tracked
+// afterwards, so the store keeps alpha-prefixed nodes for beta's files.
+func newNestedCheckoutServer(t *testing.T, trackBetaLater bool) (*Server, string, string) {
+	t.Helper()
 	alphaDir := filepath.Join(t.TempDir(), "alpha")
 	betaDir := filepath.Join(alphaDir, "nested")
 	require.NoError(t, os.MkdirAll(betaDir, 0o755))
@@ -263,11 +265,17 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(betaDir, "main.go"),
 		[]byte("package main\n\nfunc ZebraWidget() {}\n"), 0o644))
 
+	alpha := config.RepoEntry{Path: alphaDir, Name: "alpha", Workspace: "shared"}
+	beta := config.RepoEntry{Path: betaDir, Name: "beta", Workspace: "shared"}
+	repos := []config.RepoEntry{alpha, beta}
+	if trackBetaLater {
+		// Beta stays out of the config: plan 04-18 seeds walk pruning from
+		// the config, so a config entry would stop alpha from indexing the
+		// nested files and remove the state this fixture must reproduce.
+		repos = []config.RepoEntry{alpha}
+	}
 	tmpCfg := filepath.Join(t.TempDir(), "config.yaml")
-	gc := &config.GlobalConfig{Repos: []config.RepoEntry{
-		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
-		{Path: betaDir, Name: "beta", Workspace: "shared"},
-	}}
+	gc := &config.GlobalConfig{Repos: repos}
 	gc.SetConfigPath(tmpCfg)
 	require.NoError(t, gc.Save())
 	cm, err := config.NewConfigManager(tmpCfg)
@@ -279,19 +287,72 @@ func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
 	mi := indexer.NewMultiIndexer(store, testRegistry(), backend, cm, zap.NewNop())
 	_, err = mi.IndexScoped("", "")
 	require.NoError(t, err)
+	if trackBetaLater {
+		_, err = mi.TrackRepoCtx(context.Background(), beta)
+		require.NoError(t, err)
+	}
 	eng := query.NewEngine(store)
 	eng.SetSearch(backend)
 	srv := NewServer(eng, store, nil, nil, zap.NewNop(), nil, MultiRepoOptions{MultiIndexer: mi, ConfigManager: cm})
+	return srv, alphaDir, betaDir
+}
 
-	res := callSourceTool(t, srv, context.Background(), srv.handleReadFile, "read_file",
-		map[string]any{"path": "alpha/nested/main.go", "repo": "alpha"})
-	require.Truef(t, res.IsError, "an alpha-scoped read of beta's nested checkout must be refused: %s", sourceScopeText(res))
-	assert.NotContains(t, sourceScopeText(res), "ZebraWidget")
+// TestSourceScope_NestedCheckoutRefused: a tracked repository whose root sits
+// inside another's must not be readable through the outer repository's
+// spelling by a request scoped to the outer repository (CR-01), whichever
+// order the two were indexed in.
+func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
+	const nestedID = "alpha/nested/main.go::ZebraWidget"
+	const zebraSource = "func ZebraWidget() {}"
 
-	res = callSourceTool(t, srv, context.Background(), srv.handleReadFile, "read_file",
-		map[string]any{"path": "alpha/main.go", "repo": "alpha"})
-	require.Falsef(t, res.IsError, "alpha's own file must still read: %s", sourceScopeText(res))
-	assert.Contains(t, sourceScopeText(res), "AlphaThing")
+	run := func(t *testing.T, srv *Server) {
+		ctx := context.Background()
+		t.Run("read_file", func(t *testing.T) {
+			res := callSourceTool(t, srv, ctx, srv.handleReadFile, "read_file",
+				map[string]any{"path": "alpha/nested/main.go", "repo": "alpha"})
+			require.Truef(t, res.IsError, "an alpha-scoped read of beta's nested checkout must be refused: %s", sourceScopeText(res))
+			assert.NotContains(t, sourceScopeText(res), "ZebraWidget")
+
+			res = callSourceTool(t, srv, ctx, srv.handleReadFile, "read_file",
+				map[string]any{"path": "alpha/main.go", "repo": "alpha"})
+			require.Falsef(t, res.IsError, "alpha's own file must still read: %s", sourceScopeText(res))
+			assert.Contains(t, sourceScopeText(res), "AlphaThing")
+		})
+		t.Run("get_symbol_source", func(t *testing.T) {
+			res := callSourceTool(t, srv, ctx, srv.handleGetSymbolSource, "get_symbol_source",
+				map[string]any{"id": nestedID, "repo": "alpha"})
+			require.Truef(t, res.IsError, "an alpha-scoped get_symbol_source of beta's file must be refused: %s", sourceScopeText(res))
+			assert.Contains(t, sourceScopeText(res), "symbol not found")
+			assert.NotContains(t, sourceScopeText(res), zebraSource)
+		})
+		t.Run("batch_symbols", func(t *testing.T) {
+			res := callSourceTool(t, srv, ctx, srv.handleBatchSymbols, "batch_symbols",
+				map[string]any{"ids": []any{nestedID}, "include_source": true, "repo": "alpha"})
+			assert.NotContains(t, sourceScopeText(res), zebraSource)
+		})
+		t.Run("in_scope_reads", func(t *testing.T) {
+			res := callSourceTool(t, srv, ctx, srv.handleGetSymbolSource, "get_symbol_source",
+				map[string]any{"id": "beta/main.go::ZebraWidget", "repo": "beta"})
+			require.Falsef(t, res.IsError, "a beta-scoped read of beta's own symbol must succeed: %s", sourceScopeText(res))
+			assert.Contains(t, sourceScopeText(res), zebraSource)
+
+			res = callSourceTool(t, srv, ctx, srv.handleGetSymbolSource, "get_symbol_source",
+				map[string]any{"id": alphaThingID, "repo": "alpha"})
+			require.Falsef(t, res.IsError, "alpha's own symbol must still read: %s", sourceScopeText(res))
+			assert.Contains(t, sourceScopeText(res), "func AlphaThing() {}")
+		})
+	}
+
+	t.Run("tracked_together", func(t *testing.T) {
+		srv, _, _ := newNestedCheckoutServer(t, false)
+		run(t, srv)
+	})
+	t.Run("outer_indexed_first", func(t *testing.T) {
+		srv, _, _ := newNestedCheckoutServer(t, true)
+		require.NotNilf(t, srv.graph.GetNode(nestedID),
+			"the fixture must reproduce a store indexed before the nested repository was tracked: %s is missing", nestedID)
+		run(t, srv)
+	})
 }
 
 // TestSourceScope_TextSearchToolsGated: search_text and find_declaration
