@@ -186,7 +186,7 @@ Plans:
   4. Incremental reconciliation and a clean rebuild produce the same canonical active deterministic subgraph for identical final inputs.
   5. Resolution and all downstream surfaces fail closed on missing scope, reject unsupported same-name cross-repository binding, and report zero unowned or misprefixed active nodes for the acceptance corpus.
 
-**Plans**: 18/18 plans executed (2 gap-closure plans pending)
+**Plans**: 18/22 plans executed (4 gap-closure plans pending, round 2)
 
 Plans 04-11 to 04-16 are the second halves of 04-01, 04-03, 04-05, 04-06, 04-08, and 04-09, split so every plan fits the 100k smart-zone budget; run them in wave order, not number order.
 
@@ -238,6 +238,16 @@ Plans:
 
 - [x] 04-17-PLAN.md -- Gap CR-01 (surfaces): resolveNodePath, the relative resolveGraphPath branch, search_text, and find_declaration gate by the physical owner (requirePathSourceScope); nested-checkout test in both indexing orders
 - [x] 04-18-PLAN.md -- Gap CR-01 (root cause): walk and watcher stop at a nested tracked root (config seed + registered roots), so each file has one owner and the ownership audit stays honest
+
+**Wave 11** *(gap closure round 2; blocked on Wave 10 completion; 04-19 and 04-20 share no file and run in parallel)*
+
+- [ ] 04-19-PLAN.md -- Gap 1 (SEC-01/SEC-02): explore artifact lane refuses unbound multi-repo requests and admits matches by the physical owner; parse-level source-channel inventory test; source-surface audit
+- [ ] 04-20-PLAN.md -- Gap 2 seed (SEC-08/ID-09): nested-root pruning reads declared batch roots plus live registered roots (DeclarePendingRoots in indexMultiRepo and the daemon warmup); no per-Indexer config copy
+
+**Wave 12** *(blocked on Wave 11 completion; 04-21 and 04-22 share no file and run in parallel)*
+
+- [ ] 04-21-PLAN.md -- Gap 2 topology (ID-09/SEC-08): track of a nested root evicts the enclosing repository's copies and untrack admits them (reconcileEnclosingRepos); COBOL graphdump equivalence; MCP window fixture via ReconcileRepoCtx
+- [ ] 04-22-PLAN.md -- Audit follow-up (SEC-01/SEC-02): per-entry source gate in move_symbol, inline_symbol and generate_skill walks; find_declaration regex filter-before-limit (WR-05)
 
 ### Phase 5: Explicit Unresolved Evidence
 
