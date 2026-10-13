@@ -35,7 +35,11 @@ type Volatile struct {
 // and cold indexing deliberately does not (indexer.prepareFileDelta), so
 // their presence records index history, not the inputs; an incremental dump
 // could never equal a clean one with them in.
-var DeterministicVolatile = Volatile{Version: "graphdump-volatile/2", Keys: map[string]string{
+//
+// v3 (04-16): a Meta left empty once those keys are stripped renders as null,
+// like a node with no Meta, so a non-COBOL file added on the incremental path
+// equals its clean build instead of dumping {} against null.
+var DeterministicVolatile = Volatile{Version: "graphdump-volatile/3", Keys: map[string]string{
 	"source_semantic_fingerprint":         fingerprintCache,
 	"source_metadata_fingerprint":         fingerprintCache,
 	"source_core_fingerprint":             fingerprintCache,
@@ -120,11 +124,15 @@ func Dump(ctx context.Context, opener graph.ScopedProjectionSnapshotOpener, scop
 	return Result{Rows: rows, Digest: hex.EncodeToString(sum[:]), VolatileVersion: v.Version}, nil
 }
 
-// canonicalMeta marshals a copy of meta without the Volatile keys.
+// canonicalMeta marshals a copy of meta without the Volatile keys. An empty
+// result renders as null, the same as a nil Meta.
 func canonicalMeta(meta map[string]any, v Volatile) (string, error) {
 	m := maps.Clone(meta)
 	for key := range v.Keys {
 		delete(m, key)
+	}
+	if len(m) == 0 {
+		return "null", nil
 	}
 	b, err := json.Marshal(m)
 	if err != nil {

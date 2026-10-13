@@ -38,7 +38,7 @@ func TestGraphdump_Dump(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, full.Rows, 3)
 	require.True(t, sort.StringsAreSorted(full.Rows))
-	require.Equal(t, "graphdump-volatile/2", full.VolatileVersion)
+	require.Equal(t, "graphdump-volatile/3", full.VolatileVersion)
 	require.Contains(t, strings.Join(full.Rows, "\n"), `"stamp"`, "a key outside the allowlist stays in the rows")
 	again, err := Dump(ctx, store, scope, DeterministicVolatile)
 	require.NoError(t, err)
@@ -65,4 +65,30 @@ func TestGraphdump_Dump(t *testing.T) {
 	got[1] += "x"
 	diff := FirstDiff(full.Rows, got, 1)
 	require.Equal(t, "- [1] "+strings.ReplaceAll(full.Rows[1], "\x1f", " | ")+"\n", diff)
+}
+
+// TestGraphdump_EmptiedMetaIsNull locks the v3 rule: a Meta left empty by
+// stripping volatile keys renders exactly like a node with no Meta, so an
+// incrementally patched file node equals its clean build.
+func TestGraphdump_EmptiedMetaIsNull(t *testing.T) {
+	store, err := store_sqlite.Open(filepath.Join(t.TempDir(), "graph.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	node := func(id string, meta map[string]any) *graph.Node {
+		return &graph.Node{
+			ID: id, Kind: graph.KindFile, Name: id, FilePath: id,
+			RepoPrefix: "fx/repo", WorkspaceID: "ws", ProjectID: "project", Meta: meta,
+		}
+	}
+	store.AddBatch([]*graph.Node{
+		node("fx/repo/clean.yaml", nil),
+		node("fx/repo/patched.yaml", map[string]any{"source_core_fingerprint": "f"}),
+	}, nil)
+	scope := graph.ProjectionScope{Workspace: "ws", Project: "project", Repositories: []string{"fx/repo"}}
+	res, err := Dump(context.Background(), store, scope, DeterministicVolatile)
+	require.NoError(t, err)
+	require.Len(t, res.Rows, 2)
+	for _, row := range res.Rows {
+		require.True(t, strings.HasSuffix(row, "\x1fnull"), "row %q", row)
+	}
 }

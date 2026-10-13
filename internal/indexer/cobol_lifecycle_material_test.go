@@ -4,16 +4,12 @@ package indexer
 
 import (
 	"encoding/json"
-	"maps"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zzet/gortex/internal/graph"
-	"github.com/zzet/gortex/internal/testutil/graphdump"
 )
 
 // The material half of the Phase 4 lifecycle harness (D-04, D-06): an
@@ -46,31 +42,6 @@ func (env *cobolLifecycleEnv) reconfigure(t *testing.T, repo, yaml string) *Inde
 	res, err := env.mi.IncrementalReindexRepo(repo, nil)
 	require.NoError(t, err)
 	return res
-}
-
-// requireConfigCleanEquivalent is requireCleanEquivalent for a sequence that
-// added repo's .gortex.yaml on the incremental path. graphdump strips the
-// incremental-only source_*_fingerprint keys, so a file node whose Meta held
-// nothing else dumps as {} where a clean build dumps null; that holds for
-// every non-COBOL file and predates this plan (04-09 deferred-items.md). Only
-// that row of repo's .gortex.yaml is normalized; every other row, COBOL
-// included, must match the clean build exactly.
-func (env *cobolLifecycleEnv) requireConfigCleanEquivalent(t *testing.T, repo string) graphdump.Result {
-	t.Helper()
-	got := env.dump(t)
-	want := cleanCobolDump(t, env.repos, slices.Sorted(maps.Keys(env.repos))...)
-	configRow := "N\x1f" + repo + "/.gortex.yaml\x1f"
-	rows := slices.Clone(got.Rows)
-	for i, line := range rows {
-		if strings.HasPrefix(line, configRow) && strings.HasSuffix(line, "\x1f{}") {
-			rows[i] = strings.TrimSuffix(line, "{}") + "null"
-		}
-	}
-	require.Equal(t, want.Rows, rows, graphdump.FirstDiff(want.Rows, rows, 20))
-	for _, line := range rows {
-		require.NotContains(t, line, "restub_prev_")
-	}
-	return got
 }
 
 // cobolFileCount returns how many of repo's files are COBOL.
@@ -109,7 +80,7 @@ func TestCobolLifecycle_ConfigChange(t *testing.T) {
 
 		res := env.reconfigure(t, "crossa", "index:\n  cobol:\n    db2_default_schema: MYSCH\n")
 		assert.GreaterOrEqual(t, res.StaleFileCount, env.cobolFileCount("crossa"))
-		got := env.requireConfigCleanEquivalent(t, "crossa")
+		got := env.requireCleanEquivalent(t)
 		var aliases []cobolDumpEdge
 		for _, e := range cobolDumpEdges(t, got) {
 			if e.kind == string(graph.EdgeAliases) && e.from == "crossa/db2::_unqualified/ORDERS" {
@@ -126,7 +97,7 @@ func TestCobolLifecycle_ConfigChange(t *testing.T) {
 	t.Run("allowlist", func(t *testing.T) {
 		res := env.reconfigure(t, "crossa", cobolCrossAllowlist)
 		assert.GreaterOrEqual(t, res.StaleFileCount, env.cobolFileCount("crossa"))
-		got := env.requireConfigCleanEquivalent(t, "crossa")
+		got := env.requireCleanEquivalent(t)
 		xpgm := cobolPlaceholderEdge(t, cobolDumpEdges(t, got), "crossa", "unresolved::cobol::program::XPGM")
 		assert.Equal(t, "crossb/cobol/xpgm.cbl::XPGM", xpgm.to)
 	})
@@ -161,5 +132,5 @@ func TestCobolLifecycle_UnrelatedConfig(t *testing.T) {
 	after, ok := env.storedCobolMaterial(t, "crossa")
 	require.True(t, ok)
 	assert.Equal(t, before, after)
-	env.requireConfigCleanEquivalent(t, "crossa")
+	env.requireCleanEquivalent(t)
 }

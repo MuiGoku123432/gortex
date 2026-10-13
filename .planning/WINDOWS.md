@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 7
+open_count: 6
 waived_count: 0
-fixed_count: 0
+fixed_count: 1
 total_count: 7
-last_updated: 2026-10-13T05:02:39.021Z
+last_updated: 2026-10-13T05:09:07.178Z
 ---
 
 # Broken Windows Ledger
@@ -21,7 +21,7 @@ last_updated: 2026-10-13T05:02:39.021Z
 | 4 | 03 | unrun-verify | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: data-division EXEC SQL (DECLARE CURSOR in WORKING-STORAGE) program-node flow source is unreachable under the pinned grammar (parses as ERROR, grades red); the fallback is untested | open |  | 2026-10-02T08:58:47.249Z |  |
 | 5 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: INSERT INTO T1 SELECT ... FROM T2 reads of T2 are not emitted; the producer leaves the SELECT in sql_unparsed_tail (Phase 5 producer gap, no guess) | open |  | 2026-10-02T08:58:47.347Z |  |
 | 6 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-10: every EXEC SQL statement leaves an sql_unparsed_tail under the pinned producer, so any SQL-bearing COBOL document grades amber (unparsed-tail); the 03-10 acceptance program is amber, not green. Phase 5 producer gap | open |  | 2026-10-02T09:29:09.876Z |  |
-| 7 | 04 | deviation | internal/indexer/cobol_lifecycle_material_test.go |  | 04-09 config-change tests normalize the incrementally added .gortex.yaml file-node Meta ({} vs null); graphdump empty-Meta gap deferred (deferred-items.md) | open |  | 2026-10-13T05:02:39.021Z |  |
+| 7 | 04 | deviation | internal/indexer/cobol_lifecycle_material_test.go |  | 04-09 config-change tests normalize the incrementally added .gortex.yaml file-node Meta ({} vs null); graphdump empty-Meta gap deferred (deferred-items.md) | fixed |  | 2026-10-13T05:02:39.021Z | 2026-10-13T05:09:07.178Z |
 
 ````json
 [
@@ -109,10 +109,10 @@ last_updated: 2026-10-13T05:02:39.021Z
     "file": "internal/indexer/cobol_lifecycle_material_test.go",
     "line": null,
     "description": "04-09 config-change tests normalize the incrementally added .gortex.yaml file-node Meta ({} vs null); graphdump empty-Meta gap deferred (deferred-items.md)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-13T05:02:39.021Z",
-    "resolved_at": null,
+    "resolved_at": "2026-10-13T05:09:07.178Z",
     "milestone": "v1.0"
   }
 ]
