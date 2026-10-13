@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-21-PLAN.md
-last_updated: "2026-10-13T22:13:00.519Z"
+stopped_at: Completed 04-22-PLAN.md
+last_updated: "2026-10-13T22:29:12.286Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 04 execution started
-state_head: 0448ac9f1526d37dc46549a9eee2c4870952040e
+state_head: b23a688f39d205a044579929357e2d8b206c71d9
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 52
-  completed_plans: 51
+  completed_plans: 52
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 4 of 22
+Plan: 5 of 22
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 04 execution started
 
@@ -112,6 +112,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P19 | 19min | 3 tasks | 3 files |
 | Phase 04 P20 | 35min | 2 tasks | 5 files |
 | Phase 04 P21 | 38min | 3 tasks | 5 files |
+| Phase 04 P22 | 15min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -226,6 +227,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-21: Nested track/untrack reconciles each enclosing repository with the existing scoped IncrementalReindexRepo(outer,[nestedRoot]) after the trigger releases all locks; skipped inside RunRepositoryTopologyBatch
 - [Phase 04]: 04-21: Track-side enclosing reconcile runs only when the outer FileMtimes holds a key under the nested root; untrack always admits
 - [Phase 04]: 04-21: ReconcileRepoCtx (warm-restart) intentionally does not reconcile enclosing repos; MCP outer_indexed_first fixture uses it to keep exercising the physical-owner gate
+- [Phase 04]: 04-22: filesystem walks under a gated root (move_symbol, inline_symbol, generate_skill) gate each entry by physical owner via requirePathSourceScope; out-of-scope entries are skipped, not refused (refusal policy stays with WR-04/IN-06)
+- [Phase 04]: 04-22: find_declaration regex branch filters by scope before capping (GrepRegexpForRepos per-repo cap, WR-05)
 
 ### Pending Todos
 
@@ -254,6 +257,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T22:13:00.457Z
-Stopped at: Completed 04-21-PLAN.md
+Last session: 2026-10-13T22:29:12.226Z
+Stopped at: Completed 04-22-PLAN.md
 Resume file: None
