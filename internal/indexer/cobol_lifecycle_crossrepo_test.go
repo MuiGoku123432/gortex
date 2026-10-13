@@ -268,3 +268,21 @@ func TestCobolLifecycle_NestedTrackLater(t *testing.T) {
 	gotEnv.track(t, "lifea", "nestb")
 	requireSameDump(t, want, gotEnv.dump(t))
 }
+
+// TestCobolLifecycle_NestedUntrack proves ID-09 for an untrack: after the
+// nested repository is untracked, the outer repository's graph equals a
+// clean build of the outer repository holding the nested files (WR-01, SC-4).
+func TestCobolLifecycle_NestedUntrack(t *testing.T) {
+	merged := maps.Clone(nestedCobolOuter)
+	for rel, src := range nestedCobolInner {
+		merged["nested/"+rel] = src
+	}
+	single := map[string]map[string]string{"lifea": merged}
+	want := cleanCobolDump(t, single, "lifea")
+
+	env := newNestedCobolEnv(t)
+	env.track(t, "nestb", "lifea")
+	env.mi.UntrackRepo("nestb")
+	env.repos = single
+	requireSameDump(t, want, env.dump(t))
+}

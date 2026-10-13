@@ -328,3 +328,37 @@ func TestNestedTrackedRoot_TrackInsideTopologyBatchCompletes(t *testing.T) {
 	}
 	require.NotNil(t, mi.GetMetadata("beta"))
 }
+
+// TestNestedTrackedRoot_UntrackAdmits: untracking beta returns its files to
+// alpha in the same call, through either public untrack entry point, with no
+// further reindex (WR-01, ID-09, SC-4).
+func TestNestedTrackedRoot_UntrackAdmits(t *testing.T) {
+	untracks := map[string]func(t *testing.T, mi *MultiIndexer){
+		"UntrackRepo": func(t *testing.T, mi *MultiIndexer) { mi.UntrackRepo("beta") },
+		"UntrackRepoChecked": func(t *testing.T, mi *MultiIndexer) {
+			_, _, err := mi.UntrackRepoChecked(context.Background(), "beta")
+			require.NoError(t, err)
+		},
+	}
+	for name, untrack := range untracks {
+		t.Run(name, func(t *testing.T) {
+			alphaDir, betaDir := writeNestedTrackedRepos(t)
+			mi, store := newNestedTrackedMulti(t, []config.RepoEntry{
+				{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+				{Path: betaDir, Name: "beta", Workspace: "shared"},
+			})
+			_, err := mi.IndexScoped("", "")
+			require.NoError(t, err)
+
+			untrack(t, mi)
+
+			require.NotNil(t, store.GetNode("alpha/nested/main.go::ZebraWidget"))
+			require.Equal(t, "alpha", mi.RepoForFile(filepath.Join(betaDir, "main.go")))
+			d, ok := graph.ReadPrefixDiagnostics(store, 5)
+			require.True(t, ok, "the SQLite store must answer the ownership audit")
+			require.Zero(t, d.UnownedCodeNodes, "unowned nodes (%s)", d.Summary())
+			require.Zero(t, d.MisprefixedNodes, "misprefixed nodes: %v (%s)", d.MisprefixedSamples, d.Summary())
+			require.True(t, d.Clean(), "repo ownership audit must be clean (%s)", d.Summary())
+		})
+	}
+}

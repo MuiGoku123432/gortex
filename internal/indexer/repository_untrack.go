@@ -31,7 +31,36 @@ func (mi *MultiIndexer) purgeRepoChecked(
 	return mi.untrackRepoChecked(ctx, repoPrefix, true, finalize)
 }
 
+// untrackRepoChecked tears the repository down, then admits its former root
+// into every enclosing repository. UntrackRepo, UntrackRepoChecked and
+// purgeRepoChecked all pass through here (WR-01, ID-09). The teardown holds
+// the batch gate and the topology writer through its defers, so the admission
+// runs only after it returns.
 func (mi *MultiIndexer) untrackRepoChecked(
+	ctx context.Context,
+	repoPrefix string,
+	force bool,
+	finalize func(*RepoMetadata) error,
+) (nodesRemoved, edgesRemoved int, err error) {
+	// A retry finds the registry entry already hidden; the continuation keeps
+	// the metadata until the teardown completes.
+	root := ""
+	mi.mu.RLock()
+	if meta := mi.repos[repoPrefix]; meta != nil {
+		root = meta.RootPath
+	} else if state := mi.pendingRepositoryUntracks[repoPrefix]; state != nil && state.metadata != nil {
+		root = state.metadata.RootPath
+	}
+	mi.mu.RUnlock()
+
+	nodesRemoved, edgesRemoved, err = mi.untrackRepoTeardown(ctx, repoPrefix, force, finalize)
+	if err == nil {
+		mi.reconcileEnclosingRepos(ctx, root, false)
+	}
+	return nodesRemoved, edgesRemoved, err
+}
+
+func (mi *MultiIndexer) untrackRepoTeardown(
 	ctx context.Context,
 	repoPrefix string,
 	force bool,
