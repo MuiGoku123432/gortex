@@ -292,6 +292,38 @@ func TestCobolLifecycle_CrossRepoIncremental(t *testing.T) {
 	assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
 }
 
+// TestCobolLifecycle_CrossRepoUntrack binds crossa's CALL and COPY into
+// crossb through its resolve_from, then untracks crossb: crossa's edges go
+// back to their placeholders as missing, the result equals a clean build of
+// crossa alone (ID-05, ID-09), and re-tracking crossb binds them again.
+func TestCobolLifecycle_CrossRepoUntrack(t *testing.T) {
+	repos := cobolCrossRepos(map[string]string{".gortex.yaml": cobolCrossAllowlist})
+	env := newCobolLifecycleEnv(t, repos)
+	env.track(t, "crossa", "crossb")
+	edges := cobolDumpEdges(t, env.requireCleanEquivalent(t))
+	require.Equal(t, "crossb/cobol/xpgm.cbl::XPGM",
+		cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::program::XPGM").to)
+	require.Equal(t, "crossb/copy/xcpy.cpy",
+		cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::copybook::XCPY").to)
+
+	_, _, err := env.mi.UntrackRepoChecked(context.Background(), "crossb")
+	require.NoError(t, err)
+	crossb := env.repos["crossb"]
+	delete(env.repos, "crossb")
+	edges = cobolDumpEdges(t, env.requireCleanEquivalent(t))
+	for _, placeholder := range []string{"unresolved::cobol::program::XPGM", "unresolved::cobol::copybook::XCPY"} {
+		e := cobolPlaceholderEdge(t, edges, "crossa", placeholder)
+		assert.Equal(t, placeholder, e.to)
+		assert.Equal(t, "missing", e.meta["cobol_unresolved_reason"])
+	}
+
+	env.repos["crossb"] = crossb
+	env.track(t, "crossb")
+	edges = cobolDumpEdges(t, env.requireCleanEquivalent(t))
+	assert.Equal(t, "crossb/cobol/xpgm.cbl::XPGM",
+		cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::program::XPGM").to)
+}
+
 // TestCobolLifecycle_Interrupted interrupts a reindex after parse, evict, and
 // AddBatch but before its resolver tail: the store holds placeholders, never
 // a wrong binding, and a warm restart over the same SQLite file converges to

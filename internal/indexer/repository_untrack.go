@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/reach"
 	"github.com/zzet/gortex/internal/search"
 )
@@ -205,6 +206,18 @@ func (mi *MultiIndexer) untrackRepoChecked(
 func (mi *MultiIndexer) purgeRepositoryPayload(
 	repoPrefix string, meta *RepoMetadata,
 ) (nodesRemoved, edgesRemoved int, err error) {
+	// The purge deletes every edge whose target is in repoPrefix, including
+	// other repositories' COBOL CALL/COPY edges bound into it (D-09). Return
+	// those to their placeholders first, as file eviction does, and
+	// re-decide the affected repositories once the payload is gone, so the
+	// result equals a clean build without repoPrefix.
+	if reconcile := mi.restubCobolEdgesInto(repoPrefix); reconcile != nil {
+		defer func() {
+			if err == nil {
+				mi.reconcileCobolRepos(reconcile)
+			}
+		}()
+	}
 	if purger, ok := mi.graph.(interface{ PurgeRepo(string) error }); ok {
 		if err := purger.PurgeRepo(repoPrefix); err != nil {
 			return 0, 0, fmt.Errorf("purge repository payload: %w", err)
@@ -215,4 +228,48 @@ func (mi *MultiIndexer) purgeRepositoryPayload(
 		return 0, 0, nil
 	}
 	return evictRepoAllGenerations(mi.graph, repoPrefix)
+}
+
+// restubCobolEdgesInto moves every COBOL CALL/COPY edge from another
+// repository that is bound to a program or copybook of repoPrefix back to its
+// cobol_placeholder, and returns the repositories to reconcile after the
+// purge: repoPrefix (which expands to every repository whose resolve_from
+// names it, while its mutation lane still counts it as tracked) plus each
+// restubbed edge's caller repository. It returns nil when repoPrefix holds
+// no COBOL program or copybook, so no other repository can bind into it.
+func (mi *MultiIndexer) restubCobolEdgesInto(repoPrefix string) map[string]struct{} {
+	var ids []string
+	for _, n := range mi.graph.GetRepoNodesByLanguage(repoPrefix, "cobol") {
+		if n == nil {
+			continue
+		}
+		if kind, _ := n.Meta["cobol_kind"].(string); kind == "program" || kind == "copybook" {
+			ids = append(ids, n.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	repos := map[string]struct{}{repoPrefix: {}}
+	var batch []graph.EdgeReindex
+	for _, edges := range mi.graph.GetInEdgesByNodeIDs(ids) {
+		for _, e := range edges {
+			if e == nil {
+				continue
+			}
+			placeholder, _ := e.Meta["cobol_placeholder"].(string)
+			from := graph.RepoPrefixOfID(e.From)
+			if placeholder == "" || from == repoPrefix || e.To == placeholder {
+				continue
+			}
+			oldTo := e.To
+			e.To, e.CrossRepo = placeholder, false
+			batch = append(batch, graph.EdgeReindex{Edge: e, OldTo: oldTo})
+			repos[from] = struct{}{}
+		}
+	}
+	if len(batch) > 0 {
+		mi.graph.ReindexEdges(batch)
+	}
+	return repos
 }
