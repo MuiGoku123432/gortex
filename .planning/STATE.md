@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-20-PLAN.md
-last_updated: "2026-10-13T21:31:55.760Z"
+stopped_at: Completed 04-21-PLAN.md
+last_updated: "2026-10-13T22:13:00.519Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 04 execution started
-state_head: 13d9d1eb6e66c9801fcf3016d6b93f66e1b21476
+state_head: 0448ac9f1526d37dc46549a9eee2c4870952040e
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 52
-  completed_plans: 50
+  completed_plans: 51
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 3 of 22
+Plan: 4 of 22
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 04 execution started
 
@@ -111,6 +111,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P18 | 24min | 2 tasks | 6 files |
 | Phase 04 P19 | 19min | 3 tasks | 3 files |
 | Phase 04 P20 | 35min | 2 tasks | 5 files |
+| Phase 04 P21 | 38min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -222,6 +223,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-19: explore refuses unbound multi-repo artifact-probe requests from task text alone (D-13) and admits lane matches through filterTextMatchesByResolvedScope (D-16)
 - [Phase 04]: 04-19: source-channel inventory is a parse-level test (Grep* calls + filesystem walks keyed by enclosing function)
 - [Phase 04]: 04-20: nested-root pruning reads only live MultiIndexer state (mi.repos + reference-counted mi.pendingRoots declared by indexMultiRepo and the daemon warmup via DeclarePendingRoots) under one mi.mu.RLock; the per-Indexer config copy is removed (CR-01, WR-01)
+- [Phase 04]: 04-21: Nested track/untrack reconciles each enclosing repository with the existing scoped IncrementalReindexRepo(outer,[nestedRoot]) after the trigger releases all locks; skipped inside RunRepositoryTopologyBatch
+- [Phase 04]: 04-21: Track-side enclosing reconcile runs only when the outer FileMtimes holds a key under the nested root; untrack always admits
+- [Phase 04]: 04-21: ReconcileRepoCtx (warm-restart) intentionally does not reconcile enclosing repos; MCP outer_indexed_first fixture uses it to keep exercising the physical-owner gate
 
 ### Pending Todos
 
@@ -250,6 +254,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T21:31:55.702Z
-Stopped at: Completed 04-20-PLAN.md
+Last session: 2026-10-13T22:13:00.457Z
+Stopped at: Completed 04-21-PLAN.md
 Resume file: None
