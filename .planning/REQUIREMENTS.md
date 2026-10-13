@@ -75,9 +75,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 - [x] **ID-01**: Source-file and declaration identities MUST extend Gortex's existing repository-prefixed identity convention.
 - [x] **ID-02**: Stable declaration identity MUST NOT use source line number as its sole discriminator.
-- [ ] **ID-03**: Paragraph identity MUST include its owning program context.
+- [x] **ID-03**: Paragraph identity MUST include its owning program context.
 - [ ] **ID-04**: Resource identity MUST include the minimum available namespace needed to avoid merging distinct same-named artifacts.
-- [ ] **ID-05**: Multiple source occurrences supporting the same semantic relationship MUST retain distinguishable provenance.
+- [x] **ID-05**: Multiple source occurrences supporting the same semantic relationship MUST retain distinguishable provenance.
 - [ ] **ID-06**: Reindexing identical source, parser, extractor, and material configuration MUST produce the same active deterministic node, edge, and finding identities.
 - [ ] **ID-07**: Incremental reconciliation for a changed or deleted file MUST remove stale active observations owned by the prior file generation.
 - [ ] **ID-08**: A parser, extractor, retrieval, or material configuration change MUST invalidate affected observations even when source bytes are unchanged.
@@ -250,9 +250,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | DET-12 | Phase 3 | Gaps Found |
 | ID-01 | Phase 2 | Complete |
 | ID-02 | Phase 2 | Complete |
-| ID-03 | Phase 4 | Pending |
+| ID-03 | Phase 4 | Complete |
 | ID-04 | Phase 4 | Pending |
-| ID-05 | Phase 4 | Pending |
+| ID-05 | Phase 4 | Complete |
 | ID-06 | Phase 4 | Pending |
 | ID-07 | Phase 4 | Pending |
 | ID-08 | Phase 4 | Pending |
