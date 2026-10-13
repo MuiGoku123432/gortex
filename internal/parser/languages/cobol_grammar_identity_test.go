@@ -95,3 +95,130 @@ func TestCobolGrammar_ProgramIDEncoding(t *testing.T) {
 		assert.Equal(t, outer, call.Meta["cobol_caller_program"])
 	})
 }
+
+const cobolPlaceholderFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PHPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CUSTREC.
+-INC CUSTREC
+           EXEC SQL INCLUDE CUSTREC END-EXEC.
+       COPY IDMS RECORD EMP-REC.
+       01 WS-PGM PIC X(8).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'SUBPGM'.
+           EXEC CICS LINK PROGRAM('SUBPGM') END-EXEC.
+           EXEC CICS XCTL PROGRAM('SUBPGM') END-EXEC.
+           CALL WS-PGM.
+           GOBACK.
+`
+
+const cobolLibraryFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LIBPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CUSTREC OF prodlib.
+       COPY PLAINREC.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           GOBACK.
+`
+
+// cobolEdgesTo returns every edge of kind whose target is to.
+func cobolEdgesTo(result *parser.ExtractionResult, to string, kind graph.EdgeKind) []*graph.Edge {
+	var edges []*graph.Edge
+	for _, e := range result.Edges {
+		if e.To == to && e.Kind == kind {
+			edges = append(edges, e)
+		}
+	}
+	return edges
+}
+
+func TestCobolGrammar_Placeholder(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/ph.cbl"
+	result := extractCobolGrammar(t, e, path, cobolPlaceholderFixture)
+
+	t.Run("call", func(t *testing.T) {
+		const program = "unresolved::cobol::program::SUBPGM"
+		calls := cobolEdgesTo(result, program, graph.EdgeCalls)
+		require.Len(t, calls, 3, "CALL, CICS LINK, and CICS XCTL")
+		for _, edge := range calls {
+			assert.Equal(t, program, edge.Meta["cobol_placeholder"], "line %d", edge.Line)
+			assert.Equal(t, edge.To, edge.Meta["cobol_placeholder"], "line %d", edge.Line)
+		}
+	})
+
+	t.Run("copy", func(t *testing.T) {
+		const book = "unresolved::cobol::copybook::CUSTREC"
+		forms := map[string]bool{}
+		for _, edge := range cobolEdgesTo(result, book, graph.EdgeImports) {
+			forms[edge.Meta["cobol_copy_form"].(string)] = true
+			assert.Equal(t, book, edge.Meta["cobol_placeholder"], "form %v", edge.Meta["cobol_copy_form"])
+		}
+		assert.Equal(t, map[string]bool{"copy": true, "inc": true, "sql_include": true}, forms)
+	})
+
+	t.Run("never_bound", func(t *testing.T) {
+		idms := cobolEdgesTo(result, "unresolved::cobol::copybook::idms/RECORD/EMP-REC", graph.EdgeImports)
+		require.Len(t, idms, 1)
+		assert.NotContains(t, idms[0].Meta, "cobol_placeholder")
+
+		dynamic := cobolEdgesTo(result, "unresolved::cobol::dynamic::program::"+path+"::PHPGM::WS-PGM", graph.EdgeCalls)
+		require.Len(t, dynamic, 1)
+		assert.NotContains(t, dynamic[0].Meta, "cobol_placeholder")
+	})
+
+	t.Run("library_key", func(t *testing.T) {
+		lib := extractCobolGrammar(t, e, "src/lib.cbl", cobolLibraryFixture)
+		with := cobolEdgesTo(lib, "unresolved::cobol::copybook::CUSTREC", graph.EdgeImports)
+		require.Len(t, with, 1)
+		assert.Equal(t, "prodlib", with[0].Meta["cobol_copy_library"])
+		assert.Equal(t, "PRODLIB", with[0].Meta["cobol_copy_library_key"])
+
+		without := cobolEdgesTo(lib, "unresolved::cobol::copybook::PLAINREC", graph.EdgeImports)
+		require.Len(t, without, 1)
+		assert.NotContains(t, without[0].Meta, "cobol_copy_library")
+		assert.NotContains(t, without[0].Meta, "cobol_copy_library_key")
+	})
+}
+
+func TestCobolGrammar_Occurrences(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/occ.cbl"
+	const target = "unresolved::cobol::program::SUBPGM"
+
+	t.Run("distinct_lines", func(t *testing.T) {
+		src := cobolNestedPair("OCCPGM", "INNERPGM", "           CALL 'SUBPGM'.\n           CALL 'SUBPGM'.\n")
+		calls := cobolEdgesTo(extractCobolGrammar(t, e, path, src), target, graph.EdgeCalls)
+		require.Len(t, calls, 2)
+		assert.NotEqual(t, calls[0].Line, calls[1].Line)
+		assert.NotEqual(t, calls[0].Meta["cobol_statement_symbol"], calls[1].Meta["cobol_statement_symbol"])
+		assert.NotContains(t, calls[0].Meta, "cobol_occurrence_count")
+	})
+
+	t.Run("same_line", func(t *testing.T) {
+		src := cobolNestedPair("OCCPGM", "INNERPGM", "           CALL 'SUBPGM'. CALL 'SUBPGM'.\n")
+		result := extractCobolGrammar(t, e, path, src)
+		calls := cobolEdgesTo(result, target, graph.EdgeCalls)
+		require.Len(t, calls, 1)
+		assert.Equal(t, 2, calls[0].Meta["cobol_occurrence_count"])
+		symbols, ok := calls[0].Meta["cobol_statement_symbols"].([]string)
+		require.True(t, ok, "cobol_statement_symbols = %#v", calls[0].Meta["cobol_statement_symbols"])
+		require.Len(t, symbols, 2)
+		assert.NotEqual(t, symbols[0], symbols[1])
+
+		columns := map[int]bool{}
+		for _, sym := range symbols {
+			for _, n := range result.Nodes {
+				if n.ID == path+"::"+sym {
+					assert.Equal(t, graph.KindLocal, n.Kind, sym)
+					columns[n.StartColumn] = true
+				}
+			}
+		}
+		assert.Len(t, columns, 2, "each statement node has its own start column")
+	})
+}
