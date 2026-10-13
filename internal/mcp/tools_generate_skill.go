@@ -142,6 +142,18 @@ func (s *Server) handleGenerateSkill(ctx context.Context, req mcp.CallToolReques
 	// is bounded even on huge trees.
 	refs := []generateSkillRef{}
 	skipped := 0
+	// The root gate above does not cover the entries below it: a tracked
+	// root nested under absDir, or a symlinked file, would otherwise be
+	// copied into the bundle (D-13, D-20). Each entry passes the same
+	// physical-owner gate against the repository that owns the walk root,
+	// attributed as requirePathSourceScope attributes a location.
+	rootRepo := ""
+	if s.multiIndexer != nil {
+		rootRepo = s.multiIndexer.RepoForFile(absDir)
+		if view := requestViewPathRoot(ctx); view.contains(absDir) {
+			rootRepo = view.repoPrefix
+		}
+	}
 	walkErr := filepath.WalkDir(absDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -160,6 +172,13 @@ func (s *Server) handleGenerateSkill(ctx context.Context, req mcp.CallToolReques
 			return nil
 		}
 		if d.IsDir() {
+			if s.requirePathSourceScope(ctx, rootRepo, path) != nil {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if s.requirePathSourceScope(ctx, rootRepo, path) != nil {
+			skipped++
 			return nil
 		}
 

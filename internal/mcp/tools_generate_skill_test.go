@@ -286,3 +286,26 @@ func TestValidateSkillNameComponent(t *testing.T) {
 		require.Error(t, validateSkillNameComponent(name), "%q must be refused", name)
 	}
 }
+
+// TestGenerateSkill_NestedTrackedRootExcluded: an alpha-scoped generate_skill
+// over alpha's directory bundles alpha's files and none from beta, whose
+// tracked root sits inside alpha (D-13, D-20, SEC-02).
+func TestGenerateSkill_NestedTrackedRootExcluded(t *testing.T) {
+	srv, _, _ := newNestedGoModuleServer(t)
+	res := callSourceTool(t, srv, context.Background(), srv.handleGenerateSkill, "generate_skill", map[string]any{
+		"directory": "alpha/", "repo": "alpha", "dry_run": true, "skill_name": "alphaskill",
+	})
+	require.Falsef(t, res.IsError, "generate_skill: %s", sourceScopeText(res))
+	var out struct {
+		References []generateSkillRef `json:"references"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(sourceScopeText(res)), &out))
+	var rels []string
+	for _, ref := range out.References {
+		rels = append(rels, filepath.ToSlash(ref.RelPath))
+	}
+	assert.Contains(t, rels, "a/a.go", "alpha's own file is bundled")
+	for _, rel := range rels {
+		assert.Falsef(t, strings.HasPrefix(rel, "nested/"), "beta's file %s must not be bundled", rel)
+	}
+}

@@ -201,6 +201,30 @@ func TestMoveSymbol_NestedTrackedRootNotRewritten(t *testing.T) {
 	assert.Equal(t, string(before), string(after), "beta's use.go must stay byte-identical")
 }
 
+// TestInlineSymbol_NestedTrackedRootNotRewritten: an alpha-scoped
+// inline_symbol inlines alpha's own caller but never a file of beta, whose
+// tracked root sits inside alpha's Go module (D-20, SEC-01).
+func TestInlineSymbol_NestedTrackedRootNotRewritten(t *testing.T) {
+	srv, alphaDir, betaDir := newNestedGoModuleServer(t)
+	betaUse := filepath.Join(betaDir, "use.go")
+	before, err := os.ReadFile(betaUse)
+	require.NoError(t, err)
+
+	res := callSourceTool(t, srv, context.Background(), srv.handleInlineSymbol, "inline_symbol", map[string]any{
+		"id": "alpha/a/a.go::Foo", "repo": "alpha", "delete_after": false,
+	})
+	require.Falsef(t, res.IsError, "inline_symbol: %s", sourceScopeText(res))
+	assert.NotContains(t, sourceScopeText(res), "use.go", "the response must name no file of beta")
+
+	cBytes, err := os.ReadFile(filepath.Join(alphaDir, "c", "c.go"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(cBytes), "a.Foo()", "alpha's own caller is inlined")
+	assert.Contains(t, string(cBytes), "return 42")
+	after, err := os.ReadFile(betaUse)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "beta's use.go must stay byte-identical after inline")
+}
+
 func TestMoveSymbol_CrossPackage_CallerInTarget_BecomesBare(t *testing.T) {
 	srv, dir := setupMoveInlineRepo(t, map[string]string{
 		"pkga/a.go": `package pkga

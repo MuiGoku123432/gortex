@@ -1141,7 +1141,10 @@ func (s *Server) handleInlineSymbol(ctx context.Context, req mcp.CallToolRequest
 		callerFiles[abs] = struct{}{}
 	}
 	// Fallback: walk the module tree so callsites without resolved
-	// graph edges are still considered.
+	// graph edges are still considered. Each entry passes the physical-owner
+	// gate the edge loop gets from resolveNodePath, so a nested tracked root
+	// or a symlinked file is skipped, never inlined into (D-20).
+	// note: handleMoveSymbol and handleGenerateSkill apply the same per-entry gate.
 	if modRoot := findGoModRoot(calleeAbs); modRoot != "" {
 		_ = filepath.Walk(modRoot, func(p string, info os.FileInfo, werr error) error {
 			if werr != nil {
@@ -1152,9 +1155,15 @@ func (s *Server) handleInlineSymbol(ctx context.Context, req mcp.CallToolRequest
 				if base == ".git" || base == "vendor" || base == "node_modules" {
 					return filepath.SkipDir
 				}
+				if s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if !isGoSourcePath(p) {
+				return nil
+			}
+			if s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
 				return nil
 			}
 			callerFiles[filepath.Clean(p)] = struct{}{}
