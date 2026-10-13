@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-10-13T05:03:37.651Z"
+stopped_at: Completed 04-16-PLAN.md
+last_updated: "2026-10-13T05:30:35.171Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 2c0e9dd19c8bb2a5dce00f64aa8fd968ead05017
+state_head: 832feb47c8002f8c11e32a6decbf25c1fb585d2d
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 44
+  completed_plans: 45
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 15 of 16
+Plan: 16 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -105,6 +105,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P08 | 13 min | 1 tasks | 7 files |
 | Phase 04 P15 | 23 min | 2 tasks | 7 files |
 | Phase 04 P09 | 15 min | 1 tasks | 5 files |
+| Phase 04 P16 | 20 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -205,6 +206,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-15: Resolver.reconcileCobol runs DetectCrossRepoEdgesForReindexes on its rebound batch, so a cross-repository COBOL CALL carries cross_repo_calls on clean and incremental paths alike
 - [Phase 04]: 04-15 (D-08): above AffectedByReresolveMax both affected-by sites log 'affected-by: cap exceeded, resolving full affected set' at Info and resolve the full set
 - [Phase 04]: 04-09: COBOL material fingerprint = 48-bit BLAKE3 of CobolGrammarExtractor.MaterialIdentity plus the index.cobol JSON, stored as reserved key _cobol_material in RepoIndexState ExtractorVersions (no schema migration). Inequality marks cobol stale on the next full-root reconcile. The cobol extractorVersions entry is removed. The MCP freshness rider keeps the global snapshot. — D-06/D-07: the stamp and the invalidation trigger share one source, and only index.cobol (not the whole config hash) invalidates COBOL
+- [Phase 04]: 04-16: In Merkle mode the persisted leaf salt (|cobol-material@fp) is the record of the COBOL material fingerprint; the RepoIndexState _cobol_material row is read and re-stamped only on the non-Merkle path
+- [Phase 04]: 04-16: HEAD-move re-stamp (D-17) runs in reconcileRepoIndexState when HEAD differs from the stored IndexedSHA, grouping rows by prov_source_path and deciding from transforms.run bytes; graphdump-volatile/3 renders an emptied Meta as null
 
 ### Pending Todos
 
@@ -233,6 +236,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T05:03:31.445Z
-Stopped at: Completed 04-09-PLAN.md
+Last session: 2026-10-13T05:30:35.116Z
+Stopped at: Completed 04-16-PLAN.md
 Resume file: None

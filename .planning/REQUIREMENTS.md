@@ -80,7 +80,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - [x] **ID-05**: Multiple source occurrences supporting the same semantic relationship MUST retain distinguishable provenance.
 - [x] **ID-06**: Reindexing identical source, parser, extractor, and material configuration MUST produce the same active deterministic node, edge, and finding identities.
 - [x] **ID-07**: Incremental reconciliation for a changed or deleted file MUST remove stale active observations owned by the prior file generation.
-- [ ] **ID-08**: A parser, extractor, retrieval, or material configuration change MUST invalidate affected observations even when source bytes are unchanged.
+- [x] **ID-08**: A parser, extractor, retrieval, or material configuration change MUST invalidate affected observations even when source bytes are unchanged.
 - [ ] **ID-09**: For identical final inputs, incremental reconciliation MUST produce the same canonical active deterministic subgraph as a clean rebuild.
 
 ### Explicit Unresolved Evidence
@@ -255,7 +255,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | ID-05 | Phase 4 | Complete |
 | ID-06 | Phase 4 | Complete |
 | ID-07 | Phase 4 | Complete |
-| ID-08 | Phase 4 | Pending |
+| ID-08 | Phase 4 | Complete |
 | ID-09 | Phase 4 | Pending |
 | GAP-01 | Phase 5 | Pending |
 | GAP-02 | Phase 5 | Pending |
