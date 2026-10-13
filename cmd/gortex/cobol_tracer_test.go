@@ -362,6 +362,16 @@ func serveCobolTestDaemon(t *testing.T, dir string, store *store_sqlite.Store, i
 // returns the first content text of a successful result.
 func callCobolTracerTool(t *testing.T, socket, cwd, tool string, args map[string]any) string {
 	t.Helper()
+	text, isError := callCobolToolResult(t, socket, cwd, tool, args)
+	require.False(t, isError, "%s returned a tool error: %s", tool, text)
+	return text
+}
+
+// callCobolToolResult runs one MCP tools/call over the daemon relay and
+// returns the first content text and whether the tool reported an error. A
+// JSON-RPC error or an empty result fails the test.
+func callCobolToolResult(t *testing.T, socket, cwd, tool string, args map[string]any) (text string, isError bool) {
+	t.Helper()
 	client, err := daemon.DialTo(socket, daemon.Handshake{
 		Mode:       daemon.ModeMCP,
 		CWD:        cwd,
@@ -397,9 +407,8 @@ func callCobolTracerTool(t *testing.T, socket, cwd, tool string, args map[string
 	}
 	require.NoError(t, json.Unmarshal(reply, &resp))
 	require.Nil(t, resp.Error, "%s must not error: %s", tool, reply)
-	require.False(t, resp.Result.IsError, "%s returned a tool error: %s", tool, reply)
 	require.NotEmpty(t, resp.Result.Content, "%s returned no content: %s", tool, reply)
-	return resp.Result.Content[0].Text
+	return resp.Result.Content[0].Text, resp.Result.IsError
 }
 
 // cobolTracerSymbol is the get_symbol detail=full payload.
