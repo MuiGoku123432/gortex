@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"iter"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -20,9 +21,15 @@ const (
 	// Edge Meta written by this pass (D-12 reason vocabulary).
 	metaCobolUnresolvedReason = "cobol_unresolved_reason"
 	metaCobolCandidateIDs     = "cobol_candidate_ids"
+	// Edge Meta written on a COPY bound by library rank (D-10): the
+	// configured index of the library that holds it, and the rule name.
+	metaCobolCopySearchRank = "cobol_copy_search_rank"
+	metaCobolCopySearchRule = "cobol_copy_search_rule"
 	// Edge Meta read by this pass: the original unresolved target the
-	// extractor stamps on every literal CALL and non-IDMS COPY edge.
-	metaCobolPlaceholder = "cobol_placeholder"
+	// extractor stamps on every literal CALL and non-IDMS COPY edge, and
+	// the normalized library of a COPY ... OF/IN clause.
+	metaCobolPlaceholder    = "cobol_placeholder"
+	metaCobolCopyLibraryKey = "cobol_copy_library_key"
 
 	// Program node Meta read by this pass: true on a program contained in
 	// another program, stamped by the extractor from END PROGRAM nesting,
@@ -34,9 +41,10 @@ const (
 )
 
 // ReconcileCobol re-decides every literal COBOL CALL and COPY edge whose
-// caller repository is in changed (every edge when changed is empty) under
-// the resolve mutex. It is the entry for the incremental mutation tails, so
-// they decide each binding with the same code as ResolveAll.
+// caller repository is in changed, or resolves from a repository in changed
+// (every edge when changed is empty), under the resolve mutex. It is the
+// entry for the incremental mutation tails, so they decide each binding with
+// the same code as ResolveAll.
 func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -44,8 +52,10 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 }
 
 // reconcileCobol decides every literal COBOL CALL and non-IDMS COPY edge
-// whose caller repository is in changed, binding it to exactly one candidate
-// or returning it to its placeholder.
+// whose caller repository is in the reconcile set, binding it to exactly one
+// candidate or returning it to its placeholder. The set is changed plus every
+// repository whose policy's ResolveFrom names a changed repository; an empty
+// changed means every edge.
 //
 // PURPOSE — the extractor emits `unresolved::cobol::program::<key>` for a
 // literal CALL / LINK / XCTL and `unresolved::cobol::copybook::<key>` for a
@@ -57,15 +67,22 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // (placeholder, candidate set, caller policy) alone. A candidate is the
 // KindFunction program (Meta cobol_kind=program) or KindFile copybook
 // (cobol_kind=copybook) whose cobol_name_key equals <key> and that the
-// caller repository's graph.Scope admits; in this pass the scope is the
-// caller repository alone. A contained program (cobol_nested=true) is a
-// candidate only for a CALL whose cobol_caller_program is its
-// cobol_container, and such a candidate wins first. Otherwise top-level
-// programs in the edge's file win, then top-level programs in other files.
-// A sibling or unrelated program never reaches a contained one: COMMON is
-// not observed, so fail closed. A program node without cobol_nested
-// predates the flag and is never a candidate until the file is re-extracted.
-// One candidate binds. Zero sets To back to the placeholder with
+// caller repository's graph.Scope admits. The scope is the caller repository
+// plus its policy's directed ResolveFrom list (D-09), and candidates from all
+// of them form one union (D-19), so a same-repository candidate never
+// shadows an allowed one. Inside the caller repository a contained program
+// (cobol_nested=true) is a candidate only for a CALL whose
+// cobol_caller_program is its cobol_container, and such a candidate wins
+// outright. Otherwise top-level programs in the edge's file, else top-level
+// programs in other files, join every top-level program of the other allowed
+// repositories. A sibling or unrelated program never reaches a contained one:
+// COMMON is not observed, so fail closed. A program node without
+// cobol_nested predates the flag and is never a candidate until the file is
+// re-extracted. When the caller policy lists copybook libraries, a COPY
+// candidate ranks by the first library (configured order, narrowed to the
+// OF/IN library when the edge names one) whose repository and directory hold
+// it; unranked candidates drop out and the lowest rank wins (D-10), recorded
+// in cobol_copy_search_rank and cobol_copy_search_rule. One candidate binds. Zero sets To back to the placeholder with
 // cobol_unresolved_reason=missing; two or more set it back with ambiguous
 // plus the sorted candidate IDs in cobol_candidate_ids. A caller node with
 // no RepoPrefix never binds: its edge keeps the placeholder with
@@ -92,7 +109,8 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // issues no write and leaves every edge byte-identical.
 //
 // KEYWORDS — cobol, call, copybook, reconcile, rebind, exactly-one,
-// same-repo, ambiguous, missing, caller_unowned.
+// allowlist, resolve_from, union, library, search-order, ambiguous, missing,
+// caller_unowned.
 func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	if !r.graphHasLanguage("cobol") {
 		return
@@ -100,19 +118,30 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	programs := cobolCandidateIndex(r.nodesByKindLang(graph.KindFunction, "cobol"), "program")
 	copybooks := cobolCandidateIndex(r.nodesByKindLang(graph.KindFile, "cobol"), "copybook")
 
-	type cobolRef struct {
-		e           *graph.Edge
-		placeholder string
-		key         string
-		isProgram   bool
+	// Each COBOL repository's policy, read once for the pass. A non-empty
+	// changed set grows by every repository that resolves from it.
+	policies := make(map[string]CobolPolicy)
+	var repos map[string]struct{}
+	if len(changed) > 0 {
+		for _, index := range []map[string][]*graph.Node{programs, copybooks} {
+			for _, nodes := range index {
+				for _, n := range nodes {
+					if n.RepoPrefix != "" {
+						r.cobolPolicyFor(policies, n.RepoPrefix)
+					}
+				}
+			}
+		}
+		repos = cobolReconcileRepos(changed, policies)
 	}
+
 	var refs []cobolRef
 	add := func(e *graph.Edge, placeholder string) {
 		if e == nil {
 			return
 		}
-		if len(changed) > 0 {
-			if _, ok := changed[graph.RepoPrefixOfID(e.From)]; !ok {
+		if repos != nil {
+			if _, ok := repos[graph.RepoPrefixOfID(e.From)]; !ok {
 				return
 			}
 		}
@@ -180,7 +209,7 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 		if ref.isProgram {
 			index = programs
 		}
-		d := r.decideCobol(e, ref.key, ref.isProgram, index, scopes)
+		d := r.decideCobol(e, ref, index, policies, scopes)
 
 		to, origin, crossRepo := ref.placeholder, e.Origin, false
 		if d.bind != nil {
@@ -188,7 +217,8 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 		}
 		reason, _ := e.Meta[metaCobolUnresolvedReason].(string)
 		if e.To == to && e.Origin == origin && e.CrossRepo == crossRepo &&
-			reason == d.reason && cobolIDsEqual(e.Meta[metaCobolCandidateIDs], d.ids) {
+			reason == d.reason && cobolIDsEqual(e.Meta[metaCobolCandidateIDs], d.ids) &&
+			cobolRankEqual(e.Meta, d) {
 			continue
 		}
 
@@ -207,6 +237,16 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 			} else {
 				delete(e.Meta, metaCobolCandidateIDs)
 			}
+		}
+		if d.ranked {
+			if e.Meta == nil {
+				e.Meta = make(map[string]any, 2)
+			}
+			e.Meta[metaCobolCopySearchRank] = d.rank
+			e.Meta[metaCobolCopySearchRule] = cobolCopySearchRule
+		} else {
+			delete(e.Meta, metaCobolCopySearchRank)
+			delete(e.Meta, metaCobolCopySearchRule)
 		}
 		if oldTo != to || oldCrossRepo != crossRepo {
 			rebound = append(rebound, graph.EdgeReindex{Edge: e, OldTo: oldTo})
@@ -229,48 +269,75 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	}
 }
 
-// cobolDecision is one edge's reconcile outcome: the single bound candidate,
-// or the reason the edge stays on its placeholder and, when ambiguous, the
-// sorted candidate IDs.
+// cobolRef is one literal COBOL CALL or COPY edge the pass decides: its
+// placeholder target and the normalized key after the program or copybook
+// prefix.
+type cobolRef struct {
+	e           *graph.Edge
+	placeholder string
+	key         string
+	isProgram   bool
+}
+
+// cobolDecision is one edge's reconcile outcome: the single bound candidate
+// (with its library rank when a copybook library list decided it), or the
+// reason the edge stays on its placeholder and, when ambiguous, the sorted
+// candidate IDs.
 type cobolDecision struct {
 	bind      *graph.Node
 	crossRepo bool
+	ranked    bool
+	rank      int
 	reason    string
 	ids       []string
 }
 
-// decideCobol applies the reconcile decision rule to one edge. scopes caches
-// each caller repository's allowed scope for the pass.
-func (r *Resolver) decideCobol(e *graph.Edge, key string, isProgram bool, index map[string][]*graph.Node, scopes map[string]graph.Scope) cobolDecision {
+// decideCobol applies the reconcile decision rule to one edge. policies
+// caches each repository's policy and scopes each caller repository's
+// allowed scope for the pass.
+func (r *Resolver) decideCobol(e *graph.Edge, ref cobolRef, index map[string][]*graph.Node, policies map[string]CobolPolicy, scopes map[string]graph.Scope) cobolDecision {
 	callerRepo := r.callerRepoPrefix(e)
 	if callerRepo == "" {
 		return cobolDecision{reason: "caller_unowned"}
 	}
+	policy := r.cobolPolicyFor(policies, callerRepo)
 	scope, ok := scopes[callerRepo]
 	if !ok {
-		// The allowed set is the caller repository alone; 04-14 adds the
-		// caller policy's ResolveFrom repositories (D-09).
-		s, err := graph.NewScope("", "", []string{callerRepo})
+		// The caller repository plus its directed ResolveFrom list (D-09).
+		allowed := []string{callerRepo}
+		for _, from := range policy.ResolveFrom {
+			if from = strings.TrimSpace(from); from != "" {
+				allowed = append(allowed, from)
+			}
+		}
+		s, err := graph.NewScope("", "", allowed)
 		if err != nil {
 			return cobolDecision{reason: "caller_unowned"}
 		}
 		scopes[callerRepo], scope = s, s
 	}
 	var candidates []*graph.Node
-	for _, c := range index[callerRepo+"\x00"+key] {
-		if scope.Allows(c) {
-			candidates = append(candidates, c)
+	for _, repo := range scope.Repositories {
+		for _, c := range index[repo+"\x00"+ref.key] {
+			if scope.Allows(c) {
+				candidates = append(candidates, c)
+			}
 		}
 	}
 
-	if isProgram {
+	if ref.isProgram {
 		caller, _ := e.Meta[metaCobolCallerProgram].(string)
-		var contained, sameFile, otherFile []*graph.Node
+		var contained, sameFile, otherFile, allowedRepo []*graph.Node
 		for _, c := range candidates {
 			nested, known := c.Meta[metaCobolNested].(bool)
 			switch {
 			case !known:
 				// Indexed before the flag existed: fail closed until reindex.
+			case c.RepoPrefix != callerRepo:
+				// Another allowed repository: top-level programs only (D-19).
+				if !nested {
+					allowedRepo = append(allowedRepo, c)
+				}
 			case nested:
 				if container, _ := c.Meta[metaCobolContainer].(string); caller != "" && container == caller {
 					contained = append(contained, c)
@@ -285,15 +352,23 @@ func (r *Resolver) decideCobol(e *graph.Edge, key string, isProgram bool, index 
 		case len(contained) > 0:
 			candidates = contained
 		case len(sameFile) > 0:
-			candidates = sameFile
+			candidates = append(sameFile, allowedRepo...)
 		default:
-			candidates = otherFile
+			candidates = append(otherFile, allowedRepo...)
 		}
+	}
+
+	rank := -1
+	if !ref.isProgram && len(policy.CopybookLibraries) > 0 {
+		candidates, rank = cobolLibraryRank(e, candidates, callerRepo, policy.CopybookLibraries)
 	}
 
 	switch len(candidates) {
 	case 1:
-		return cobolDecision{bind: candidates[0], crossRepo: candidates[0].RepoPrefix != callerRepo}
+		return cobolDecision{
+			bind: candidates[0], crossRepo: candidates[0].RepoPrefix != callerRepo,
+			ranked: rank >= 0, rank: rank,
+		}
 	case 0:
 		return cobolDecision{reason: "missing"}
 	}
@@ -303,6 +378,67 @@ func (r *Resolver) decideCobol(e *graph.Edge, key string, isProgram bool, index 
 	}
 	sort.Strings(ids)
 	return cobolDecision{reason: "ambiguous", ids: ids}
+}
+
+// cobolLibraryRank keeps the copybook candidates of the lowest library rank
+// (D-10) and returns that rank, or -1 when no candidate is in any library. A
+// candidate's rank is the configured index of the first library whose
+// repository (the caller's own when Repo is empty) is the candidate's and
+// whose cleaned Path equals the directory of the candidate's
+// repository-relative path ("." for the root). Membership is exact directory
+// equality, like a flat PDS. When the edge carries a COPY ... OF/IN library
+// key, only libraries of that Name are searched.
+func cobolLibraryRank(e *graph.Edge, candidates []*graph.Node, callerRepo string, libs []CobolLibrary) ([]*graph.Node, int) {
+	libKey, _ := e.Meta[metaCobolCopyLibraryKey].(string)
+	best := -1
+	var kept []*graph.Node
+	for _, c := range candidates {
+		dir := path.Dir(strings.TrimPrefix(c.FilePath, c.RepoPrefix+"/"))
+		for i, lib := range libs {
+			if libKey != "" && lib.Name != libKey {
+				continue
+			}
+			repo := lib.Repo
+			if repo == "" {
+				repo = callerRepo
+			}
+			if repo != c.RepoPrefix || path.Clean(lib.Path) != dir {
+				continue
+			}
+			switch {
+			case best < 0 || i < best:
+				best, kept = i, []*graph.Node{c}
+			case i == best:
+				kept = append(kept, c)
+			}
+			break
+		}
+	}
+	return kept, best
+}
+
+// cobolRankEqual reports whether an edge's stored library-rank Meta matches
+// d: both keys present with d's rank and the rule when d is a library bind,
+// both absent otherwise. A disk store may decode the rank as int64 or
+// float64.
+func cobolRankEqual(meta map[string]any, d cobolDecision) bool {
+	rank, hasRank := meta[metaCobolCopySearchRank]
+	rule, hasRule := meta[metaCobolCopySearchRule]
+	if !d.ranked {
+		return !hasRank && !hasRule
+	}
+	if rule != cobolCopySearchRule {
+		return false
+	}
+	switch n := rank.(type) {
+	case int:
+		return n == d.rank
+	case int64:
+		return n == int64(d.rank)
+	case float64:
+		return n == float64(d.rank)
+	}
+	return false
 }
 
 // cobolIDsEqual reports whether a stored cobol_candidate_ids value equals

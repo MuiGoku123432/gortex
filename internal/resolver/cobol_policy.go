@@ -1,5 +1,15 @@
 package resolver
 
+import (
+	"maps"
+	"strings"
+)
+
+// cobolCopySearchRule names the D-10 ordered copybook search rule. A COPY
+// bound by library rank records it in cobol_copy_search_rule next to the
+// configured library index in cobol_copy_search_rank.
+const cobolCopySearchRule = "cobol-copy-search/1"
+
 // CobolLibrary is one entry of a repository's ordered copybook search list
 // (D-10): a library Name as a COPY ... OF/IN clause spells it, the repository
 // that holds it (empty means the caller's own), and the directory Path inside
@@ -39,13 +49,34 @@ func (r *Resolver) SetCobolPolicyLookup(fn CobolPolicyLookup) {
 	r.cobolPolicyLookup = fn
 }
 
-// cobolPolicyFor returns repo's policy, or the zero policy when no lookup is
-// installed.
-//
-//nolint:unused // read by the reconcile pass once 04-14 lands the allowlist.
-func (r *Resolver) cobolPolicyFor(repo string) CobolPolicy {
-	if r.cobolPolicyLookup == nil {
-		return CobolPolicy{}
+// cobolPolicyFor returns repo's policy from the pass cache, consulting the
+// lookup at most once per repository per pass. With no lookup installed it
+// is the zero policy.
+func (r *Resolver) cobolPolicyFor(policies map[string]CobolPolicy, repo string) CobolPolicy {
+	if p, ok := policies[repo]; ok {
+		return p
 	}
-	return r.cobolPolicyLookup(repo)
+	var p CobolPolicy
+	if r.cobolPolicyLookup != nil {
+		p = r.cobolPolicyLookup(repo)
+	}
+	policies[repo] = p
+	return p
+}
+
+// cobolReconcileRepos returns changed plus every repository in policies whose
+// ResolveFrom names a changed repository (D-09, Pitfall 5): a change in
+// repository B re-decides the edges of every repository allowed to resolve
+// against B. It never modifies changed.
+func cobolReconcileRepos(changed map[string]struct{}, policies map[string]CobolPolicy) map[string]struct{} {
+	repos := maps.Clone(changed)
+	for repo, p := range policies {
+		for _, from := range p.ResolveFrom {
+			if _, ok := changed[strings.TrimSpace(from)]; ok {
+				repos[repo] = struct{}{}
+				break
+			}
+		}
+	}
+	return repos
 }
