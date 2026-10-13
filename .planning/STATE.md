@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-15-PLAN.md
-last_updated: "2026-10-13T04:45:47.625Z"
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-10-13T05:03:37.651Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 35f3032f220155b0aa6c2e4bcb74c001eca0b87c
+state_head: 2c0e9dd19c8bb2a5dce00f64aa8fd968ead05017
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 43
+  completed_plans: 44
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 14 of 16
+Plan: 15 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -104,6 +104,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P13 | 6 min | 1 tasks | 2 files |
 | Phase 04 P08 | 13 min | 1 tasks | 7 files |
 | Phase 04 P15 | 23 min | 2 tasks | 7 files |
+| Phase 04 P09 | 15 min | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -203,6 +204,7 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-15: ReconcileRepoCtx reconciles COBOL unconditionally at the end of every warm restart, so an interrupted reindex (mtimes already persisted) converges
 - [Phase 04]: 04-15: Resolver.reconcileCobol runs DetectCrossRepoEdgesForReindexes on its rebound batch, so a cross-repository COBOL CALL carries cross_repo_calls on clean and incremental paths alike
 - [Phase 04]: 04-15 (D-08): above AffectedByReresolveMax both affected-by sites log 'affected-by: cap exceeded, resolving full affected set' at Info and resolve the full set
+- [Phase 04]: 04-09: COBOL material fingerprint = 48-bit BLAKE3 of CobolGrammarExtractor.MaterialIdentity plus the index.cobol JSON, stored as reserved key _cobol_material in RepoIndexState ExtractorVersions (no schema migration). Inequality marks cobol stale on the next full-root reconcile. The cobol extractorVersions entry is removed. The MCP freshness rider keeps the global snapshot. — D-06/D-07: the stamp and the invalidation trigger share one source, and only index.cobol (not the whole config hash) invalidates COBOL
 
 ### Pending Todos
 
@@ -231,6 +233,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T04:45:47.570Z
-Stopped at: Completed 04-15-PLAN.md
+Last session: 2026-10-13T05:03:31.445Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None
