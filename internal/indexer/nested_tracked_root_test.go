@@ -362,3 +362,52 @@ func TestNestedTrackedRoot_UntrackAdmits(t *testing.T) {
 		})
 	}
 }
+
+// TestNestedTrackedRoot_LifecycleTrackAndUntrack drives the CheckoutLifecycle
+// surfaces: Register runs TrackRepoCtx under its batch fan-out and Untrack
+// reaches purgeRepoChecked. Neither may hold a lock the enclosing reconcile
+// needs, so each step must finish within a bounded wait (SEC-08, ID-09).
+func TestNestedTrackedRoot_LifecycleTrackAndUntrack(t *testing.T) {
+	f := newLifecycleFixture(t)
+	defer f.close()
+	ctx := context.Background()
+
+	outer := f.gitRepo("outer")
+	inner := filepath.Join(outer, "inner")
+	require.NoError(t, os.MkdirAll(inner, 0o755))
+	runGit(t, inner, "init", "-q", "-b", "main")
+	writeFile(t, filepath.Join(inner, "inner.go"), "package a\n\nfunc InnerThing() {}\n")
+	const outerCopy = "outer/inner/inner.go::InnerThing"
+
+	within := func(name string, step func() error) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- step() }()
+		select {
+		case err := <-done:
+			require.NoError(t, err, name)
+		case <-time.After(2 * time.Minute):
+			t.Fatalf("%s did not complete", name)
+		}
+	}
+
+	within("register outer", func() error {
+		_, err := f.lc.Register(ctx, config.RepoEntry{Path: outer}, TrackSourceCLI)
+		return err
+	})
+	require.NotNil(t, f.store.GetNode(outerCopy), "precondition: outer indexed the nested file")
+
+	within("register inner", func() error {
+		_, err := f.lc.Register(ctx, config.RepoEntry{Path: inner}, TrackSourceCLI)
+		return err
+	})
+	require.Nil(t, f.store.GetNode(outerCopy), "tracking inner must evict outer's copy")
+	require.NotNil(t, f.store.GetNode("inner/inner.go::InnerThing"))
+
+	within("untrack inner", func() error {
+		_, err := f.lc.Untrack(ctx, inner)
+		return err
+	})
+	require.NotNil(t, f.store.GetNode(outerCopy), "untracking inner must admit its file into outer")
+	require.Equal(t, "outer", f.mi.RepoForFile(filepath.Join(inner, "inner.go")))
+}
