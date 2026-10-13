@@ -1630,17 +1630,18 @@ func (cr *CrossRepoResolver) resolveMethodCall(e *graph.Edge, methodName string,
 			}
 		}
 		// Cross-repo + exact type — bounded by the import-reachability
-		// and workspace evidence gates.
-		for _, c := range candidates {
-			if c.Kind != graph.KindMethod || nodeReceiverType(c) != receiverType {
-				continue
-			}
-			if !reachable(c.RepoPrefix) {
-				continue
-			}
-			if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-				continue
-			}
+		// and workspace evidence gates. An ambiguous tier stops the walk
+		// (D-12): a weaker tier must not bind what this one refused.
+		c, ambiguousIDs := cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+			return c.Kind == graph.KindMethod && nodeReceiverType(c) == receiverType &&
+				reachable(c.RepoPrefix) &&
+				cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+		})
+		if ambiguousIDs != nil {
+			stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+			return
+		}
+		if c != nil {
 			e.To = c.ID
 			e.Confidence = 0.85
 			e.Origin = graph.OriginASTResolved
@@ -1675,16 +1676,16 @@ func (cr *CrossRepoResolver) resolveMethodCall(e *graph.Edge, methodName string,
 			return
 		}
 	}
-	for _, c := range candidates {
-		if c.Kind != graph.KindMethod {
-			continue
-		}
-		if !reachable(c.RepoPrefix) {
-			continue
-		}
-		if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-			continue
-		}
+	c, ambiguousIDs := cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+		return c.Kind == graph.KindMethod &&
+			reachable(c.RepoPrefix) &&
+			cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+	})
+	if ambiguousIDs != nil {
+		stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+		return
+	}
+	if c != nil {
 		e.To = c.ID
 		stats.Resolved++
 		if isCrossRepoHop(callerRepo, c.RepoPrefix) {
@@ -1701,16 +1702,16 @@ func (cr *CrossRepoResolver) resolveMethodCall(e *graph.Edge, methodName string,
 			return
 		}
 	}
-	for _, c := range candidates {
-		if c.Kind != graph.KindFunction {
-			continue
-		}
-		if !reachable(c.RepoPrefix) {
-			continue
-		}
-		if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-			continue
-		}
+	c, ambiguousIDs = cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+		return c.Kind == graph.KindFunction &&
+			reachable(c.RepoPrefix) &&
+			cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+	})
+	if ambiguousIDs != nil {
+		stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+		return
+	}
+	if c != nil {
 		e.To = c.ID
 		stats.Resolved++
 		if isCrossRepoHop(callerRepo, c.RepoPrefix) {
