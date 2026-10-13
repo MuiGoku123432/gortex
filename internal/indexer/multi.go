@@ -94,6 +94,11 @@ type MultiIndexer struct {
 	// a live repo is hidden and removed only after payload, vector, config, and
 	// derived-contract cleanup have all succeeded.
 	pendingRepositoryUntracks map[string]*repositoryUntrackState
+	// pendingRoots holds the cleaned absolute roots of repositories an
+	// in-flight batch declared (DeclarePendingRoots) and may not have
+	// registered yet, with one count per declaration. Guarded by mu;
+	// nestedTrackedRootContains reads it together with repos.
+	pendingRoots map[string]int
 
 	// repositoryMutations owns one stable mutation lane per repository prefix.
 	// The slot survives Indexer replacement so an explicit re-index cannot race
@@ -373,23 +378,6 @@ func (mi *MultiIndexer) newPerRepoIndexerGuardedWithMode(
 	idx.parseAdmission.Store(mi.parseAdmission.Load())
 	idx.nativeParseAdmission.Store(mi.nativeParseAdmission.Load())
 	idx.repositoryMutationOwner = mi
-	// Seed the tracked roots once per Indexer: during a parallel warmup a
-	// sibling is not in mi.repos yet when this repository walks.
-	// ReposSnapshot copies under the config mutex and does not take mi.mu,
-	// keeping this constructor's must-not-re-enter-mi.mu guarantee. Never
-	// read the config per file.
-	if mi.configMgr != nil {
-		for _, entry := range mi.configMgr.Global().ReposSnapshot() {
-			if entry.Path == "" {
-				continue
-			}
-			abs, err := filepath.Abs(entry.Path)
-			if err != nil {
-				continue
-			}
-			idx.trackedRepoRoots = append(idx.trackedRepoRoots, filepath.Clean(abs))
-		}
-	}
 	idx.search = mi.search
 	if mi.embedder != nil {
 		idx.SetEmbedder(mi.embedder)
@@ -2136,6 +2124,59 @@ func (mi *MultiIndexer) rebuildColdRefFacts(ctx context.Context, repoPrefixes []
 }
 
 // indexMultiRepo indexes multiple repos concurrently with repo prefixes.
+// DeclarePendingRoots marks the roots of repos as about to be indexed until
+// the returned release runs.
+//
+// PURPOSE — a batch's siblings are not in mi.repos until it publishes, so a
+// walk that runs first needs the set the batch is indexing to stop at a
+// nested sibling's root. The global config is the wrong set: it misses
+// projects: entries and includes entries the batch does not index (CR-01).
+//
+// RATIONALE — counts are per declaration so one batch's release cannot drop a
+// root another in-flight batch or the daemon warmup also declared. mi.mu is
+// held only for the map updates; the caller must not hold mi.mu. release is
+// idempotent, so a deferred and an explicit call are both safe. Entries with
+// an empty or non-Abs-able path are skipped; roots are spelled
+// filepath.Clean(filepath.Abs(path)), like mi.repos.
+//
+// KEYWORDS — nested repository, pending root, walk pruning, batch, warmup.
+func (mi *MultiIndexer) DeclarePendingRoots(repos []config.RepoEntry) (release func()) {
+	roots := make([]string, 0, len(repos))
+	for _, entry := range repos {
+		if entry.Path == "" {
+			continue
+		}
+		abs, err := filepath.Abs(entry.Path)
+		if err != nil {
+			continue
+		}
+		roots = append(roots, filepath.Clean(abs))
+	}
+	mi.mu.Lock()
+	if mi.pendingRoots == nil {
+		mi.pendingRoots = make(map[string]int, len(roots))
+	}
+	for _, r := range roots {
+		mi.pendingRoots[r]++
+	}
+	mi.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			mi.mu.Lock()
+			defer mi.mu.Unlock()
+			for _, r := range roots {
+				if mi.pendingRoots[r] <= 1 {
+					delete(mi.pendingRoots, r)
+					continue
+				}
+				mi.pendingRoots[r]--
+			}
+		})
+	}
+}
+
 func (mi *MultiIndexer) indexMultiRepo(repos []config.RepoEntry) (map[string]*IndexResult, error) {
 	type repoResult struct {
 		prefix string
@@ -2209,9 +2250,17 @@ func (mi *MultiIndexer) indexMultiRepo(repos []config.RepoEntry) (map[string]*In
 	}
 
 	prefixes := make([]string, 0, len(resolved))
+	declared := make([]config.RepoEntry, 0, len(resolved))
 	for _, repo := range resolved {
 		prefixes = append(prefixes, repo.prefix)
+		declared = append(declared, repo.entry)
 	}
+	// Declare the repositories this batch indexes, including projects:
+	// entries and excluding filtered, duplicate and unopenable ones, so a
+	// worker's walk stops at a nested sibling that has not published yet
+	// (CR-01). Taken before the gate; mi.mu is not held here.
+	release := mi.DeclarePendingRoots(declared)
+	defer release()
 	// Freeze one batch-mode generation before acquiring any stable repository
 	// lane. This global gate -> sorted lanes order prevents a queued transition
 	// writer from owning the gate while waiting for a lane held by this batch.

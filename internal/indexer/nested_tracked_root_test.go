@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,9 +36,14 @@ func writeNestedTrackedRepos(t *testing.T) (alphaDir, betaDir string) {
 // newNestedTrackedMulti saves repos as the global config and builds a
 // MultiIndexer over a real SQLite store.
 func newNestedTrackedMulti(t *testing.T, repos []config.RepoEntry) (*MultiIndexer, *store_sqlite.Store) {
+	return newNestedTrackedMultiFromConfig(t, &config.GlobalConfig{Repos: repos})
+}
+
+// newNestedTrackedMultiFromConfig saves gc as the global config and builds a
+// MultiIndexer over a real SQLite store.
+func newNestedTrackedMultiFromConfig(t *testing.T, gc *config.GlobalConfig) (*MultiIndexer, *store_sqlite.Store) {
 	t.Helper()
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	gc := &config.GlobalConfig{Repos: repos}
 	gc.SetConfigPath(cfgPath)
 	require.NoError(t, gc.Save())
 	cm, err := config.NewConfigManager(cfgPath)
@@ -108,9 +114,9 @@ func TestNestedTrackedRoot_IndexedOnce(t *testing.T) {
 	}
 }
 
-// trackNestedLater indexes alpha alone (beta is not in the config, so alpha's
-// config seed does not list it), then tracks beta without touching the
-// config.
+// trackNestedLater indexes alpha alone, then tracks beta without touching the
+// config. Alpha indexes the nested files because beta is neither declared by
+// alpha's batch nor registered when that batch runs.
 func trackNestedLater(t *testing.T) (mi *MultiIndexer, store *store_sqlite.Store, alphaDir, betaDir string) {
 	t.Helper()
 	alphaDir, betaDir = writeNestedTrackedRepos(t)
@@ -151,4 +157,100 @@ func TestNestedTrackedRoot_WatcherRefusesNestedEvents(t *testing.T) {
 	wb := &Watcher{indexer: mi.GetIndexer("beta"), excludes: excludes.New(excludes.Builtin)}
 	require.False(t, wb.isExcluded(filepath.Join(betaDir, "main.go")),
 		"beta's own watcher must keep admitting its files")
+}
+
+// TestNestedTrackedRoot_ProjectsMapIndexedOnce: the nested pair is defined
+// only under a projects: entry selected by active_project. The batch declares
+// the repositories it indexes, so alpha's walk stops at beta's root even
+// though the top-level repos: list is empty (CR-01 under-prune, SEC-08).
+func TestNestedTrackedRoot_ProjectsMapIndexedOnce(t *testing.T) {
+	alphaDir, betaDir := writeNestedTrackedRepos(t)
+	mi, store := newNestedTrackedMultiFromConfig(t, &config.GlobalConfig{
+		Projects: map[string]config.ProjectConfig{"p1": {Repos: []config.RepoEntry{
+			{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+			{Path: betaDir, Name: "beta", Workspace: "shared"},
+		}}},
+		ActiveProject: "p1",
+	})
+	_, err := mi.IndexScoped("", "")
+	require.NoError(t, err)
+
+	prefixes := mi.RepoPrefixes()
+	sort.Strings(prefixes)
+	require.Equal(t, []string{"alpha", "beta"}, prefixes)
+	requireNestedIndexedOnce(t, store)
+}
+
+// TestNestedTrackedRoot_OuterOwnsUnindexedNestedEntry: beta is a repos: entry
+// the batch does not index (another project is active, or IndexScoped's
+// project filter drops it). Beta's root must not prune alpha's walk, so alpha
+// owns the nested file and the graph agrees with RepoForFile (CR-01
+// over-prune, ID-09).
+func TestNestedTrackedRoot_OuterOwnsUnindexedNestedEntry(t *testing.T) {
+	cases := []struct {
+		name          string
+		activeProject string
+		projectFilter string
+	}{
+		{name: "other_active_project", activeProject: "p1"},
+		{name: "project_filter", projectFilter: "p1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			alphaDir, betaDir := writeNestedTrackedRepos(t)
+			mi, store := newNestedTrackedMultiFromConfig(t, &config.GlobalConfig{
+				Repos: []config.RepoEntry{
+					{Path: alphaDir, Name: "alpha", Workspace: "shared", Project: "p1"},
+					{Path: betaDir, Name: "beta", Workspace: "shared", Project: "p2"},
+				},
+				ActiveProject: tc.activeProject,
+			})
+			_, err := mi.IndexScoped("", tc.projectFilter)
+			require.NoError(t, err)
+
+			require.Equal(t, []string{"alpha"}, mi.RepoPrefixes())
+			require.NotNil(t, store.GetNode("alpha/nested/main.go::ZebraWidget"),
+				"an unindexed nested entry must not erase alpha's files")
+			require.Equal(t, "alpha", mi.RepoForFile(filepath.Join(betaDir, "main.go")))
+
+			d, ok := graph.ReadPrefixDiagnostics(store, 5)
+			require.True(t, ok, "the SQLite store must answer the ownership audit")
+			require.Positive(t, d.OwnedCodeNodes, "sanity: owned code nodes (%s)", d.Summary())
+			require.Zero(t, d.UnownedCodeNodes, "unowned nodes (%s)", d.Summary())
+			require.Zero(t, d.MisprefixedNodes, "misprefixed nodes: %v (%s)", d.MisprefixedSamples, d.Summary())
+			require.True(t, d.Clean(), "repo ownership audit must be clean (%s)", d.Summary())
+		})
+	}
+}
+
+// TestNestedTrackedRoot_UntrackStopsExcluding: after beta is untracked, the
+// same alpha Indexer stops excluding beta's former root at once, on the walk,
+// the explicit-path probe and the watcher, and an incremental pass indexes the
+// file under alpha (WR-01, ID-09, SC-4).
+func TestNestedTrackedRoot_UntrackStopsExcluding(t *testing.T) {
+	alphaDir, betaDir := writeNestedTrackedRepos(t)
+	mi, store := newNestedTrackedMulti(t, []config.RepoEntry{
+		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+		{Path: betaDir, Name: "beta", Workspace: "shared"},
+	})
+	_, err := mi.IndexScoped("", "")
+	require.NoError(t, err)
+	alphaBefore := mi.GetIndexer("alpha")
+	require.NotNil(t, alphaBefore)
+
+	mi.UntrackRepo("beta")
+
+	require.Same(t, alphaBefore, mi.GetIndexer("alpha"))
+	betaFile := filepath.Join(betaDir, "main.go")
+	require.False(t, alphaBefore.shouldExclude(betaFile, alphaDir, false),
+		"alpha must stop excluding an untracked root immediately")
+	skip, ok := alphaBefore.PathIndexability("nested/main.go")
+	require.True(t, ok)
+	require.False(t, skip.Skipped, "alpha must report the formerly nested file as indexable")
+	wa := &Watcher{indexer: alphaBefore, excludes: excludes.New(excludes.Builtin)}
+	require.False(t, wa.isExcluded(betaFile))
+
+	_, err = mi.IncrementalReindexRepo("alpha", []string{betaFile})
+	require.NoError(t, err)
+	require.NotNil(t, store.GetNode("alpha/nested/main.go::ZebraWidget"))
 }

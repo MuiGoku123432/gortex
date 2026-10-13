@@ -526,11 +526,6 @@ type Indexer struct {
 	repositoryMutationMu    sync.Mutex
 	repositoryMutation      *repositoryMutationCoordinator
 	repositoryMutationOwner *MultiIndexer
-	// trackedRepoRoots holds the absolute, cleaned roots of the repositories
-	// the global config tracked when the owning MultiIndexer built this
-	// Indexer. inNestedTrackedRoot reads them so a sibling that is not
-	// registered yet still stops the walk. Read-only after construction.
-	trackedRepoRoots []string
 
 	// incrementalResolveFilesHook is a focused test seam for proving a
 	// multi-file watcher batch invokes the scoped resolver exactly once. nil in
@@ -5687,21 +5682,17 @@ func (idx *Indexer) shouldExclude(path, root string, isDir bool) bool {
 // repository's files (CR-01; SEC-08 double ownership).
 //
 // RATIONALE — a root equal to or containing root never excludes anything, so
-// the nested repository's own walk is unaffected. The config seed is copied
-// once per Indexer; the seed loop reads no config, builds no slices, and
-// takes no lock. Registered roots are then read live from the owning
-// MultiIndexer, so a repository tracked later, or tracked without a config
-// entry, is honoured and the watcher stays correct after a later track.
+// the nested repository's own walk is unaffected. Roots are read live from the
+// owning MultiIndexer: the registered repositories plus the roots an in-flight
+// batch declared before its siblings publish. Nothing is copied per Indexer,
+// so a later track, an untrack, or a config reload takes effect immediately,
+// and an entry no batch indexes never prunes (CR-01, WR-01). An Indexer with
+// no owner prunes nothing.
 //
 // KEYWORDS — nested repository, tracked root, walk pruning, ownership.
 func (idx *Indexer) inNestedTrackedRoot(path, root string) bool {
 	if root == "" {
 		return false
-	}
-	for _, r := range idx.trackedRepoRoots {
-		if pathkey.HasPathPrefix(path, r) && !pathkey.EqualPaths(r, root) && pathkey.HasPathPrefix(r, root) {
-			return true
-		}
 	}
 	if owner := idx.repositoryMutationOwner; owner != nil {
 		return owner.nestedTrackedRootContains(root, path)
