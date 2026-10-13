@@ -186,3 +186,11 @@ func cobolCandidateIndex(nodes iter.Seq[*graph.Node], cobolKind string) map[stri
 	}
 	return index
 }
+
+// ReconcileCobol is a RED-phase stub (04-06): it runs the placeholder-only
+// pass so the reconcile tests compile and fail on behavior.
+func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.resolveCobolReferences()
+}
