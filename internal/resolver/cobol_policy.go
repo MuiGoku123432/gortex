@@ -10,6 +10,12 @@ import (
 // configured library index in cobol_copy_search_rank.
 const cobolCopySearchRule = "cobol-copy-search/1"
 
+// cobolQualifierRule names the D-11 default-qualifier rule. Every link edge
+// from an `_unqualified` shared resource to the qualified node its
+// repository's default schema or subschema names carries it in
+// cobol_qualifier_rule.
+const cobolQualifierRule = "cobol-default-qualifier/1"
+
 // CobolLibrary is one entry of a repository's ordered copybook search list
 // (D-10): a library Name as a COPY ... OF/IN clause spells it, the repository
 // that holds it (empty means the caller's own), and the directory Path inside

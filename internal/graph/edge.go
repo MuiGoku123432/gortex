@@ -257,6 +257,8 @@ const (
 	// EdgeAliases links a type alias `type X = Y` to its underlying
 	// type. Distinct from EdgeExtends (`type X Y` newtype) — agents
 	// distinguish by edge kind to compute correct blast radius.
+	// COBOL also uses it from an `_unqualified` shared resource to the
+	// qualified node a configured default schema or subschema names (D-11).
 	EdgeAliases EdgeKind = "aliases"
 	// EdgeComposes links a type to an embedded/composed/mixed-in type
 	// (Go struct embedding, Rust trait bounds, Python multiple

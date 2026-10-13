@@ -106,7 +106,8 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // Runs serially in ResolveAll's relative-import settle window, after
 // resolveLuaRequires, with changed = the resolve scope. It writes only the
 // edges whose decision differs from their current state, so a second run
-// issues no write and leaves every edge byte-identical.
+// issues no write and leaves every edge byte-identical. It ends with
+// reconcileCobolResources over the same repository set.
 //
 // KEYWORDS — cobol, call, copybook, reconcile, rebind, exactly-one,
 // allowlist, resolve_from, union, library, search-order, ambiguous, missing,
@@ -267,6 +268,7 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 			p.PersistEdgeAttributesBatch(stamped)
 		}
 	}
+	r.reconcileCobolResources(repos, policies)
 }
 
 // cobolRef is one literal COBOL CALL or COPY edge the pass decides: its
