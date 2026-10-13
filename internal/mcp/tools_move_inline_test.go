@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +14,10 @@ import (
 
 	"github.com/zzet/gortex/internal/config"
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
 	"github.com/zzet/gortex/internal/indexer"
 	"github.com/zzet/gortex/internal/query"
+	"github.com/zzet/gortex/internal/search"
 )
 
 // setupMoveInlineRepo materialises a tiny Go module on disk with the given
@@ -127,6 +130,75 @@ func UseFoo() int {
 	assert.Contains(t, string(cBytes), "pkgb.Foo()", "caller's qualifier should be rewritten")
 	assert.NotContains(t, string(cBytes), "pkga.Foo()", "old qualifier should be removed")
 	assert.Contains(t, string(cBytes), `"example.com/movetest/pkgb"`, "new import should be present")
+}
+
+// newNestedGoModuleServer builds the Go module example.com/alpha at
+// <tmp>/alpha (a/a.go declares Foo, b/b.go is empty, c/c.go calls a.Foo())
+// and tracks beta at <tmp>/alpha/nested, inside alpha's module, whose use.go
+// also calls a.Foo(). Both share workspace "shared".
+// note: the config, store, MultiIndexer and NewServer wiring repeats
+// newTwoRepoServer and newNestedCheckoutServer; a shared builder is a
+// follow-up once the round-2 gap plans are merged.
+func newNestedGoModuleServer(t *testing.T) (*Server, string, string) {
+	t.Helper()
+	alphaDir := filepath.Join(t.TempDir(), "alpha")
+	betaDir := filepath.Join(alphaDir, "nested")
+	files := map[string]string{
+		"go.mod":        "module example.com/alpha\n\ngo 1.21\n",
+		"a/a.go":        "package a\n\nfunc Foo() int { return 42 }\n",
+		"b/b.go":        "package b\n",
+		"c/c.go":        "package c\n\nimport \"example.com/alpha/a\"\n\nfunc UseFoo() int {\n\treturn a.Foo()\n}\n",
+		"nested/use.go": "package nested\n\nimport \"example.com/alpha/a\"\n\nfunc UseFoo() int {\n\treturn a.Foo()\n}\n",
+	}
+	for rel, content := range files {
+		full := filepath.Join(alphaDir, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
+		require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
+	}
+
+	tmpCfg := filepath.Join(t.TempDir(), "config.yaml")
+	gc := &config.GlobalConfig{Repos: []config.RepoEntry{
+		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+		{Path: betaDir, Name: "beta", Workspace: "shared"},
+	}}
+	gc.SetConfigPath(tmpCfg)
+	require.NoError(t, gc.Save())
+	cm, err := config.NewConfigManager(tmpCfg)
+	require.NoError(t, err)
+	store, err := store_sqlite.Open(filepath.Join(t.TempDir(), "fts.sqlite"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	backend := search.NewSymbolSearcherBackend(store)
+	mi := indexer.NewMultiIndexer(store, testRegistry(), backend, cm, zap.NewNop())
+	_, err = mi.IndexScoped("", "")
+	require.NoError(t, err)
+	eng := query.NewEngine(store)
+	eng.SetSearch(backend)
+	srv := NewServer(eng, store, nil, nil, zap.NewNop(), nil, MultiRepoOptions{MultiIndexer: mi, ConfigManager: cm})
+	return srv, alphaDir, betaDir
+}
+
+// TestMoveSymbol_NestedTrackedRootNotRewritten: an alpha-scoped move_symbol
+// rewrites alpha's own callers but never a file of beta, whose tracked root
+// sits inside alpha's Go module (D-20, SEC-01).
+func TestMoveSymbol_NestedTrackedRootNotRewritten(t *testing.T) {
+	srv, alphaDir, betaDir := newNestedGoModuleServer(t)
+	betaUse := filepath.Join(betaDir, "use.go")
+	before, err := os.ReadFile(betaUse)
+	require.NoError(t, err)
+
+	res := callSourceTool(t, srv, context.Background(), srv.handleMoveSymbol, "move_symbol", map[string]any{
+		"id": "alpha/a/a.go::Foo", "target_file": "alpha/b/b.go", "repo": "alpha",
+	})
+	require.Falsef(t, res.IsError, "move_symbol: %s", sourceScopeText(res))
+	assert.NotContains(t, sourceScopeText(res), "use.go", "touched must name no file of beta")
+
+	cBytes, err := os.ReadFile(filepath.Join(alphaDir, "c", "c.go"))
+	require.NoError(t, err)
+	assert.Contains(t, string(cBytes), "b.Foo()", "alpha's own caller is rewritten")
+	after, err := os.ReadFile(betaUse)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "beta's use.go must stay byte-identical")
 }
 
 func TestMoveSymbol_CrossPackage_CallerInTarget_BecomesBare(t *testing.T) {

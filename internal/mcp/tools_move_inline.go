@@ -245,7 +245,12 @@ func (s *Server) handleMoveSymbol(ctx context.Context, req mcp.CallToolRequest) 
 		callerFiles[abs] = struct{}{}
 	}
 	// Fallback / completion: scan the module tree so callers without a
-	// resolved graph edge are still rewritten.
+	// resolved graph edge are still rewritten. The walk is a filesystem
+	// fallback, so each entry passes the same physical-owner gate the edge
+	// loop gets from resolveNodePath (D-20): a tracked root nested under the
+	// module, or a symlinked file, cannot bring another repository's file
+	// into the rewrite. A refused entry is skipped, as the edge loop skips an
+	// out-of-scope caller.
 	modRoot := findGoModRoot(srcAbs)
 	if modRoot != "" {
 		_ = filepath.Walk(modRoot, func(p string, info os.FileInfo, werr error) error {
@@ -257,9 +262,15 @@ func (s *Server) handleMoveSymbol(ctx context.Context, req mcp.CallToolRequest) 
 				if base == ".git" || base == "vendor" || base == "node_modules" {
 					return filepath.SkipDir
 				}
+				if s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if !isGoSourcePath(p) {
+				return nil
+			}
+			if s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
 				return nil
 			}
 			abs := filepath.Clean(p)
