@@ -2,8 +2,12 @@ package mcp
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -506,4 +510,105 @@ func TestSourceScope_TextSearchToolsGated(t *testing.T) {
 			assert.Truef(t, strings.HasPrefix(m.Path, "alpha/"), "find_declaration use site outside the scope: %s %q", m.Path, m.Text)
 		}
 	}
+}
+
+// TestSourceScope_SourceChannelsInventoried: every raw source channel in this
+// package (a trigram text search or a filesystem walk) is listed with the gate
+// that covers it. The list is checked against the parsed code, so a new call
+// site turns this test red until it is put behind a gate and listed here.
+func TestSourceScope_SourceChannelsInventoried(t *testing.T) {
+	textGates := map[string]string{
+		"handleSearchText":                  "unbound refusal + filterTextMatchesByResolvedScope (04-12, 04-17)",
+		"searchTextInView":                  "called only from handleSearchText after its refusal; matches pass the same filter",
+		"findUseSiteMatches":                "handleFindDeclaration's unbound refusal + requirePathSourceScope per path (04-17)",
+		"gatherExploreArtifactLane":         "handleExplore's unbound refusal + filterTextMatchesByResolvedScope (04-19)",
+		"searchExploreSourceLiteralDurable": "single repository only; search_symbols' content fallback filters through filterTextMatchesByResolvedScope",
+	}
+	walkGates := map[string]string{
+		"handleMoveSymbol":    "per-entry requirePathSourceScope (04-22)",
+		"handleInlineSymbol":  "per-entry requirePathSourceScope (04-22)",
+		"handleGenerateSkill": "per-entry requirePathSourceScope (04-22)",
+	}
+	textMethods := map[string]bool{
+		"Grep": true, "GrepText": true, "GrepTextForRepos": true, "GrepTextBounded": true,
+		"GrepTextForRepoBounded": true, "GrepRegexp": true, "GrepRegexpForRepos": true,
+		"GrepLiteralBounded": true, "GrepLiteralForRepoBounded": true, "GrepCheckout": true,
+	}
+
+	names, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	fset := token.NewFileSet()
+	foundText, foundWalk := map[string]bool{}, map[string]bool{}
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		require.NoError(t, err)
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				if textMethods[sel.Sel.Name] {
+					foundText[fn.Name.Name] = true
+				}
+				if pkg, ok := sel.X.(*ast.Ident); ok && (pkg.Name == "filepath" || pkg.Name == "fs") &&
+					(sel.Sel.Name == "Walk" || sel.Sel.Name == "WalkDir") {
+					foundWalk[fn.Name.Name] = true
+				}
+				return true
+			})
+		}
+	}
+
+	sortedKeys := func(m map[string]bool) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	listed := func(m map[string]string) map[string]bool {
+		out := make(map[string]bool, len(m))
+		for k := range m {
+			out[k] = true
+		}
+		return out
+	}
+	const fix = "put the new site behind requireSourceScope or requirePathSourceScope " +
+		"(or filterTextMatchesByResolvedScope) and list it here with its gate"
+	assert.Equal(t, sortedKeys(listed(textGates)), sortedKeys(foundText),
+		"text-search call sites changed: %s", fix)
+	assert.Equal(t, sortedKeys(listed(walkGates)), sortedKeys(foundWalk),
+		"filesystem-walk call sites changed: %s", fix)
+}
+
+// TestSourceScope_SearchSymbolsContentFallbackGated: search_symbols' content
+// fallback returns matching source lines, so an unbound multi-repo request
+// gets none and a beta-scoped request gets beta's line.
+func TestSourceScope_SearchSymbolsContentFallbackGated(t *testing.T) {
+	srv, _ := newTwoRepoServer(t)
+	writeBetaDeploySecret(t, srv)
+	ctx := context.Background()
+
+	res := callSourceTool(t, srv, ctx, srv.handleSearchSymbols, "search_symbols",
+		map[string]any{"query": exploreSecret, "format": "json"})
+	require.Falsef(t, res.IsError, "unbound search_symbols must succeed: %s", sourceScopeText(res))
+	assert.NotContains(t, sourceScopeText(res), "ZEBRA_SECRET_TOKEN", "an unbound content fallback must return no source line")
+
+	res = callSourceTool(t, srv, ctx, srv.handleSearchSymbols, "search_symbols",
+		map[string]any{"query": exploreSecret, "repo": "beta", "format": "json"})
+	require.Falsef(t, res.IsError, "beta-scoped search_symbols must succeed: %s", sourceScopeText(res))
+	assert.Contains(t, sourceScopeText(res), "ZEBRA_SECRET_TOKEN", "the beta-scoped content fallback must return the deploy.yaml line")
 }
