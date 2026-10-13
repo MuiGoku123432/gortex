@@ -65,7 +65,32 @@ var errPathEscape = errors.New("relative path escapes the indexed repo root")
 // routed to a worktree view reads that checkout's working copy, every other
 // request the canonical one. An absolute input names a location outright and is
 // never moved between checkouts.
+//
+// With several tracked repositories the confined path must also pass the
+// source gate (D-13, D-20) for its repository; every read and write caller
+// goes through here, so none can bypass it.
 func (s *Server) resolveFilePath(ctx context.Context, rawPath string) (absPath, relPath string, err error) {
+	absPath, relPath, err = s.resolveConfinedFilePath(ctx, rawPath)
+	if err != nil || s.multiIndexer == nil {
+		return absPath, relPath, err
+	}
+	repo := matchedRepoPrefix(s.multiIndexer, relPath)
+	if view := requestViewPathRoot(ctx); repo == "" && view.contains(absPath) {
+		// A file in the request's selected checkout belongs to that
+		// checkout's repository even when no tracked root contains it.
+		repo = view.repoPrefix
+	}
+	if err := s.requireSourceScope(ctx, repo); err != nil {
+		return "", "", err
+	}
+	return absPath, relPath, nil
+}
+
+// resolveConfinedFilePath is resolveFilePath without the source gate: the
+// anchoring and root confinement only. Callers that turn the result into a
+// graph key or a repository attribution and never touch bytes
+// (graphRelPath, workspaceEditVerificationFiles) call it directly.
+func (s *Server) resolveConfinedFilePath(ctx context.Context, rawPath string) (absPath, relPath string, err error) {
 	// Post-resolution confinement (the SECURITY.md "confined to indexed
 	// repository roots" invariant): whatever path the body resolves below —
 	// relative or absolute — is refused if its real, symlink-resolved
@@ -481,6 +506,9 @@ func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string,
 	if node.FilePath == "" {
 		return "", fmt.Errorf("node %q has no file path", node.ID)
 	}
+	if err := s.requireSourceScope(ctx, node.RepoPrefix); err != nil {
+		return "", err
+	}
 	if filepath.IsAbs(node.FilePath) {
 		return filepath.Clean(node.FilePath), nil
 	}
@@ -557,6 +585,17 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 	if requestReadsCommittedTree(ctx) {
 		return "", errViewHasNoWorkingCopy
 	}
+	if s.multiIndexer != nil {
+		// The source gate (D-13, D-20): rename and scaffold read and write
+		// through this resolver, so it carries the same rule as resolveFilePath.
+		repoPath := graphPath
+		if filepath.IsAbs(graphPath) {
+			repoPath = s.repoRelative(filepath.Clean(graphPath))
+		}
+		if err := s.requireSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, repoPath)); err != nil {
+			return "", err
+		}
+	}
 	if filepath.IsAbs(graphPath) {
 		return filepath.Clean(graphPath), nil
 	}
@@ -607,7 +646,7 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 // `alpha/svc\a.go`, which matches no node: get_file_summary answered
 // file_not_indexed for an indexed file.
 func (s *Server) graphRelPath(ctx context.Context, fp string) string {
-	if _, rel, err := s.resolveFilePath(ctx, fp); err == nil && rel != "" {
+	if _, rel, err := s.resolveConfinedFilePath(ctx, fp); err == nil && rel != "" {
 		return graphPathKey(rel)
 	}
 	return fp
@@ -1404,6 +1443,9 @@ func (s *Server) handleReadFile(ctx context.Context, req mcp.CallToolRequest) (*
 			return mcp.NewToolResultError(
 				"physical_evidence describes a file on disk, and this request reads a committed tree " +
 					"that is not checked out anywhere"), nil
+		}
+		if err := s.requireSourceScope(ctx, files.repoPrefix); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		bytes, rel, viewErr := readViewFile(ctx, files, rawPath)
 		if viewErr != nil {

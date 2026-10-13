@@ -126,6 +126,11 @@ func TestSourceScope_NarrowedAllowed(t *testing.T) {
 		map[string]any{"id": "beta/main.go::ZebraWidget", "repo": "alpha"})
 	require.True(t, sym.IsError)
 	assert.Equal(t, "symbol not found: beta/main.go::ZebraWidget", sourceScopeText(sym))
+
+	rename := callSourceTool(t, srv, ctx, srv.handleRenameSymbol, "rename_symbol",
+		map[string]any{"id": "beta/main.go::ZebraWidget", "new_name": "Renamed", "repo": "alpha"})
+	require.True(t, rename.IsError)
+	assert.Equal(t, "symbol not found: beta/main.go::ZebraWidget", sourceScopeText(rename))
 }
 
 // TestSourceScope_WriteToolsGated: an unbound multi-repo write is refused and
@@ -146,6 +151,12 @@ func TestSourceScope_WriteToolsGated(t *testing.T) {
 		"path": "alpha/main.go", "content": "package main\n\nfunc Overwritten() {}\n",
 	})
 	require.Truef(t, res.IsError, "unbound write_file must be refused: %s", sourceScopeText(res))
+
+	// rename_symbol writes through resolveGraphPath, the third choke point.
+	res = callSourceTool(t, srv, ctx, srv.handleRenameSymbol, "rename_symbol", map[string]any{
+		"id": alphaThingID, "new_name": "AlphaRenamed",
+	})
+	require.Truef(t, res.IsError, "unbound rename_symbol must be refused: %s", sourceScopeText(res))
 
 	after, err := os.ReadFile(target)
 	require.NoError(t, err)
