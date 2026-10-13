@@ -8,13 +8,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/zzet/gortex/internal/gitcmd"
+	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/parser"
 )
 
@@ -60,29 +64,132 @@ func (idx *Indexer) stampSourceRevision(relPath string, src []byte, result *pars
 	}
 
 	commit, absence := classifySourceRevision(idx.rootPath, relPath, src)
-	stamp := func(meta map[string]any) {
-		if _, ok := meta["prov_revision_content_id"]; !ok {
-			return
-		}
-		if commit != "" {
-			meta["prov_vcs_commit"] = commit
-			delete(meta, "prov_vcs_commit_absence")
-			return
-		}
-		meta["prov_vcs_commit_absence"] = absence
-		delete(meta, "prov_vcs_commit")
-	}
 	for _, n := range result.Nodes {
 		if n != nil {
-			stamp(n.Meta)
+			applySourceRevision(n.Meta, commit, absence)
 		}
 	}
 	for _, e := range result.Edges {
 		if e != nil {
-			stamp(e.Meta)
+			applySourceRevision(e.Meta, commit, absence)
 		}
 	}
 	idx.alignProvByteOffsets(relPath, src, result)
+}
+
+// applySourceRevision gives meta, when it carries prov_revision_content_id,
+// exactly one of prov_vcs_commit (commit is non-empty) or
+// prov_vcs_commit_absence, deleting the other, and reports whether meta
+// changed.
+func applySourceRevision(meta map[string]any, commit, absence string) bool {
+	if _, ok := meta["prov_revision_content_id"]; !ok {
+		return false
+	}
+	set, drop, value := "prov_vcs_commit_absence", "prov_vcs_commit", absence
+	if commit != "" {
+		set, drop, value = "prov_vcs_commit", "prov_vcs_commit_absence", commit
+	}
+	_, stale := meta[drop]
+	if cur, ok := meta[set].(string); ok && cur == value && !stale {
+		return false
+	}
+	meta[set] = value
+	delete(meta, drop)
+	return true
+}
+
+// restampSourceRevisions re-decides the revision stamp of the repository's
+// COBOL nodes and edges after HEAD moved (D-17): prov_vcs_commit when the
+// indexed bytes are the blob the new HEAD holds, prov_vcs_commit_absence
+// otherwise. Nothing is re-extracted; only rows whose stamp changed are
+// written.
+//
+// PURPOSE — stampSourceRevision runs only when a file is extracted, so a
+// commit that leaves a file's bytes unchanged left the old commit (or a
+// stale absence) on it, while a clean build stamps the new HEAD.
+//
+// RATIONALE — the stamp is decided per document named by prov_source_path,
+// from the file's bytes passed through idx.transforms.run, the same
+// preparation the extraction paths apply before stampSourceRevision, so a
+// commit is never claimed for bytes the commit does not hold. Files the
+// mtime ledger reports stale are skipped: their next extraction stamps them.
+// COBOL is the only extractor that writes prov_revision_content_id today,
+// so only its nodes are read; shared resource nodes carry no content ID and
+// are left alone. Nodes are upserted, and edges are persisted through
+// EdgeMetaBatchPersister (the in-memory store hands out live edges, so the
+// in-place change is already durable there). The log carries counts only.
+//
+// KEYWORDS — provenance, vcs, git, head move, prov_vcs_commit, restamp
+func (idx *Indexer) restampSourceRevisions(rootAbs string) {
+	nodes := idx.graph.GetRepoNodesByLanguage(idx.repoPrefix, "cobol")
+	if len(nodes) == 0 {
+		return
+	}
+	type revision struct {
+		commit, absence string
+		ok              bool
+	}
+	revisions := make(map[string]revision)
+	revisionOf := func(meta map[string]any) revision {
+		rel, _ := meta["prov_source_path"].(string)
+		if rel == "" {
+			return revision{}
+		}
+		if r, seen := revisions[rel]; seen {
+			return r
+		}
+		var r revision
+		if !idx.IsStale(rel) {
+			if src, err := os.ReadFile(filepath.Join(rootAbs, filepath.FromSlash(rel))); err == nil {
+				r.commit, r.absence = classifySourceRevision(rootAbs, rel, idx.transforms.run(rel, src))
+				r.ok = true
+			}
+		}
+		revisions[rel] = r
+		return r
+	}
+
+	ids := make([]string, 0, len(nodes))
+	var changedNodes []*graph.Node
+	for _, n := range nodes {
+		ids = append(ids, n.ID)
+		if _, ok := n.Meta["prov_revision_content_id"]; !ok {
+			continue
+		}
+		r := revisionOf(n.Meta)
+		if !r.ok {
+			continue
+		}
+		c := *n
+		c.Meta = maps.Clone(n.Meta)
+		if applySourceRevision(c.Meta, r.commit, r.absence) {
+			changedNodes = append(changedNodes, &c)
+		}
+	}
+	var changedEdges []*graph.Edge
+	for _, edges := range idx.graph.GetOutEdgesByNodeIDs(ids) {
+		for _, e := range edges {
+			if _, ok := e.Meta["prov_revision_content_id"]; !ok {
+				continue
+			}
+			if r := revisionOf(e.Meta); r.ok && applySourceRevision(e.Meta, r.commit, r.absence) {
+				changedEdges = append(changedEdges, e)
+			}
+		}
+	}
+
+	if len(changedNodes) > 0 {
+		idx.graph.AddBatch(changedNodes, nil)
+	}
+	if len(changedEdges) > 0 {
+		if p, ok := idx.graph.(graph.EdgeMetaBatchPersister); ok {
+			p.PersistEdgeAttributesBatch(changedEdges)
+		}
+	}
+	idx.logger.Debug("indexer: re-stamped source revisions after HEAD move",
+		zap.Int("documents", len(revisions)),
+		zap.Int("nodes", len(changedNodes)),
+		zap.Int("edges", len(changedEdges)))
 }
 
 // alignProvByteOffsets makes prov_start_byte / prov_end_byte true file
