@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-10-13T01:46:03.006Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-10-13T01:54:02.649Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: 7444568ab4d717e3e9229fb57ce4afa355fd284d
+state_head: 47b75526140ef07c8d878015554b346c178d39cc
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 33
+  completed_plans: 34
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 4 of 16
+Plan: 5 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -94,6 +94,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P01 | 25 min | 1 tasks | 8 files |
 | Phase 04 P02 | 12 min | 2 tasks | 4 files |
 | Phase 04 P03 | 5 min | 1 tasks | 6 files |
+| Phase 04 P04 | 6 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -177,6 +178,7 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-02: cobol_placeholder marks bindable COBOL edges (literal CALL/LINK/XCTL, non-IDMS COPY); its absence marks never-bound edges
 - [Phase 04]: 04-03: graph.Scope is the one fail-closed scope type (D-16); ProjectionScope is an alias; Allows/AllowsRepo reject an empty RepoPrefix, the zero Scope, and an exact WorkspaceID/ProjectID mismatch (no RepoPrefix fallback)
 - [Phase 04]: 04-03: neo4jprojection.NormalizeRequest fails closed on a blank repository entry instead of dropping it; OpenScopedProjectionSnapshot validates via graph.NewScope + RequireWorkspaceProject with the original error substrings
+- [Phase 04]: 04-04: generic cross-repo fallback refuses multi-repository matches via pickCrossRepoCandidate (lowest ID within one repo, synthetic no-repo first); resolution_* keys cleared centrally in resolveEdge on bind
 
 ### Pending Todos
 
@@ -205,6 +207,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T01:45:56.199Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-10-13T01:54:02.601Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
