@@ -480,6 +480,11 @@ type Resolver struct {
 	// SetScope. Independent of any backend bulk-mode flag.
 	scope map[string]struct{}
 
+	// cobolPolicyLookup supplies each caller repository's COBOL binding
+	// policy (cobol_policy.go). nil means same-repository binding only. Set
+	// via SetCobolPolicyLookup.
+	cobolPolicyLookup CobolPolicyLookup
+
 	// stampTerminal, when true, lets a FULL (unscoped) ResolveAll durably mark
 	// the edges it concludes are permanently external / stdlib / definition-
 	// less so a later SCOPED warm resolve can skip re-feeding them (see
@@ -1658,8 +1663,10 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 	// imports above; resolveRelativeImports never touches Lua, so this lands
 	// the Lua module/instance requires onto their indexed file nodes.
 	r.resolveLuaRequires()
-	// COBOL literal CALL / COPY binding: exactly one same-repo candidate (D-09, D-11).
-	r.resolveCobolReferences()
+	// COBOL literal CALL / COPY reconcile: re-decides placeholders and bound
+	// edges from the scope's repositories, exactly as the incremental tails do
+	// through ReconcileCobol (D-09, D-11, D-16).
+	r.reconcileCobol(r.scope)
 	// Godot `res://` binding — scene `[ext_resource]` references and
 	// GDScript `preload(...)`. Same settle window and the same path-suffix
 	// net as the Lua requires above.
@@ -3376,7 +3383,7 @@ func (r *Resolver) resolveEdge(e *graph.Edge, stats *ResolveStats) (oldTo string
 		// resolver can't see project-layout context. Leave untouched
 		// so the post-pass owns rewriting.
 		return oldTo, false
-	case strings.HasPrefix(target, "cobol::"): // owned by resolveCobolReferences (exactly-one, same repo)
+	case strings.HasPrefix(target, "cobol::"): // owned by reconcileCobol (exactly-one, same repo)
 		return oldTo, false
 	case strings.HasPrefix(target, "import::"):
 		r.resolveImport(e, strings.TrimPrefix(target, "import::"), stats)
