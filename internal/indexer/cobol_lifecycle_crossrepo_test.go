@@ -221,3 +221,50 @@ func TestCobolLifecycle_CrossRepoClean(t *testing.T) {
 		assert.Equal(t, config.CobolConfig{ResolveFrom: []string{"crossb"}}, idx.cobolConfig())
 	})
 }
+
+// The nested corpus (D-04): invented fixed-format COBOL. nestb's root lies
+// inside lifea at nested/; neither program calls or copies the other.
+var nestedCobolOuter = map[string]string{
+	"cobol/outer.cbl": `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTERPGM.
+       PROCEDURE DIVISION.
+       OUTER-PARA.
+           GOBACK.
+`,
+}
+
+var nestedCobolInner = map[string]string{
+	"cobol/inner.cbl": `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNERPGM.
+       PROCEDURE DIVISION.
+       INNER-PARA.
+           GOBACK.
+`,
+}
+
+// newNestedCobolEnv writes lifea and nests nestb's files under
+// <lifea>/nested, registering nestb's root and corpus in env.
+func newNestedCobolEnv(t *testing.T) *cobolLifecycleEnv {
+	t.Helper()
+	env := newCobolLifecycleEnv(t, map[string]map[string]string{"lifea": nestedCobolOuter})
+	root := filepath.Join(env.roots["lifea"], "nested")
+	for rel, src := range nestedCobolInner {
+		writeRepoFile(t, root, rel, src)
+	}
+	env.roots["nestb"] = root
+	env.repos["nestb"] = nestedCobolInner
+	return env
+}
+
+// TestCobolLifecycle_NestedTrackLater proves ID-09 for a nested topology:
+// tracking the outer repository first, then the nested one, gives the same
+// canonical graph as tracking the nested repository first (WR-02, SC-4).
+func TestCobolLifecycle_NestedTrackLater(t *testing.T) {
+	wantEnv := newNestedCobolEnv(t)
+	wantEnv.track(t, "nestb", "lifea")
+	want := wantEnv.dump(t)
+
+	gotEnv := newNestedCobolEnv(t)
+	gotEnv.track(t, "lifea", "nestb")
+	requireSameDump(t, want, gotEnv.dump(t))
+}

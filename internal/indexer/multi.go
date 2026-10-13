@@ -2913,7 +2913,85 @@ func EffectiveRepoPrefix(cm *config.ConfigManager, entry config.RepoEntry) strin
 // TrackRepoCtx is TrackRepo with a context, allowing callers to pipe progress
 // reporters (via progress.WithReporter) through to the underlying Index call.
 func (mi *MultiIndexer) TrackRepoCtx(ctx context.Context, entry config.RepoEntry) (*IndexResult, error) {
-	return mi.trackRepoSourceCtx(ctx, entry, nil)
+	result, err := mi.trackRepoSourceCtx(ctx, entry, nil)
+	// A repository tracked inside another one's root takes its files over:
+	// evict the enclosing repositories' copies now rather than at their next
+	// reindex (WR-02, ID-09).
+	if err == nil && result != nil && result.RepoPrefix != "" {
+		if meta := mi.GetMetadata(result.RepoPrefix); meta != nil {
+			mi.reconcileEnclosingRepos(ctx, meta.RootPath, true)
+		}
+	}
+	return result, err
+}
+
+// reconcileEnclosingRepos reconciles, scoped to root, every registered
+// repository whose root strictly contains root, after a repository at root
+// was tracked (evicting) or untracked (admitting).
+//
+// PURPOSE — a topology change is a mutation of every enclosing repository:
+// once root is registered the outer walk prunes it, and once it is gone the
+// outer walk admits it again. IncrementalReindexRepo(outer, [root]) does both
+// jobs: its scoped deletion pass purges present-but-excluded copies, and its
+// walk admits the subtree, so incremental equals a clean build (ID-09, SC-4).
+//
+// RATIONALE — this runs only after the triggering track or untrack has
+// released mi.mu, its repository lane, the batch gate and the topology
+// writer; the reconcile takes the outer lane itself, so no lane is ever held
+// across another (the ordering 04-18 deferred). Inside a repository topology
+// batch it is skipped: the batch holds the transition writer, so an unmarked
+// reconcile would wait on it, and the batch's declared roots (04-20) plus the
+// outer repository's census converge instead. When evicting, an enclosing
+// repository is reconciled only if its committed snapshot holds a file under
+// root, since otherwise there is nothing to purge. IncrementalReindexRepo
+// takes no context, so cancellation is not honoured past the batch check.
+//
+// KEYWORDS — nested tracked root, enclosing repository, topology change,
+// evict, admit, scoped reconcile, lock order.
+func (mi *MultiIndexer) reconcileEnclosingRepos(ctx context.Context, root string, evicting bool) {
+	if root == "" || activeRepositoryTopologyBatch(ctx, mi) != nil {
+		return
+	}
+	root = filepath.Clean(root)
+	var prefixes []string
+	mi.mu.RLock()
+	for prefix, meta := range mi.repos {
+		if meta == nil {
+			continue
+		}
+		r := filepath.Clean(meta.RootPath)
+		if r == "" || r == "." || pathkey.EqualPaths(r, root) || !pathkey.HasPathPrefix(root, r) {
+			continue
+		}
+		if evicting {
+			rel, err := filepath.Rel(r, root)
+			if err != nil {
+				continue
+			}
+			sub := filepath.ToSlash(rel)
+			held := false
+			for key := range meta.FileMtimes {
+				if key == sub || strings.HasPrefix(key, sub+"/") {
+					held = true
+					break
+				}
+			}
+			if !held {
+				continue
+			}
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	mi.mu.RUnlock()
+
+	sort.Strings(prefixes)
+	for _, prefix := range prefixes {
+		if _, err := mi.IncrementalReindexRepo(prefix, []string{root}); err != nil {
+			mi.logger.Warn("enclosing repository reconcile failed",
+				zap.String("prefix", prefix), zap.String("root", root),
+				zap.Bool("evicting", evicting), zap.Error(err))
+		}
+	}
 }
 
 // trackRepoSourceCtx is TrackRepoCtx with a borrowed immutable content source.

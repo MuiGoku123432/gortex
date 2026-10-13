@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -285,4 +286,45 @@ func TestNestedTrackedRoot_DeclaredRootsPruneWarmupOrder(t *testing.T) {
 	require.NotNil(t, alphaIdx)
 	require.True(t, alphaIdx.shouldExclude(filepath.Join(betaDir, "main.go"), alphaDir, false),
 		"after release the registered roots alone must keep pruning")
+}
+
+// TestNestedTrackedRoot_TrackLaterEvicts: alpha already holds copies of
+// beta's file when beta is tracked. The same TrackRepoCtx call reconciles
+// alpha's subtree, so with no IndexRepo beta's file has one owner and alpha's
+// text index no longer matches it (WR-02, ID-09, SEC-08).
+func TestNestedTrackedRoot_TrackLaterEvicts(t *testing.T) {
+	mi, store, _, _ := trackNestedLater(t)
+
+	requireNestedIndexedOnce(t, store)
+	require.Empty(t, mi.GetIndexer("alpha").GrepText("ZebraWidget", 0),
+		"alpha's text index must drop the evicted copy")
+}
+
+// TestNestedTrackedRoot_TrackInsideTopologyBatchCompletes: tracking a nested
+// repository inside RunRepositoryTopologyBatch (the daemon warmup shape) must
+// not wait on the batch gate the caller holds. A deadlock fails the test
+// after a bounded wait instead of hanging the package (SEC-08).
+func TestNestedTrackedRoot_TrackInsideTopologyBatchCompletes(t *testing.T) {
+	alphaDir, betaDir := writeNestedTrackedRepos(t)
+	mi, _ := newNestedTrackedMulti(t, []config.RepoEntry{
+		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+	})
+	_, err := mi.IndexScoped("", "")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mi.RunRepositoryTopologyBatch(context.Background(), func(batchCtx context.Context) error {
+			_, err := mi.TrackRepoCtx(batchCtx,
+				config.RepoEntry{Path: betaDir, Name: "beta", Workspace: "shared"})
+			return err
+		})
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Minute):
+		t.Fatal("TrackRepoCtx inside a topology batch did not complete")
+	}
+	require.NotNil(t, mi.GetMetadata("beta"))
 }
