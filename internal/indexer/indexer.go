@@ -241,6 +241,9 @@ type Indexer struct {
 	// them); readers pay only the atomic load.
 	excludes      atomic.Pointer[excludes.Matcher]
 	excludeMu     sync.Mutex
+	// cobolMu guards config.Cobol, which SetCobolConfig swaps on a live
+	// Indexer when its repository's `.gortex.yaml` is re-read.
+	cobolMu sync.RWMutex
 	dirIgnore     *excludes.Hierarchical
 	dirIgnoreOnce sync.Once
 	rootPath      string
@@ -5834,6 +5837,13 @@ func (idx *Indexer) SetExcludePatterns(patterns []string) {
 	defer idx.excludeMu.Unlock()
 	idx.config.Exclude = patterns
 	idx.excludes.Store(excludes.New(effectiveExcludePatterns(patterns)))
+}
+
+// cobolConfig returns a copy of this repository's index.cobol policy.
+func (idx *Indexer) cobolConfig() config.CobolConfig {
+	idx.cobolMu.RLock()
+	defer idx.cobolMu.RUnlock()
+	return idx.config.Cobol
 }
 
 // effectiveExcludePatterns falls back to the builtin baseline when the
