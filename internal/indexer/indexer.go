@@ -5688,7 +5688,10 @@ func (idx *Indexer) shouldExclude(path, root string, isDir bool) bool {
 //
 // RATIONALE — a root equal to or containing root never excludes anything, so
 // the nested repository's own walk is unaffected. The config seed is copied
-// once per Indexer; nothing here reads config, builds slices, or locks.
+// once per Indexer; the seed loop reads no config, builds no slices, and
+// takes no lock. Registered roots are then read live from the owning
+// MultiIndexer, so a repository tracked later, or tracked without a config
+// entry, is honoured and the watcher stays correct after a later track.
 //
 // KEYWORDS — nested repository, tracked root, walk pruning, ownership.
 func (idx *Indexer) inNestedTrackedRoot(path, root string) bool {
@@ -5699,6 +5702,9 @@ func (idx *Indexer) inNestedTrackedRoot(path, root string) bool {
 		if pathkey.HasPathPrefix(path, r) && !pathkey.EqualPaths(r, root) && pathkey.HasPathPrefix(r, root) {
 			return true
 		}
+	}
+	if owner := idx.repositoryMutationOwner; owner != nil {
+		return owner.nestedTrackedRootContains(root, path)
 	}
 	return false
 }

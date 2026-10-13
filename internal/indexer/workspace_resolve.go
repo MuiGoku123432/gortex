@@ -144,6 +144,29 @@ func (mi *MultiIndexer) bestRepoPrefixForPathLocked(path string) string {
 	return mi.bestRepoPrefixForSpellingLocked(pathkey.CanonicalPath(path), true)
 }
 
+// nestedTrackedRootContains reports whether path lies inside a registered
+// repository root nested strictly under root. It takes mi.mu.RLock, so a
+// caller must not hold mi.mu (walks and watcher admission run unlocked).
+// note: Indexer.inNestedTrackedRoot repeats the three-part test over its
+// config seed (two uses, below the rule of three).
+func (mi *MultiIndexer) nestedTrackedRootContains(root, path string) bool {
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+	for _, meta := range mi.repos {
+		if meta == nil {
+			continue
+		}
+		r := filepath.Clean(meta.RootPath)
+		if r == "" || r == "." {
+			continue
+		}
+		if pathkey.HasPathPrefix(path, r) && !pathkey.EqualPaths(r, root) && pathkey.HasPathPrefix(r, root) {
+			return true
+		}
+	}
+	return false
+}
+
 func (mi *MultiIndexer) bestRepoPrefixForSpellingLocked(path string, canonicalRoots bool) string {
 	var bestPrefix string
 	bestLen := -1
