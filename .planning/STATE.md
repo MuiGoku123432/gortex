@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-10-13T01:38:31.308Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-10-13T01:46:03.006Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 04 execution started
-state_head: c6326db85bef5ef6cd106712ea97326353c9d07e
+state_head: 7444568ab4d717e3e9229fb57ce4afa355fd284d
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 46
-  completed_plans: 32
+  completed_plans: 33
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 3 of 16
+Plan: 4 of 16
 Status: Ready to execute
 Last activity: 2026-10-12 — Phase 04 execution started
 
@@ -93,6 +93,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 03 P17 | 26 min | 3 tasks | 8 files |
 | Phase 04 P01 | 25 min | 1 tasks | 8 files |
 | Phase 04 P02 | 12 min | 2 tasks | 4 files |
+| Phase 04 P03 | 5 min | 1 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-01: graphdump DeterministicVolatile (graphdump-volatile/1) ships empty; add a key only when a harness diff proves it volatile — Two clean builds and opposite track orders matched with no exclusions (D-01)
 - [Phase 04]: 04-02: literal PROGRAM-ID quotes stay in IDs; only ID metacharacters are cobolIDSegment-encoded ('A/B' -> {path}::'A%2FB')
 - [Phase 04]: 04-02: cobol_placeholder marks bindable COBOL edges (literal CALL/LINK/XCTL, non-IDMS COPY); its absence marks never-bound edges
+- [Phase 04]: 04-03: graph.Scope is the one fail-closed scope type (D-16); ProjectionScope is an alias; Allows/AllowsRepo reject an empty RepoPrefix, the zero Scope, and an exact WorkspaceID/ProjectID mismatch (no RepoPrefix fallback)
+- [Phase 04]: 04-03: neo4jprojection.NormalizeRequest fails closed on a blank repository entry instead of dropping it; OpenScopedProjectionSnapshot validates via graph.NewScope + RequireWorkspaceProject with the original error substrings
 
 ### Pending Todos
 
@@ -202,6 +205,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T01:38:31.251Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-10-13T01:45:56.199Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
