@@ -38,7 +38,7 @@ func (idx *Indexer) persistRepoIndexState(diskTarget graph.Store, rootAbs, works
 		return
 	}
 	sha, dirty := repoHeadAndDirty(rootAbs)
-	vers, _ := json.Marshal(extractorVersionsSnapshot())
+	vers, _ := json.Marshal(idx.repoExtractorVersionsSnapshot())
 	st := graph.RepoIndexState{
 		RepoPrefix:        idx.repoPrefix,
 		IndexedSHA:        sha,

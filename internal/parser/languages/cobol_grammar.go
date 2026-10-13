@@ -160,6 +160,31 @@ func (e *CobolGrammarExtractor) init() {
 	e.analyzer = analyzer
 }
 
+// MaterialIdentity returns the extractor identity every observation is
+// stamped with (D-07): the approved grammar ID (prov_parser_grammar_id,
+// which Extract requires the handoff to match), the parser module
+// (prov_parser_module), the preprocessor module (prov_preprocessor_module),
+// the extractor version (prov_extractor_version), and the cobol_name_norm
+// rule, joined with "|". The indexer folds it into the COBOL material
+// fingerprint, so the stamp and the invalidation trigger cannot drift. The
+// preprocessor tool and configuration IDs are fixed by the module pin init
+// enforces. When init failed it returns "unavailable:" plus the error class,
+// so a broken toolchain still yields a distinct fingerprint while Extract
+// fails as before.
+func (e *CobolGrammarExtractor) MaterialIdentity() string {
+	e.once.Do(e.init)
+	if e.initErr != nil {
+		if errors.Is(e.initErr, errCobolPreprocessorNotApproved) {
+			return "unavailable:preprocessor-not-approved"
+		}
+		return "unavailable:parser"
+	}
+	return strings.Join([]string{
+		e.approvedGrammarID, e.parserModule, e.preprocessorModule,
+		cobolGrammarExtractorVersion, cobolNameNormRule,
+	}, "|")
+}
+
 // Extract analyzes one COBOL document and maps its handoff onto graph nodes
 // and edges. filePath is the unprefixed repository-relative path; the
 // indexer applies the repository prefix and scope fields afterwards.
