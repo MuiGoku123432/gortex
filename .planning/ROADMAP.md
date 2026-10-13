@@ -186,7 +186,7 @@ Plans:
   4. Incremental reconciliation and a clean rebuild produce the same canonical active deterministic subgraph for identical final inputs.
   5. Resolution and all downstream surfaces fail closed on missing scope, reject unsupported same-name cross-repository binding, and report zero unowned or misprefixed active nodes for the acceptance corpus.
 
-**Plans**: 16/16 plans executed
+**Plans**: 16/18 plans executed (2 gap-closure plans pending)
 
 Plans 04-11 to 04-16 are the second halves of 04-01, 04-03, 04-05, 04-06, 04-08, and 04-09, split so every plan fits the 100k smart-zone budget; run them in wave order, not number order.
 
@@ -233,6 +233,11 @@ Plans:
 **Wave 9** *(blocked on Wave 8 completion)*
 
 - [x] 04-10-PLAN.md -- Cross-surface scope proof, ownership acceptance, D-04 completeness, Meta-key screen, docs, full race suite
+
+**Wave 10** *(gap closure; blocked on Wave 9 completion; 04-17 and 04-18 share no file and run in parallel)*
+
+- [ ] 04-17-PLAN.md -- Gap CR-01 (surfaces): resolveNodePath, the relative resolveGraphPath branch, search_text, and find_declaration gate by the physical owner (requirePathSourceScope); nested-checkout test in both indexing orders
+- [ ] 04-18-PLAN.md -- Gap CR-01 (root cause): walk and watcher stop at a nested tracked root (config seed + registered roots), so each file has one owner and the ownership audit stays honest
 
 ### Phase 5: Explicit Unresolved Evidence
 
