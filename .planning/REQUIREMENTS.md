@@ -163,8 +163,8 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Security and Scope
 
-- [ ] **SEC-01**: Extraction, resolution, query, AI context, claim storage, logging, and export MUST enforce the same workspace/project/repository scope.
-- [ ] **SEC-02**: Ambiguous or absent scope MUST fail closed for source reads and AI context assembly.
+- [x] **SEC-01**: Extraction, resolution, query, AI context, claim storage, logging, and export MUST enforce the same workspace/project/repository scope.
+- [x] **SEC-02**: Ambiguous or absent scope MUST fail closed for source reads and AI context assembly.
 - [ ] **SEC-03**: Cross-repository resolution MUST NOT bind same-named programs, copybooks, or resources without explicit allowed scope and deterministic resolution evidence.
 - [ ] **SEC-04**: Raw prompts, source context, and model responses MUST NOT be written to logs by default.
 - [ ] **SEC-05**: Persisted AI audit metadata MUST use restrictive file permissions and bounded retention defined by policy.
@@ -314,8 +314,8 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | EVAL-07 | Phase 9 | Pending |
 | EVAL-08 | Phase 9 | Pending |
 | EVAL-09 | Phase 9 | Pending |
-| SEC-01 | Phase 4 | Gaps Found |
-| SEC-02 | Phase 4 | Gaps Found |
+| SEC-01 | Phase 4 | Complete |
+| SEC-02 | Phase 4 | Complete |
 | SEC-03 | Phase 4 | Gaps Found |
 | SEC-04 | Phase 7 | Pending |
 | SEC-05 | Phase 7 | Pending |
