@@ -205,6 +205,17 @@ func (cm *ConfigManager) readWorkspaceConfig(repoPrefix, repoPath string) (*Conf
 			zap.Error(err))
 		return nil, false
 	}
+	// An invalid index.cobol block fails closed the same way: the last good
+	// parse (or, on a first load, the global defaults, i.e. same-repository
+	// COBOL binding only) stays in force, so a bad allowlist never widens
+	// resolution.
+	if err := cfg.Index.Cobol.Validate(); err != nil {
+		cm.logger.Warn("invalid index.cobol in workspace config, keeping the last good parse",
+			zap.String("repo", repoPrefix),
+			zap.String("path", configPath),
+			zap.Error(err))
+		return nil, false
+	}
 
 	return cfg, true
 }

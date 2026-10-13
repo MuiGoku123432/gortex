@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -904,9 +906,71 @@ type CobolCopybookLibrary struct {
 	Path string `mapstructure:"path" yaml:"path"`
 }
 
-// Validate reports every index.cobol rule c breaks, joined with "; ".
+// Validate reports every index.cobol rule c breaks, joined with "; ". It
+// fails closed: a resolve_from entry must be one concrete repository prefix
+// (no blank, no *, ?, or [), a library path must be repository-relative with
+// no .. segment and no wildcard, a library repo must be listed in
+// resolve_from, and library names and default qualifiers must already be
+// cobol-name-norm/1 keys.
 func (c CobolConfig) Validate() error {
-	return nil
+	var errs []string
+	allowed := make(map[string]bool, len(c.ResolveFrom))
+	for i, repo := range c.ResolveFrom {
+		repo = strings.TrimSpace(repo)
+		switch {
+		case repo == "":
+			errs = append(errs, fmt.Sprintf("index.cobol.resolve_from[%d] is blank", i))
+		case strings.ContainsAny(repo, "*?["):
+			errs = append(errs, fmt.Sprintf("index.cobol.resolve_from[%d] = %q: wildcards are not allowed; name each repository", i, repo))
+		default:
+			allowed[repo] = true
+		}
+	}
+	for i, lib := range c.CopybookLibraries {
+		p := filepath.ToSlash(lib.Path)
+		switch {
+		case strings.TrimSpace(p) == "":
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path is empty", i))
+		case path.IsAbs(p) || filepath.IsAbs(lib.Path):
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path = %q must be repository-relative", i, lib.Path))
+		case slices.Contains(strings.Split(p, "/"), ".."):
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path = %q must not contain a .. segment", i, lib.Path))
+		case strings.ContainsAny(p, "*?["):
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path = %q: wildcards are not allowed", i, lib.Path))
+		}
+		if repo := strings.TrimSpace(lib.Repo); repo != "" && !allowed[repo] {
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].repo = %q is not listed in resolve_from", i, lib.Repo))
+		}
+		if lib.Name != "" && !validCobolKey(lib.Name) {
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].name = %q must be an upper-case, unquoted COBOL name", i, lib.Name))
+		}
+	}
+	if c.DB2DefaultSchema != "" && !validCobolKey(c.DB2DefaultSchema) {
+		errs = append(errs, fmt.Sprintf("index.cobol.db2_default_schema = %q must be an upper-case, unquoted schema name (delimited schemas cannot be defaults)", c.DB2DefaultSchema))
+	}
+	if c.IDMSDefaultSubschema != "" && !validCobolKey(c.IDMSDefaultSubschema) {
+		errs = append(errs, fmt.Sprintf("index.cobol.idms_default_subschema = %q must be an upper-case, unquoted subschema name", c.IDMSDefaultSubschema))
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.Join(errs, "; "))
+}
+
+// validCobolKey reports whether s is already a cobol-name-norm/1 key that is
+// safe as a node ID segment: non-empty, no lower-case ASCII letter, no quote,
+// and none of %, :, /, #, space, or a control byte.
+func validCobolKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || c <= ' ' || c == 0x7f || strings.IndexByte(`'"%:/#`, c) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ContentAdmissionConfig gates which large non-source artifacts enter the
@@ -1992,6 +2056,9 @@ func (c *Config) validateWorkspaceSchema() error {
 		if err := pc.Connect.Validate(); err != nil {
 			errs = append(errs, fmt.Sprintf("config: semantic.providers[%q]: %v", pc.Name, err))
 		}
+	}
+	if err := c.Index.Cobol.Validate(); err != nil {
+		errs = append(errs, "config: "+err.Error())
 	}
 	if len(errs) == 0 {
 		return nil
