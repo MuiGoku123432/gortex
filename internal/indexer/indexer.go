@@ -241,9 +241,6 @@ type Indexer struct {
 	// them); readers pay only the atomic load.
 	excludes      atomic.Pointer[excludes.Matcher]
 	excludeMu     sync.Mutex
-	// cobolMu guards config.Cobol, which SetCobolConfig swaps on a live
-	// Indexer when its repository's `.gortex.yaml` is re-read.
-	cobolMu sync.RWMutex
 	dirIgnore     *excludes.Hierarchical
 	dirIgnoreOnce sync.Once
 	rootPath      string
@@ -296,6 +293,10 @@ type Indexer struct {
 	// trigramBudgetOverride scopes the idle/LRU eviction budget to one
 	// test rather than the process-wide default. Nil in production.
 	trigramBudgetOverride *trigramBudget
+
+	// cobolMu guards config.Cobol, which SetCobolConfig swaps on a live
+	// Indexer when its repository's `.gortex.yaml` is re-read.
+	cobolMu sync.RWMutex
 
 	// repoPrefix is set in multi-repo mode to prefix all file paths and node IDs.
 	// When empty, the indexer operates in single-repo mode (backward compatible).
@@ -591,6 +592,15 @@ func New(g graph.Store, reg *parser.Registry, cfg config.IndexConfig, logger *za
 	// Break same-named import collisions in favour of the importer's
 	// own package-manager workspace member. Same lazy-build rationale.
 	idx.resolver.SetWorkspaceMembership(idx.indexerWorkspaceMembership)
+	// A standalone Indexer honours its own repository's index.cobol policy
+	// (libraries and default qualifiers) and no other repository's. A
+	// MultiIndexer replaces this with its tracked-repository lookup.
+	idx.resolver.SetCobolPolicyLookup(func(repoPrefix string) resolver.CobolPolicy {
+		if repoPrefix != idx.repoPrefix {
+			return resolver.CobolPolicy{}
+		}
+		return cobolPolicyFromConfig(idx.cobolConfig())
+	})
 	return idx
 }
 
@@ -5837,6 +5847,16 @@ func (idx *Indexer) SetExcludePatterns(patterns []string) {
 	defer idx.excludeMu.Unlock()
 	idx.config.Exclude = patterns
 	idx.excludes.Store(excludes.New(effectiveExcludePatterns(patterns)))
+}
+
+// SetCobolConfig installs a re-read index.cobol policy on a live Indexer.
+// RefreshRepoConfigs calls it beside SetExcludePatterns: the per-repository
+// Indexer outlives `.gortex.yaml` edits, so without it the Indexer kept the
+// block it was constructed with (Pitfall 6).
+func (idx *Indexer) SetCobolConfig(cfg config.CobolConfig) {
+	idx.cobolMu.Lock()
+	defer idx.cobolMu.Unlock()
+	idx.config.Cobol = cfg
 }
 
 // cobolConfig returns a copy of this repository's index.cobol policy.

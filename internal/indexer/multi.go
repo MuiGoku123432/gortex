@@ -373,6 +373,10 @@ func (mi *MultiIndexer) newPerRepoIndexerGuardedWithMode(
 	if mi.semanticMgr != nil {
 		idx.SetSemanticManager(mi.semanticMgr)
 	}
+	// COBOL binding policy comes from every tracked repository's config, so
+	// a per-repository pass decides cross-repository edges exactly as the
+	// master pass does (D-09).
+	idx.resolver.SetCobolPolicyLookup(mi.cobolPolicyLookup())
 	return idx
 }
 
@@ -958,6 +962,7 @@ func (mi *MultiIndexer) newMasterResolver(useLSP bool) *resolver.Resolver {
 	master.SetNpmDependencyLookup(mi.npmDependencyLookup())
 	master.SetPathAliasResolver(mi.pathAliasResolver())
 	master.SetWorkspaceMembership(mi.workspaceMembershipResolver())
+	master.SetCobolPolicyLookup(mi.cobolPolicyLookup())
 	return master
 }
 
@@ -2480,6 +2485,7 @@ func (mi *MultiIndexer) RefreshRepoConfigs() int {
 		mi.mu.RUnlock()
 		if idx != nil {
 			idx.SetExcludePatterns(cfg.Index.Exclude)
+			idx.SetCobolConfig(cfg.Index.Cobol)
 		}
 	}
 	return len(roots)
