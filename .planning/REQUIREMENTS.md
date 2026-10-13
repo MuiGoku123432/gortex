@@ -170,7 +170,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - [ ] **SEC-05**: Persisted AI audit metadata MUST use restrictive file permissions and bounded retention defined by policy.
 - [ ] **SEC-06**: Canary tests MUST verify that protected source does not appear in unauthorized provider requests, logs, claims, temporary files, or Cypher exports.
 - [ ] **SEC-07**: AI provider or audit-path health failures MUST be observable without echoing protected source.
-- [ ] **SEC-08**: Repository ownership health MUST report zero unowned or misprefixed nodes for the acceptance corpus before AI context or export acceptance.
+- [x] **SEC-08**: Repository ownership health MUST report zero unowned or misprefixed nodes for the acceptance corpus before AI context or export acceptance.
 
 ## Future Requirements
 
@@ -321,4 +321,4 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | SEC-05 | Phase 7 | Pending |
 | SEC-06 | Phase 9 | Pending |
 | SEC-07 | Phase 7 | Pending |
-| SEC-08 | Phase 4 | Gaps Found |
+| SEC-08 | Phase 4 | Complete |

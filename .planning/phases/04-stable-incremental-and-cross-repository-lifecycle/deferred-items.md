@@ -20,3 +20,8 @@
   **What:** The incremental patch stamps the `source_*_fingerprint` delta-probe cache keys into every file node's Meta (`stampExtractionGraphFingerprints`, `stampDerivedFingerprints`). `graphdump` strips them as volatile (`graphdump-volatile/2`, 04-08), so a file node whose Meta held nothing else dumps as `{}`, and a clean build of the same file dumps `null`. This applies to any non-COBOL file (reproduced with `conf/x.yaml` and `pkg/a.go`). COBOL file nodes always carry `prov_*` keys, so the existing COBOL harness never hit it. 04-09's config-change tests add `.gortex.yaml` incrementally, and `requireConfigCleanEquivalent` normalizes only that one row.
   **Why deferred:** The fix is in the shared dump tool: render an emptied Meta as `null` and version the policy as `graphdump-volatile/3`. That is outside 04-09's files and changes the measuring tool every Phase 4 lifecycle test relies on.
   **Resolution (04-16):** `graphdump.canonicalMeta` renders a Meta that is empty after stripping as `null`, the same as a nil Meta, under `graphdump-volatile/3` (`TestGraphdump_EmptiedMetaIsNull`). The `.gortex.yaml` row rewrite in `requireConfigCleanEquivalent` is removed; the config-change tests call `requireCleanEquivalent`, so every row must match exactly.
+
+- `internal/indexer/file_delta.go` is not gofmt-clean (found during 04-18)
+  status: open
+  **What:** `gofmt -l internal/indexer/` lists `file_delta.go`: the multi-value `return fileDeltaFingerprints{...}, derivedFingerprints{...}` near line 586 is indented one level deeper than gofmt wants. Last touched by upstream commit 7aae60eb.
+  **Why deferred:** 04-18 does not modify this file, and reformatting an upstream file outside the plan's scope widens the fork diff for no behavior change.

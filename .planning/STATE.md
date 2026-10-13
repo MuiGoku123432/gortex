@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Stable Incremental and Cross-Repository Lifecycle
 status: executing
-stopped_at: Completed 04-17-PLAN.md
-last_updated: "2026-10-13T18:35:11.104Z"
+stopped_at: Completed 04-18-PLAN.md
+last_updated: "2026-10-13T19:01:42.523Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 04 execution started
-state_head: 090b2b2688b3ed03fdf5a01e0b0c92360b9be329
+state_head: a9fecc764e984d3be3fda54ab1a46bd1e94fb9ba
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 48
-  completed_plans: 47
+  completed_plans: 48
   percent: 20
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 2 of 18
+Plan: 3 of 18
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 04 execution started
 
@@ -108,6 +108,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P16 | 20 min | 2 tasks | 9 files |
 | Phase 04 P10 | 28min | 3 tasks | 6 files |
 | Phase 04 P17 | 45min | 2 tasks | 8 files |
+| Phase 04 P18 | 24min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -214,6 +215,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-10: callCobolTracerTool delegates to callCobolToolResult (text, isError) so tests read tool-error results without a second relay helper
 - [Phase 04]: 04-10: SEC-03 placeholder collision closed by proof - the shared unresolved dynamic CALL target has no node and each edge keeps its repository-prefixed From
 - [Phase 04]: 04-17: every source surface admits paths only via requirePathSourceScope (lexical + physical owner); gate is independent of the 04-18 walk fix because pre-tracked duplicate nodes persist
+- [Phase 04]: 04-18: Nested tracked roots are pruned in shouldExclude, admitWalkFileKnownType's regular-file fast path, and Watcher.isExcluded; config roots seeded once per Indexer, registered roots read live under mi.mu.RLock (audited: no caller holds mi.mu)
+- [Phase 04]: 04-18: Kept the live RLock read over pushing roots to Indexers at publication points — the watcher needs later-tracked roots on already-built Indexers
 
 ### Pending Todos
 
@@ -242,6 +245,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-13T18:35:10.921Z
-Stopped at: Completed 04-17-PLAN.md
+Last session: 2026-10-13T19:01:42.462Z
+Stopped at: Completed 04-18-PLAN.md
 Resume file: None
