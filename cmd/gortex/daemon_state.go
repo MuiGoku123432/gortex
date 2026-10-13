@@ -636,6 +636,13 @@ func warmupDaemonState(state *daemonState, logger *zap.Logger, markReady func())
 	var scopeUnknown atomic.Bool
 	deltaFrontier := newWarmupDeltaFrontier()
 	if err := state.multiIndexer.RunRepositoryTopologyBatch(ctx, func(batchCtx context.Context) error {
+		// The pool tracks these repositories in parallel, so a sibling is not
+		// registered yet when another repository walks. Declare the exact list
+		// the job loop feeds (not a config copy) so a walk stops at a nested
+		// sibling's root (CR-01). The declaration ends with the callback, after
+		// every worker has joined.
+		release := state.multiIndexer.DeclarePendingRoots(repos)
+		defer release()
 		coordinatedBulk, _ := state.graph.(graph.CoordinatedBulkLoader)
 		coordinatedBulkActive := coordinatedBulk != nil && coordinatedBulk.BeginCoordinatedBulkLoad()
 		defer func() {

@@ -254,3 +254,35 @@ func TestNestedTrackedRoot_UntrackStopsExcluding(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, store.GetNode("alpha/nested/main.go::ZebraWidget"))
 }
+
+// TestNestedTrackedRoot_DeclaredRootsPruneWarmupOrder mirrors the daemon
+// warmup: the pool tracks the configured repositories inside one topology
+// batch, alpha before beta, so beta is not registered when alpha walks. The
+// warmup declares the list it tracks, which stops alpha at beta's root; after
+// release the registered roots alone keep pruning (CR-01, SEC-08).
+func TestNestedTrackedRoot_DeclaredRootsPruneWarmupOrder(t *testing.T) {
+	alphaDir, betaDir := writeNestedTrackedRepos(t)
+	repos := []config.RepoEntry{
+		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+		{Path: betaDir, Name: "beta", Workspace: "shared"},
+	}
+	mi, store := newNestedTrackedMulti(t, repos)
+
+	release := mi.DeclarePendingRoots(repos)
+	err := mi.RunRepositoryTopologyBatch(context.Background(), func(batchCtx context.Context) error {
+		for _, entry := range repos {
+			if _, err := mi.TrackRepoCtx(batchCtx, entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	release()
+	require.NoError(t, err)
+
+	requireNestedIndexedOnce(t, store)
+	alphaIdx := mi.GetIndexer("alpha")
+	require.NotNil(t, alphaIdx)
+	require.True(t, alphaIdx.shouldExclude(filepath.Join(betaDir, "main.go"), alphaDir, false),
+		"after release the registered roots alone must keep pruning")
+}
