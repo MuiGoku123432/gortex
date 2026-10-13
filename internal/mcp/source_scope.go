@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -93,4 +94,33 @@ func (s *Server) requireSourceScope(ctx context.Context, repoPrefix string) erro
 		return errSourceOutOfScope
 	}
 	return nil
+}
+
+// requirePathSourceScope is the source gate for a resolved on-disk path.
+// lexical is the repository the caller's spelling names. Root confinement
+// accepts a location inside any tracked root, so a symlink or a nested
+// checkout can put another repository's bytes under that spelling; the
+// repository that physically owns the symlink-resolved location must be in
+// scope too.
+func (s *Server) requirePathSourceScope(ctx context.Context, lexical, absPath string) error {
+	if err := s.requireSourceScope(ctx, lexical); err != nil {
+		return err
+	}
+	if s.multiIndexer == nil {
+		return nil
+	}
+	real, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		real = resolveNearestExistingAncestor(absPath)
+	}
+	physical := s.multiIndexer.RepoForFile(real)
+	if view := requestViewPathRoot(ctx); view.contains(real) {
+		// The request's selected checkout owns its own files, as in
+		// resolveFilePath's lexical attribution.
+		physical = view.repoPrefix
+	}
+	if physical == "" || physical == lexical {
+		return nil
+	}
+	return s.requireSourceScope(ctx, physical)
 }

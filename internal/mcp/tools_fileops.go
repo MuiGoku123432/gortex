@@ -80,7 +80,7 @@ func (s *Server) resolveFilePath(ctx context.Context, rawPath string) (absPath, 
 		// checkout's repository even when no tracked root contains it.
 		repo = view.repoPrefix
 	}
-	if err := s.requireSourceScope(ctx, repo); err != nil {
+	if err := s.requirePathSourceScope(ctx, repo, absPath); err != nil {
 		return "", "", err
 	}
 	return absPath, relPath, nil
@@ -588,11 +588,14 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 	if s.multiIndexer != nil {
 		// The source gate (D-13, D-20): rename and scaffold read and write
 		// through this resolver, so it carries the same rule as resolveFilePath.
-		repoPath := graphPath
+		// An absolute path is also checked against the repository that
+		// physically owns its symlink-resolved location.
 		if filepath.IsAbs(graphPath) {
-			repoPath = s.repoRelative(filepath.Clean(graphPath))
-		}
-		if err := s.requireSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, repoPath)); err != nil {
+			abs := filepath.Clean(graphPath)
+			if err := s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, s.repoRelative(abs)), abs); err != nil {
+				return "", err
+			}
+		} else if err := s.requireSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, graphPath)); err != nil {
 			return "", err
 		}
 	}

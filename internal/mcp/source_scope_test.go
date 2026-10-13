@@ -207,3 +207,89 @@ func TestSourceScope_MetadataUnchanged(t *testing.T) {
 		assert.Contains(t, sourceScopeText(res), name)
 	}
 }
+
+// TestSourceScope_SymlinkIntoOtherRepoRefused: a symlink inside alpha that
+// points into beta must not let an alpha-scoped request read or write beta's
+// bytes. Root confinement accepts any tracked root, so the gate has to check
+// the repository that physically owns the resolved location too (CR-01).
+func TestSourceScope_SymlinkIntoOtherRepoRefused(t *testing.T) {
+	srv, alphaDir := newTwoRepoServer(t)
+	betaDir, ok := srv.multiIndexer.RepoRoot("beta")
+	require.True(t, ok)
+	require.NoError(t, os.Symlink(betaDir, filepath.Join(alphaDir, "vendor")))
+	betaMain := filepath.Join(betaDir, "main.go")
+	before, err := os.ReadFile(betaMain)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	for _, path := range []string{"alpha/vendor/main.go", filepath.Join(alphaDir, "vendor", "main.go")} {
+		res := callSourceTool(t, srv, ctx, srv.handleReadFile, "read_file",
+			map[string]any{"path": path, "repo": "alpha"})
+		require.Truef(t, res.IsError, "read_file %s through a symlink into beta must be refused: %s", path, sourceScopeText(res))
+		assert.NotContains(t, sourceScopeText(res), "ZebraWidget")
+	}
+
+	res := callSourceTool(t, srv, ctx, srv.handleEditFile, "edit_file", map[string]any{
+		"path": "alpha/vendor/main.go", "repo": "alpha", "old_string": "ZebraWidget", "new_string": "Hijacked",
+	})
+	require.Truef(t, res.IsError, "edit_file through a symlink into beta must be refused: %s", sourceScopeText(res))
+	res = callSourceTool(t, srv, ctx, srv.handleWriteFile, "write_file", map[string]any{
+		"path": "alpha/vendor/main.go", "repo": "alpha", "content": "package main\n\nfunc Hijacked() {}\n",
+	})
+	require.Truef(t, res.IsError, "write_file through a symlink into beta must be refused: %s", sourceScopeText(res))
+	after, err := os.ReadFile(betaMain)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "beta's bytes must stay put")
+
+	// The absolute arm of resolveGraphPath (rename, scaffold) applies the same rule.
+	alphaCtx := withSourceScopeRequest(ctx, makeReq("rename_symbol", map[string]any{"repo": "alpha"}))
+	_, err = srv.resolveGraphPath(alphaCtx, filepath.Join(alphaDir, "vendor", "main.go"))
+	require.ErrorIs(t, err, errSourceOutOfScope)
+	// The repository that owns the bytes still reads them.
+	betaCtx := withSourceScopeRequest(ctx, makeReq("rename_symbol", map[string]any{"repo": "beta"}))
+	_, err = srv.resolveGraphPath(betaCtx, betaMain)
+	require.NoError(t, err)
+}
+
+// TestSourceScope_NestedCheckoutRefused: a tracked repository whose root sits
+// inside another's must not be readable through the outer repository's
+// spelling by a request scoped to the outer repository (CR-01).
+func TestSourceScope_NestedCheckoutRefused(t *testing.T) {
+	alphaDir := filepath.Join(t.TempDir(), "alpha")
+	betaDir := filepath.Join(alphaDir, "nested")
+	require.NoError(t, os.MkdirAll(betaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(alphaDir, "main.go"),
+		[]byte("package main\n\nfunc AlphaThing() {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(betaDir, "main.go"),
+		[]byte("package main\n\nfunc ZebraWidget() {}\n"), 0o644))
+
+	tmpCfg := filepath.Join(t.TempDir(), "config.yaml")
+	gc := &config.GlobalConfig{Repos: []config.RepoEntry{
+		{Path: alphaDir, Name: "alpha", Workspace: "shared"},
+		{Path: betaDir, Name: "beta", Workspace: "shared"},
+	}}
+	gc.SetConfigPath(tmpCfg)
+	require.NoError(t, gc.Save())
+	cm, err := config.NewConfigManager(tmpCfg)
+	require.NoError(t, err)
+	store, err := store_sqlite.Open(filepath.Join(t.TempDir(), "fts.sqlite"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	backend := search.NewSymbolSearcherBackend(store)
+	mi := indexer.NewMultiIndexer(store, testRegistry(), backend, cm, zap.NewNop())
+	_, err = mi.IndexScoped("", "")
+	require.NoError(t, err)
+	eng := query.NewEngine(store)
+	eng.SetSearch(backend)
+	srv := NewServer(eng, store, nil, nil, zap.NewNop(), nil, MultiRepoOptions{MultiIndexer: mi, ConfigManager: cm})
+
+	res := callSourceTool(t, srv, context.Background(), srv.handleReadFile, "read_file",
+		map[string]any{"path": "alpha/nested/main.go", "repo": "alpha"})
+	require.Truef(t, res.IsError, "an alpha-scoped read of beta's nested checkout must be refused: %s", sourceScopeText(res))
+	assert.NotContains(t, sourceScopeText(res), "ZebraWidget")
+
+	res = callSourceTool(t, srv, context.Background(), srv.handleReadFile, "read_file",
+		map[string]any{"path": "alpha/main.go", "repo": "alpha"})
+	require.Falsef(t, res.IsError, "alpha's own file must still read: %s", sourceScopeText(res))
+	assert.Contains(t, sourceScopeText(res), "AlphaThing")
+}
