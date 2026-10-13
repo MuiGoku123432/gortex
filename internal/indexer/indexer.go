@@ -526,6 +526,11 @@ type Indexer struct {
 	repositoryMutationMu    sync.Mutex
 	repositoryMutation      *repositoryMutationCoordinator
 	repositoryMutationOwner *MultiIndexer
+	// trackedRepoRoots holds the absolute, cleaned roots of the repositories
+	// the global config tracked when the owning MultiIndexer built this
+	// Indexer. inNestedTrackedRoot reads them so a sibling that is not
+	// registered yet still stops the walk. Read-only after construction.
+	trackedRepoRoots []string
 
 	// incrementalResolveFilesHook is a focused test seam for proving a
 	// multi-file watcher batch invokes the scoped resolver exactly once. nil in
@@ -5664,7 +5669,38 @@ func (idx *Indexer) shouldExclude(path, root string, isDir bool) bool {
 	if !isDir && pathguard.SymlinkEscapes(path, root) {
 		return true
 	}
+	// Another tracked repository's root nested inside this one owns its
+	// files. The check sits ahead of the rule-based re-includes so no
+	// `!pattern` or agent-config re-include can re-admit them.
+	if idx.inNestedTrackedRoot(path, root) {
+		return true
+	}
 	return idx.shouldExcludeRules(path, root, isDir)
+}
+
+// inNestedTrackedRoot reports whether path lies inside a tracked repository
+// root nested strictly under root.
+//
+// PURPOSE — one path has one owner, the longest tracked root containing it
+// (MultiIndexer.RepoForFile), so the outer repository must not index it as
+// its own. Without this, alpha mints alpha/nested/... duplicates of a nested
+// repository's files (CR-01; SEC-08 double ownership).
+//
+// RATIONALE — a root equal to or containing root never excludes anything, so
+// the nested repository's own walk is unaffected. The config seed is copied
+// once per Indexer; nothing here reads config, builds slices, or locks.
+//
+// KEYWORDS — nested repository, tracked root, walk pruning, ownership.
+func (idx *Indexer) inNestedTrackedRoot(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	for _, r := range idx.trackedRepoRoots {
+		if pathkey.HasPathPrefix(path, r) && !pathkey.EqualPaths(r, root) && pathkey.HasPathPrefix(r, root) {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldExcludeRules applies the lexical and per-directory ignore rules.

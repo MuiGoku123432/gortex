@@ -373,6 +373,23 @@ func (mi *MultiIndexer) newPerRepoIndexerGuardedWithMode(
 	idx.parseAdmission.Store(mi.parseAdmission.Load())
 	idx.nativeParseAdmission.Store(mi.nativeParseAdmission.Load())
 	idx.repositoryMutationOwner = mi
+	// Seed the tracked roots once per Indexer: during a parallel warmup a
+	// sibling is not in mi.repos yet when this repository walks.
+	// ReposSnapshot copies under the config mutex and does not take mi.mu,
+	// keeping this constructor's must-not-re-enter-mi.mu guarantee. Never
+	// read the config per file.
+	if mi.configMgr != nil {
+		for _, entry := range mi.configMgr.Global().ReposSnapshot() {
+			if entry.Path == "" {
+				continue
+			}
+			abs, err := filepath.Abs(entry.Path)
+			if err != nil {
+				continue
+			}
+			idx.trackedRepoRoots = append(idx.trackedRepoRoots, filepath.Clean(abs))
+		}
+	}
 	idx.search = mi.search
 	if mi.embedder != nil {
 		idx.SetEmbedder(mi.embedder)
