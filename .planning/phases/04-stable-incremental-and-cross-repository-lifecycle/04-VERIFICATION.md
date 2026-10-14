@@ -1,39 +1,19 @@
 ---
 phase: 04-stable-incremental-and-cross-repository-lifecycle
-verified: 2026-10-13T22:56:01Z
-status: gaps_found
-score: 114/116 must-haves verified (4/5 roadmap success criteria; 110/111 plan truths)
+verified: 2026-10-14T03:42:42Z
+status: human_needed
+score: 116/116 must-haves verified (5/5 roadmap success criteria; 111/111 plan truths)
 covered_files: [".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-01-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-01-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-02-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-02-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-03-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-03-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-04-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-04-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-05-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-05-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-06-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-06-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-07-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-07-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-08-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-08-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-09-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-09-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-10-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-10-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-11-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-11-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-12-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-12-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-13-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-13-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-14-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-14-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-15-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-15-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-16-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-16-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-17-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-17-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-18-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-18-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-19-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-19-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-20-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-20-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-21-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-21-SUMMARY.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-22-PLAN.md",".planning/phases/04-stable-incremental-and-cross-repository-lifecycle/04-22-SUMMARY.md","cmd/gortex/daemon_state.go","internal/indexer/cobol_lifecycle_crossrepo_test.go","internal/indexer/indexer.go","internal/indexer/multi.go","internal/indexer/nested_tracked_root_test.go","internal/indexer/repository_untrack.go","internal/indexer/workspace_resolve.go","internal/mcp/explore_artifact_intent.go","internal/mcp/overlay_view.go","internal/mcp/source_scope.go","internal/mcp/source_scope_test.go","internal/mcp/tools_explore.go","internal/mcp/tools_fileops.go","internal/mcp/tools_find_declaration.go","internal/mcp/tools_find_declaration_test.go","internal/mcp/tools_generate_skill.go","internal/mcp/tools_generate_skill_test.go","internal/mcp/tools_move_inline.go","internal/mcp/tools_move_inline_test.go","internal/mcp/tools_simulate.go"]
-covered_digest: "v3:sha256:949b8aa149c3aa2231d2766d00200d071f022e93314175fee4f5fe63bf2f56e3"
+covered_digest: "v3:sha256:2ce3b3678ecd31eaa573f204e960ae86d1bf87971a387d5dcb4e29278cd2d4be"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
   previous_status: gaps_found
-  previous_score: 93/97
+  previous_score: 114/116
   gaps_closed:
-    - "SC-5 / SEC-01 / SEC-02 (explore artifact lane): an unbound two-repository explore is refused before the lane runs, and an alpha-scoped explore returns no nested beta bytes in either index state (04-19)"
-    - "SC-4 / ID-09 / SEC-08 (nested topology): untracking a nested repository admits its files into the enclosing repository, tracking it later evicts the outer copies in the same call, and the projects:-map and inactive-entry shapes give one owner (04-20, 04-21)"
+    - "SC-5 / SEC-01 / 04-17 truth 3 (CR-04): each walk file entry in move_symbol, inline_symbol and generate_skill now passes guardSymlinkWithinRepo before requirePathSourceScope (fix 5b4e4597), so a symlink pointing outside every tracked root is excluded exactly as read_file refuses it, in multi-repo and single-repo mode"
   gaps_remaining: []
   regressions: []
-  new_gaps:
-    - "SC-5 / SEC-01: the per-entry walk gate added in 04-22 fails open for a symlink whose target lies outside every tracked root, so generate_skill, move_symbol and inline_symbol admit bytes that read_file refuses for the same path and scope (review CR-04, verifier probe-confirmed)"
-gaps:
-  - truth: "SC-5 / SEC-01 / 04-17 truth 3: every source surface admits the same bytes for one allow-set and fails closed when the physical owner of a location cannot be established (no source surface admits a location that read_file refuses for the same scope)"
-    status: failed
-    reason: "requirePathSourceScope returns nil when the symlink-resolved location has no registered owner (source_scope.go:124, `physical == \"\"`). Its doc comment says it relies on the caller having confined the path first ('Root confinement accepts a location inside any tracked root'). resolveFilePath and resolveNodePath do confine (guardSymlinkWithinRepo). The three filesystem walks that 04-22 gated do not, so for them the gate fails open on an owner-less location. Verifier probe (go test -overlay, tree untouched), fixture newNestedGoModuleServer with alpha/a/link.txt -> <tmp>/secret.txt and alpha/a/zlink.go -> <tmp>/x.go: (1) read_file {path: alpha/a/link.txt, repo: alpha} is refused ('resolves to ... outside every indexed repository root'). (2) generate_skill {directory: alpha/, repo: alpha} lists a/link.txt (25 bytes) and a/zlink.go, and writes alpha/.claude/skills/alphaskill/references/a/link.txt containing TOP-SECRET-OUTSIDE-ROOTS. (3) read_file then serves that bundled copy (isError=false, secret present). (4) move_symbol alpha/a/a.go::Foo rewrites alpha/a/zlink.go: the symlink becomes a regular in-repository file holding the outside file's bytes (with the import rewritten); the outside file is unchanged. The same leak appears with sibling (non-nested) repositories (newTwoRepoServer: generate_skill dry_run lists alpha/link.txt). The behavior in generate_skill predates the phase (upstream 47fceda9), but 04-22 rewrote these walks specifically to close 'a symlinked file' and its comments claim that coverage; the files changed in this round."
-    artifacts:
-      - path: "internal/mcp/source_scope.go"
-        issue: "requirePathSourceScope (lines 107-128): `physical == \"\"` returns nil, so an owner-less (outside-every-root) location is attributed to the lexical repository instead of being refused"
-      - path: "internal/mcp/tools_generate_skill.go"
-        issue: "WalkDir callback (lines ~158-205): per-entry gate is requirePathSourceScope only; no guardSymlinkWithinRepo; os.ReadFile follows the symlink and the bytes are written into the skill bundle"
-      - path: "internal/mcp/tools_move_inline.go"
-        issue: "move_symbol and inline_symbol module walks (lines ~254-283, ~1148-1172) and the callerFiles read loops: same fail-open; AtomicWriteFile replaces the link with an in-repository copy of the out-of-tree file"
-      - path: "internal/mcp/tools_generate_skill_test.go"
-        issue: "TestGenerateSkill_NestedTrackedRootExcluded has no symlink case; tools_move_inline_test.go likewise"
-    missing:
-      - "Refuse an owner-less location in the walk gates: either make requirePathSourceScope refuse when physical == \"\" and guardResolvedPathWithinRepo(ctx, absPath, real) fails (every caller inherits confinement), or call guardSymlinkWithinRepo on each walk entry before reading it (generate_skill, move_symbol, inline_symbol, and the callerFiles read loops)"
-      - "Make the fix hold in single-repository mode too (requirePathSourceScope short-circuits there, so the confinement check must not depend on IsMultiRepo)"
-      - "Tests: a symlink-out-of-every-root case for generate_skill (not listed, not copied), move_symbol and inline_symbol (link not rewritten or replaced), plus a single-repository variant"
 advisory:
   - finding: "WR-10: preview_edit and simulate_chain resolve WorkspaceEdit paths through ungated resolveOverlayAbsPath (accepts any absolute path) and read the file from disk"
     category: security
@@ -55,16 +35,44 @@ human_verification:
 # Phase 4: Stable Incremental and Cross-Repository Lifecycle Verification Report
 
 **Phase Goal:** Users receive the same canonical scoped deterministic graph from identical final inputs regardless of reruns, edits, deletions, restores, or clean rebuilds.
-**Verified:** 2026-10-13T22:56:01Z (HEAD 2c5d9354)
-**Status:** gaps_found
-**Re-verification:** Yes. This follows gap-closure round 2 (plans 04-19, 04-20, 04-21, 04-22).
+**Verified:** 2026-10-14T03:42:42Z (HEAD 5b4e4597)
+**Status:** human_needed
+**Re-verification:** Yes, round 4. A targeted re-check of the single CR-04 gap after fix commit 5b4e4597. The round-3 pass (HEAD 2c5d9354) verified everything else; those findings are kept below.
 
-## Summary of this pass
+## Round 4: CR-04 re-verification (fix 5b4e4597)
+
+**The CR-04 gap is closed.** Fix 5b4e4597 changes three lines. Each walk FILE entry now calls `s.guardSymlinkWithinRepo(ctx, p)` before `requirePathSourceScope`, at `tools_move_inline.go:273` (move_symbol), `tools_move_inline.go:1166` (inline_symbol) and `tools_generate_skill.go:180`. `read_file` confines paths with the same function. `guardSymlinkWithinRepo` resolves symlinks and checks the result against `guardRepoRoots`, which includes every registered multi-repo root, `s.indexer.RootPath()` and the view root. It does not depend on `IsMultiRepo`.
+
+I checked it with a probe run through `go test -overlay`; the repository tree was not touched. The probe files are `scratchpad/probe3/zz_verifier_r3_test.go` and `scratchpad/probe4/zz_vr4_test.go`.
+
+| Check | Result at HEAD 5b4e4597 |
+|-------|-------------------------|
+| Round-3 probe, nested fixture: `alpha/a/link.txt` and `alpha/a/zlink.go` point outside every root | `read_file` refuses link.txt. `generate_skill` bundles only `[a/a.go b/b.go c/c.go go.mod]`, with no copy of link.txt on disk. Reading the would-be bundle path through `read_file` is refused (the file does not exist). After `move_symbol`, zlink.go is still a symlink and the outside x.go is byte-identical. Before the fix, the link was bundled and rewritten. |
+| Sibling-repo symlink (`alpha/a/blink.txt` → `beta/use.go`) | Still gated. It is not bundled, because the confinement passes and `requirePathSourceScope` then refuses the physical owner beta. In the two-repo sibling fixture, `generate_skill` dry_run no longer lists link.txt (round 3 listed it). |
+| `inline_symbol`, nested fixture | zlink.go stays a symlink, the outside file is unchanged, and alpha's own caller c.go is inlined. |
+| Symlinked DIRECTORY (`alpha/c/sdir` → outside dir holding s.go and secret.txt) | Not descended. `generate_skill` lists nothing under sdir, and `inline_symbol` leaves sdir/s.go unchanged. This matches the stdlib contract: `filepath.Walk` uses Lstat and `filepath.WalkDir` uses DirEntry types, so neither follows a symlinked directory below the root. A symlinked directory reaches the file branch as a non-directory and passes the same guard. The walk roots come from `resolveFilePath` (generate_skill) and `findGoModRoot` of a resolved source file (move/inline). |
+| Single-repo mode (`setupMoveInlineRepo`, no multiIndexer) | `read_file link.txt` is refused. `generate_skill` bundles `[go.mod pkga/a.go pkgb/b.go pkgc/c.go]` and does not copy link.txt. `move_symbol` and `inline_symbol` both rewrite the in-repo caller, keep `pkgc/zlink.go` a symlink, and leave the outside file byte-identical. |
+| Single repo whose go.mod lives in an untracked parent (the module walk leaves the root) | `move_symbol` leaves `../other/o.go`, which lies outside the tracked root and calls `pkga.Foo()`, byte-identical. The guard refuses ownerless files in this case too. |
+| Stale-graph swap (an indexed caller is replaced by an outside symlink before reindex), through the edge loop and `resolveNodePath` | move_symbol and inline_symbol leave the link and the outside file unchanged. `get_symbol_source` and `read_file` refuse. |
+| Named tests, `-race` | `TestMoveInline_SymlinkOutsideRootsNotRewritten/{move_symbol,inline_symbol}`, `TestGenerateSkill_SymlinkOutsideRootsExcluded` and `TestSourceScope_SourceChannelsInventoried` PASS. |
+| gofmt and debt markers on the 4 changed files | Clean. |
+
+**No other surface in internal/mcp has the same ownerless-path hole.**
+- The only `filepath.Walk` and `WalkDir` sites are the three gated above. `TestSourceScope_SourceChannelsInventoried` enforces that inventory and passes.
+- The other `requirePathSourceScope` callers confine first or take indexed paths only:
+  - `resolveFilePath` → `resolveConfinedFilePath`.
+  - `resolveNodePath` and `resolveGraphPath` take graph paths. The indexer's `shouldExclude` → `pathguard.SymlinkEscapes` never admits an escaping symlinked file.
+  - The trigram filters in `find_declaration` and `search_text` only see indexed paths.
+- The only `os.ReadDir` site is `inferGoPackageForDir` (`tools_move_inline.go:633`). It reads just the package clause of a sibling file in the confined target directory and emits no bytes (ℹ️ Info).
+
+ℹ️ The `walkGates` descriptions in `TestSourceScope_SourceChannelsInventoried` still say "per-entry requirePathSourceScope (04-22)". They do not mention the added confinement. This is cosmetic.
+
+## Round 3 summary (HEAD 2c5d9354, carried)
 
 - **Both prior gaps are closed.** I checked each one with the round-2 tests (re-run under `-race`) and by re-running my round-1 probes against HEAD.
   - **Explore (prior gap 1).** An unbound explore is now refused. An alpha-scoped explore in the nested `outer_indexed_first` state returns no beta bytes.
   - **Nested topology (prior gap 2).** Untracking beta admits alpha/nested through incremental reconcile, matching the clean build. Tracking beta later evicts alpha's copies with no manual reindex. The `projects:` shape indexes the file once. With an inactive entry, alpha owns the file and RepoForFile agrees.
-- **One new gap blocks: review CR-04, which I confirmed.** The per-entry walk gate 04-22 added fails open for a symlink whose target lies outside every tracked root.
+- **One new gap blocked in round 3: review CR-04 (closed in round 4, see above).** The per-entry walk gate 04-22 added fails open for a symlink whose target lies outside every tracked root.
   - `generate_skill` copies that file's bytes into the repository's skill bundle, and `read_file` then serves the copy.
   - `move_symbol` and `inline_symbol` replace a `.go` symlink with an in-repository copy of the outside file.
   - `read_file` refuses the same path for the same scope, so the source surfaces disagree.
@@ -80,9 +88,9 @@ human_verification:
 | 2 | Identical reindex reuses identities, no duplicates | ✓ VERIFIED (regression check) | Same as row 1. TestCobolLifecycle_* is in the green indexer run. |
 | 3 | Edit/delete/restore/version/retrieval/config changes invalidate stale observations | ✓ VERIFIED (regression check) | Same as row 1. |
 | 4 | Incremental equals clean for identical final inputs | ✓ VERIFIED (prior partial now closed) | `TestCobolLifecycle_NestedTrackLater` and `TestCobolLifecycle_NestedUntrack` (graphdump digest equality) pass under -race, as do `TestNestedTrackedRoot_TrackLaterEvicts`, `UntrackAdmits/{UntrackRepo,UntrackRepoChecked}`, `LifecycleTrackAndUntrack`, `ProjectsMapIndexedOnce`, `OuterOwnsUnindexedNestedEntry/*` and `DeclaredRootsPruneWarmupOrder` (verifier run). Re-running the round-1 probes at HEAD: projects: map, alpha/nested=false and beta present; inactive entry, alpha/nested=true and RepoForFile=alpha; untrack, shouldExclude=false and nested present (matching clean); track-later, nested evicted with no manual IndexRepo. |
-| 5 | All downstream surfaces fail closed on missing scope; no same-name cross-repo binding; zero unowned/misprefixed for the acceptance corpus | ✗ FAILED (new gap, CR-04) | Binding refusal, the ownership audit and the explore gate hold. But `requirePathSourceScope` fails open when a location has no owner. Through the walks of generate_skill, move_symbol and inline_symbol, an alpha-scoped request receives bytes from outside every tracked root, while `read_file` refuses the same path for the same scope. |
+| 5 | All downstream surfaces fail closed on missing scope; no same-name cross-repo binding; zero unowned/misprefixed for the acceptance corpus | ✓ VERIFIED (round 4, CR-04 closed) | Binding refusal, the ownership audit and the explore gate hold. The three walk tools now confine each file entry with `guardSymlinkWithinRepo` before the owner gate, so an outside-root symlink is excluded wherever `read_file` refuses it. Checked by probe in nested, sibling and single-repo modes, and by the new tests under -race. |
 
-**Score:** 114/116 must-haves (roadmap 4/5; plan truths 110/111). No truth is present but behavior-unverified.
+**Score:** 116/116 must-haves (roadmap 5/5; plan truths 111/111). No truth is present but behavior-unverified.
 
 ### Plan Must-Have Truths: round 2 in full, earlier plans by regression
 
@@ -105,9 +113,9 @@ human_verification:
 | 04-22 #1 | Alpha-scoped move_symbol leaves nested beta byte-identical | ✓ VERIFIED | `TestMoveSymbol_NestedTrackedRootNotRewritten` PASS. Side effect: beta is left non-compiling (WR-08, human item 1) |
 | 04-22 #2 | Alpha-scoped inline_symbol leaves beta byte-identical | ✓ VERIFIED | `TestInlineSymbol_NestedTrackedRootNotRewritten` PASS |
 | 04-22 #3 | generate_skill lists no nested beta file | ✓ VERIFIED | `TestGenerateSkill_NestedTrackedRootExcluded` PASS |
-| 04-22 #4 | Each walk admits entries only through requirePathSourceScope; no nested root or symlink brings **another repository's** bytes in | ✓ VERIFIED (literal) | Verifier probe: alpha/a/blink.txt pointing to beta/use.go is not bundled. The truth names "another repository's bytes", and an outside-every-root target is no repository's, so the literal truth holds. The 04-22 code comments claim the whole symlink class, and that wider claim is false (gap). |
+| 04-22 #4 | Each walk admits entries only through requirePathSourceScope; no nested root or symlink brings **another repository's** bytes in | ✓ VERIFIED | Sibling-repo symlink not bundled (probe). Since 5b4e4597 the code's wider claim also holds: outside-every-root symlinks are excluded by `guardSymlinkWithinRepo` (round-4 probe) |
 | 04-22 #5 | find_declaration regex filters before cap | ✓ VERIFIED | `TestFindDeclaration_RegexFiltersBeforeLimit` PASS. The per-repository cap before the physical-owner filter remains (WR-05 residual; a false negative, not a leak) |
-| 04-17 #3 | "no two source surfaces disagree for one allow-set" | ✗ FAILED | For allow-set {alpha} and path alpha/a/link.txt: read_file refuses, while generate_skill copies the bytes and move_symbol materializes them (probe) |
+| 04-17 #3 | "no two source surfaces disagree for one allow-set" | ✓ VERIFIED (round 4) | For allow-set {alpha} and alpha/a/link.txt, all four surfaces now refuse or exclude: read_file, generate_skill, move_symbol and inline_symbol. The same holds in single-repo mode (probe) |
 | 04-12 #1 | Every source-returning tool refuses an unbound multi-repo request and an out-of-scope repository | ✓ VERIFIED (prior gap closed) | Explore now refuses. No other unbound leak of source bytes was found (preview_edit returns symbol IDs only, see WR-10 advisory) |
 | 04-01..04-18 (others) | as in prior reports | ✓ VERIFIED (regression) | Full suite green; round 2 touched only the files listed |
 
@@ -122,7 +130,7 @@ human_verification:
 | `internal/indexer/workspace_resolve.go`, `indexer.go` | live registered plus pending roots | ✓ VERIFIED | |
 | `internal/indexer/repository_untrack.go` | admit on untrack | ✓ VERIFIED | |
 | `cmd/gortex/daemon_state.go` | warmup declares its list | ✓ VERIFIED | |
-| `internal/mcp/tools_move_inline.go`, `tools_generate_skill.go` | per-entry requirePathSourceScope | ⚠️ PRESENT, FAILS OPEN | `verify.artifacts` 04-22 6/6. Wired, but the gate admits owner-less (outside-root) symlink targets (gap) |
+| `internal/mcp/tools_move_inline.go`, `tools_generate_skill.go` | per-entry guardSymlinkWithinRepo + requirePathSourceScope | ✓ VERIFIED | `verify.artifacts` 04-22 6/6. Lines 273/1166 and 180 confine before the owner gate (5b4e4597) |
 | `internal/mcp/tools_find_declaration.go` | GrepRegexpForRepos, filter then cap | ✓ VERIFIED | |
 
 ### Key Link Verification
@@ -132,7 +140,7 @@ human_verification:
 | 04-19 | handleExplore→requireSourceScope; lane→filterTextMatchesByResolvedScope; inventory→gatherExploreArtifactLane | ✓ WIRED (`verify.key-links` 3/3) |
 | 04-20 | inNestedTrackedRoot→nestedTrackedRootContains; pendingRoots; daemon DeclarePendingRoots(repos) | ✓ WIRED (3/3) |
 | 04-21 | TrackRepoCtx→reconcileEnclosingRepos; untrack→reconcileEnclosingRepos; batch skip | ✓ WIRED (3/3) |
-| 04-22 | move/inline/generate_skill walks→requirePathSourceScope; find_declaration→GrepRegexpForRepos | ✓ WIRED (3/3). The wired gate is incomplete for owner-less locations (gap) |
+| 04-22 | move/inline/generate_skill walks→requirePathSourceScope; find_declaration→GrepRegexpForRepos | ✓ WIRED (3/3), with guardSymlinkWithinRepo ahead of the gate since 5b4e4597 |
 
 ### Data-Flow Trace (Level 4)
 
@@ -140,7 +148,7 @@ human_verification:
 |----------|------|--------|-----------|--------|
 | nested-root pruning | registered and declared roots | live `mi.repos` and `mi.pendingRoots` under RLock | Yes; refreshed on track, untrack and release | ✓ FLOWING (residual: WR-06 failed-registration path) |
 | explore artifact snippet | `match.Text` | GrepText, then physical-owner filter | Yes, gated | ✓ FLOWING |
-| generate_skill bundle bytes | `os.ReadFile(path)` per walk entry | filesystem, following symlinks | Gated for registered owners; ungated for owner-less targets | ✗ leaks outside-root bytes (gap) |
+| generate_skill bundle bytes | `os.ReadFile(path)` per walk entry | filesystem, following symlinks | Confined to tracked roots, then gated by physical owner | ✓ FLOWING (gated) |
 
 ### Behavioral Spot-Checks
 
@@ -152,7 +160,9 @@ human_verification:
 | gofmt / debt markers on the 16 round-2 files | `gofmt -l`; grep TBD/FIXME/XXX | clean; only feature-code literals in indexer.go:1631-1637 | ✓ PASS |
 | Round-1 explore probe at HEAD | `go test -overlay … -run '^TestVerifierProbe_' ./internal/mcp/` | unbound explore refused; nested alpha-scoped no leak; sibling no leak | ✓ PASS (gap 1 closed) |
 | Round-1 nested probes at HEAD | `go test -overlay … -run '^TestVerifierProbe_' ./internal/indexer/` | projects:, inactive, untrack, track-later all converge (see SC-4 row) | ✓ PASS (gap 2 closed) |
-| CR-04 probe | `go test -overlay … -run '^TestVerifierR3_CR04' ./internal/mcp/` | read_file refuses alpha/a/link.txt; generate_skill bundles it (25 bytes, secret on disk); read_file serves the copy; move_symbol turns zlink.go into an in-repo copy of the outside file; sibling layout also lists link.txt | ✗ FAIL |
+| CR-04 probe (round 3, at 2c5d9354) | `go test -overlay … -run '^TestVerifierR3_CR04' ./internal/mcp/` | generate_skill bundled link.txt; move_symbol replaced zlink.go | ✗ FAIL (superseded) |
+| CR-04 probe (round 4, at 5b4e4597) | `go test -overlay probe4/overlay.json -run '^TestVerifierR3_CR04\|^TestVR4_' ./internal/mcp/` | All refused or excluded: nested, sibling, inline, symlinked dir, single-repo, parent-module walk, stale-graph swap (see Round 4) | ✓ PASS |
+| CR-04 named tests | `GOWORK=off go test -race -count=1 -run '^(TestMoveInline_SymlinkOutsideRootsNotRewritten\|TestGenerateSkill_SymlinkOutsideRootsExcluded\|TestSourceScope_SourceChannelsInventoried)$' ./internal/mcp/` | ok 8.8s; 3 PASS plus 2 subtests | ✓ PASS |
 | WR-10 probe | `… -run '^TestVerifierR3_WR10' ./internal/mcp/` | unbound and alpha-scoped preview_edit of beta/main.go: isError=false, symbols_removed=[beta/main.go::ZebraWidget]; no raw lines; outside-root absolute path yields no symbols | ⚠️ metadata disclosure (advisory) |
 | WR-06 probe | `… -run '^TestVerifierR3_WR06' ./internal/indexer/` | declared-but-unregistered beta: alpha/nested absent, RepoForFile=alpha, shouldExclude=false; explicit incremental restores | ⚠️ failure-path divergence (human item 2) |
 
@@ -169,7 +179,7 @@ Step 7c: no `scripts/*/tests/probe-*.sh` is declared or present. Not applicable.
 
 | Finding | Verifier result | Classification |
 |---------|-----------------|----------------|
-| CR-04: walk gate admits outside-root symlinks | **Confirmed** by probe for generate_skill (copy plus read_file serving it) and move_symbol (link replaced by an in-repo copy). Surfaces disagree: read_file refuses the same path for the same scope (guardSymlinkWithinRepo). It predates the phase in generate_skill (upstream 47fceda9), but the gate's fail-open on `physical == ""` is phase-4 code (04-17), and 04-22 reused it on paths that were never confined while claiming symlink coverage. Files changed this round and a deterministic probe exists, so the evidence gate keeps it blocking. | 🛑 Gap (SC-5, SEC-01; 04-17 #3; 04-22 SEC-02 prohibition) |
+| CR-04: walk gate admits outside-root symlinks | **Closed in round 4** by 5b4e4597 (probe and tests above). Round-3 finding: **Confirmed** by probe for generate_skill (copy plus read_file serving it) and move_symbol (link replaced by an in-repo copy). Surfaces disagree: read_file refuses the same path for the same scope (guardSymlinkWithinRepo). It predates the phase in generate_skill (upstream 47fceda9), but the gate's fail-open on `physical == ""` is phase-4 code (04-17), and 04-22 reused it on paths that were never confined while claiming symlink coverage. Files changed this round and a deterministic probe exists, so the evidence gate keeps it blocking. | ✓ Closed (was 🛑 Gap) |
 | WR-06: declared roots over-prune on failed registration | **Confirmed** by probe (mechanism). It is an error path, logged; a deterministic failure reproduces on a clean rebuild. | ⚠️ Warning, human item 2 |
 | WR-07: enclosing-reconcile failure only logged | **Confirmed** by code (multi.go:2988-2993 Warn only). Error path. | ⚠️ Warning, human item 2 |
 | WR-08: move/inline silently leave out-of-scope callers broken | **Confirmed** by probe (beta/use.go still calls a.Foo(); no advisory in the result). Required by the 04-22 truths. | Human item 1 (policy) |
@@ -188,12 +198,12 @@ Step 7c: no `scripts/*/tests/probe-*.sh` is declared or present. Not applicable.
 | ID-07 | 04-06, 04-08, 04-14, 04-15 | Stale observations removed on change or delete | ✓ SATISFIED | Unchanged |
 | ID-08 | 04-09, 04-16 | Parser/extractor/retrieval/config change invalidates | ✓ SATISFIED | Unchanged |
 | ID-09 | 04-07..04-10, 04-15, 04-16, 04-20, 04-21 | Incremental equals clean | ✓ SATISFIED | Nested track-later and untrack now digest-equal to clean (TestCobolLifecycle_Nested*). Failure-path caveat WR-06/WR-07 (human item 2) |
-| SEC-01 | 04-03, 04-10, 04-12, 04-17, 04-18, 04-19, 04-22 | Same scope across surfaces | ✗ BLOCKED | Walk tools admit owner-less symlink targets that read_file refuses (gap) |
+| SEC-01 | 04-03, 04-10, 04-12, 04-17, 04-18, 04-19, 04-22 | Same scope across surfaces | ✓ SATISFIED | Walk tools now confine like read_file (5b4e4597; round-4 probe) |
 | SEC-02 | 04-12, 04-17, 04-19, 04-22 | Absent scope fails closed for source reads and AI context | ✓ SATISFIED | Explore and every inventoried source surface refuse unbound multi-repo requests. CR-04 is an out-of-tree attribution failure under a bound scope, not an unbound read; it is tracked under SEC-01 |
 | SEC-03 | 04-04, 04-06, 04-07, 04-10, 04-14 | No same-name cross-repo binding without allowlist and evidence | ✓ SATISFIED | Unchanged |
 | SEC-08 | 04-05, 04-10, 04-13, 04-18, 04-20, 04-21 | Zero unowned/misprefixed for the acceptance corpus | ✓ SATISFIED | Ownership audit green; nested double ownership closed in all four probed shapes |
 
-Every phase requirement ID appears in at least one plan's `requirements:`, so none is orphaned. REQUIREMENTS.md currently marks all eleven "Gaps Found", which matches this report: SEC-01 stays open.
+Every phase requirement ID appears in at least one plan's `requirements:`, so none is orphaned. All eleven are now satisfied. REQUIREMENTS.md still marks them "Gaps Found", and the orchestrator should update that.
 
 ### Prohibitions (judgment tier; non-authoritative LLM verdicts)
 
@@ -205,17 +215,16 @@ Every phase requirement ID appears in at least one plan's `requirements:`, so no
 | 04-20 SEC-01 | MUST NOT read the config per file or event, or copy roots into an Indexer | ✓ Holds |
 | 04-21 ID-09 | MUST NOT leave the outer graph different from clean after a nested track or untrack | ✓ Holds (digest tests). ⚠️ Flagged on reconcile failure (WR-07) |
 | 04-21 SEC-08 | MUST NOT reconcile while holding mi.mu, a lane, the gate, the writer, or inside a batch | ✓ Holds (code plus SUMMARY caller audit) |
-| 04-22 SEC-01 | MUST NOT write a file whose physical owner is outside scope from a walk | ✗ Violated in spirit: move_symbol writes outside-root bytes into an alpha file by replacing the symlink (the owner is "none", which the gate treats as alpha) |
-| 04-22 SEC-02 | MUST NOT copy or list a file whose physical owner is outside scope from generate_skill's walk | ✗ Violated: an owner-less outside-root file is listed and copied |
+| 04-22 SEC-01 | MUST NOT write a file whose physical owner is outside scope from a walk | ✓ Holds (round 4: outside-root symlinks are no longer rewritten) |
+| 04-22 SEC-02 | MUST NOT copy or list a file whose physical owner is outside scope from generate_skill's walk | ✓ Holds (round 4) |
 | 04-12 SEC-02 privacy | MUST NOT reveal out-of-scope existence through a refusal | ⚠️ Flagged (rename message; human item 1) |
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| internal/mcp/source_scope.go | 124 | Fail-open on an unresolved physical owner (`physical == ""` → nil) | 🛑 Blocker | Gap. Callers that do not confine first leak outside-root bytes |
-| internal/mcp/tools_generate_skill.go | ~146-205 | Comment claims symlink coverage the gate does not provide; os.ReadFile follows the link | 🛑 Blocker | Gap (same root cause) |
-| internal/mcp/tools_move_inline.go | ~248-283, ~1143-1172 | Same claim; rename-write replaces the link with outside bytes | 🛑 Blocker | Gap (same root cause) |
+| internal/mcp/source_scope.go | 124 | `physical == ""` → nil, by design: it relies on the caller confining first | ℹ️ Info | Every caller now confines first or takes only indexed paths (round 4 audit) |
+| internal/mcp/source_scope_test.go | 531-533 | `walkGates` descriptions omit the added confinement | ℹ️ Info | Cosmetic |
 | internal/indexer/multi.go | 2988-2993 | Error swallowed to a Warn log | ⚠️ Warning | WR-07 |
 | internal/indexer/multi.go | 2126-2127 | `indexMultiRepo` doc line now sits above `DeclarePendingRoots` | ℹ️ Info | IN-07 |
 | (round-2 added lines) | | TBD/FIXME/XXX/TODO/HACK | none | |
@@ -244,26 +253,15 @@ Today rename refuses with a distinct message, while move and inline silently ski
 
 ### Gaps Summary
 
-There is **one gap (BLOCKER: SC-5, SEC-01)**, and it has a single root cause.
+**No gaps remain.** Fix 5b4e4597 closes CR-04, the only round-3 blocker. The three filesystem walks now confine each file entry to the tracked roots with `guardSymlinkWithinRepo`, as `read_file` does, before the physical-owner gate. I checked this in five setups: nested, sibling, single-repo, a parent-module walk and a stale-graph swap. Symlinked directories are not descended. No other walk or surface in internal/mcp has the same ownerless-path hole.
 
-`requirePathSourceScope` treats a location with no registered owner as belonging to the lexical repository. It was written for callers that confine the path first, and `resolveFilePath` and `resolveNodePath` do. 04-22 then used it as the only per-entry gate in three filesystem walks that do not confine. As a result:
-- an alpha-scoped `generate_skill` bundles a symlinked file from anywhere the daemon can read;
-- `move_symbol` and `inline_symbol` materialize such a file inside alpha.
+All automated must-haves pass (116/116). The status is **human_needed** because of the two carried human decisions above:
+1. The refusal-versus-skip policy for rename, move and inline (WR-04, IN-06, WR-08).
+2. The failure-path and concurrency warnings: WR-06, WR-07, REVIEW-FIX WR-01, re-review WR-01/WR-02 and IN-05.
 
-`read_file` refuses the same path for the same scope, so the surfaces disagree. The walk behavior predates the phase, but these walks were rewritten in this round to close "a symlinked file" and they did not. This is an OWASP A01 path-traversal and confinement issue, and it breaks the SECURITY.md invariant. No later phase in the roadmap covers it.
-
-The fix is small and local:
-- confine each walk entry with `guardSymlinkWithinRepo`, or make `requirePathSourceScope` refuse an owner-less location that fails `guardResolvedPathWithinRepo`;
-- make the check independent of `IsMultiRepo`;
-- add symlink-out-of-root tests for the three tools, including a single-repository variant.
-
-I do not suggest an override. The tool writes bytes from outside every tracked repository into a repository and then serves them.
-
-**Everything else holds.**
-- Both prior gaps are closed and backed by tests: the explore gate (04-19) and the nested-topology lifecycle (04-20, 04-21), including digest equivalence for nested track-later and untrack.
-- The lifecycle core is unchanged and green: SC-1 to SC-4, ID-03 to ID-09, SEC-03 and SEC-08.
+WR-09 and WR-10 stay advisories.
 
 ---
 
-_Verified: 2026-10-13T22:56:01Z_
+_Verified: 2026-10-14T03:42:42Z_
 _Verifier: Claude (gsd-verifier)_
