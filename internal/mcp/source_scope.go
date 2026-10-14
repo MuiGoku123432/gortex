@@ -40,6 +40,16 @@ var errSourceScopeRequired = errors.New(
 // path, so the refusal does not reveal whether the target exists.
 var errSourceOutOfScope = fmt.Errorf("%w: no such file or directory", errPathUnresolved)
 
+// refsOutOfScopeResult refuses a refactor with an indexed reference outside
+// the resolved scope: a refactor that cannot reach every reference must not
+// be applied to the rest. The text names no repository or path, so it only
+// reveals that such a reference exists (D-13). action completes "widen it ...
+// to <action>".
+func refsOutOfScopeResult(tool, action string) *mcp.CallToolResult {
+	return mcp.NewToolResultError(tool + ": some references lie outside the resolved scope; " +
+		"widen it with repo, project, or workspace to " + action)
+}
+
 type sourceScopeRequestKey struct{}
 
 // withSourceScopeRequest stores the tool request so the source gate can

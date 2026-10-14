@@ -2866,8 +2866,7 @@ func (s *Server) handleRenameSymbol(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(scopeErr.Error()), nil
 	}
 	if scopeErr != nil {
-		return mcp.NewToolResultError("rename_symbol: some references lie outside the resolved scope; " +
-			"widen it with repo, project, or workspace to rename every reference"), nil
+		return refsOutOfScopeResult("rename_symbol", "rename every reference"), nil
 	}
 
 	// Collect affected files.

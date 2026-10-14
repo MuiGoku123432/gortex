@@ -178,51 +178,69 @@ func newNestedGoModuleServer(t *testing.T) (*Server, string, string) {
 	return srv, alphaDir, betaDir
 }
 
-// TestMoveSymbol_NestedTrackedRootNotRewritten: an alpha-scoped move_symbol
-// rewrites alpha's own callers but never a file of beta, whose tracked root
-// sits inside alpha's Go module (D-20, SEC-01).
-func TestMoveSymbol_NestedTrackedRootNotRewritten(t *testing.T) {
-	srv, alphaDir, betaDir := newNestedGoModuleServer(t)
-	betaUse := filepath.Join(betaDir, "use.go")
-	before, err := os.ReadFile(betaUse)
-	require.NoError(t, err)
+// readNestedModuleFiles snapshots every file an alpha-scoped refactor of Foo
+// could write: alpha's a.go, b.go, c.go and beta's use.go.
+func readNestedModuleFiles(t *testing.T, alphaDir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, rel := range []string{"a/a.go", "b/b.go", "c/c.go", "nested/use.go"} {
+		b, err := os.ReadFile(filepath.Join(alphaDir, rel))
+		require.NoError(t, err)
+		out[rel] = string(b)
+	}
+	return out
+}
+
+// TestMoveSymbol_OutOfScopeReferenceRefuses: beta's tracked root sits inside
+// alpha's Go module and calls a.Foo(). An alpha-scoped cross-package move
+// cannot rewrite that call, so it is refused like rename_symbol and writes
+// nothing, rather than leaving beta calling a symbol that moved (D-20, WR-08).
+// Widening the scope to the shared workspace lets the move rewrite both.
+func TestMoveSymbol_OutOfScopeReferenceRefuses(t *testing.T) {
+	srv, alphaDir, _ := newNestedGoModuleServer(t)
+	before := readNestedModuleFiles(t, alphaDir)
 
 	res := callSourceTool(t, srv, context.Background(), srv.handleMoveSymbol, "move_symbol", map[string]any{
 		"id": "alpha/a/a.go::Foo", "target_file": "alpha/b/b.go", "repo": "alpha",
 	})
-	require.Falsef(t, res.IsError, "move_symbol: %s", sourceScopeText(res))
-	assert.NotContains(t, sourceScopeText(res), "use.go", "touched must name no file of beta")
+	require.Truef(t, res.IsError, "an alpha-scoped move with a beta caller must be refused: %s", sourceScopeText(res))
+	assert.Contains(t, sourceScopeText(res), "some references lie outside the resolved scope")
+	assert.NotContains(t, sourceScopeText(res), "use.go", "the refusal must name no file of beta")
+	assert.Equal(t, before, readNestedModuleFiles(t, alphaDir), "a refused move must write nothing")
 
-	cBytes, err := os.ReadFile(filepath.Join(alphaDir, "c", "c.go"))
-	require.NoError(t, err)
-	assert.Contains(t, string(cBytes), "b.Foo()", "alpha's own caller is rewritten")
-	after, err := os.ReadFile(betaUse)
-	require.NoError(t, err)
-	assert.Equal(t, string(before), string(after), "beta's use.go must stay byte-identical")
+	res = callSourceTool(t, srv, context.Background(), srv.handleMoveSymbol, "move_symbol", map[string]any{
+		"id": "alpha/a/a.go::Foo", "target_file": "alpha/b/b.go", "workspace": "shared",
+	})
+	require.Falsef(t, res.IsError, "a workspace-scoped move must succeed: %s", sourceScopeText(res))
+	after := readNestedModuleFiles(t, alphaDir)
+	assert.Contains(t, after["c/c.go"], "b.Foo()", "alpha's caller is rewritten")
+	assert.Contains(t, after["nested/use.go"], "b.Foo()", "beta's caller is rewritten once in scope")
 }
 
-// TestInlineSymbol_NestedTrackedRootNotRewritten: an alpha-scoped
-// inline_symbol inlines alpha's own caller but never a file of beta, whose
-// tracked root sits inside alpha's Go module (D-20, SEC-01).
-func TestInlineSymbol_NestedTrackedRootNotRewritten(t *testing.T) {
-	srv, alphaDir, betaDir := newNestedGoModuleServer(t)
-	betaUse := filepath.Join(betaDir, "use.go")
-	before, err := os.ReadFile(betaUse)
-	require.NoError(t, err)
+// TestInlineSymbol_OutOfScopeCallsiteRefuses: an alpha-scoped inline_symbol
+// cannot inline beta's call to a.Foo(), so it is refused like rename_symbol
+// and writes nothing, rather than deleting Foo out from under beta (D-20,
+// WR-08). Widening the scope to the shared workspace inlines both callsites.
+func TestInlineSymbol_OutOfScopeCallsiteRefuses(t *testing.T) {
+	srv, alphaDir, _ := newNestedGoModuleServer(t)
+	before := readNestedModuleFiles(t, alphaDir)
 
 	res := callSourceTool(t, srv, context.Background(), srv.handleInlineSymbol, "inline_symbol", map[string]any{
-		"id": "alpha/a/a.go::Foo", "repo": "alpha", "delete_after": false,
+		"id": "alpha/a/a.go::Foo", "repo": "alpha",
 	})
-	require.Falsef(t, res.IsError, "inline_symbol: %s", sourceScopeText(res))
-	assert.NotContains(t, sourceScopeText(res), "use.go", "the response must name no file of beta")
+	require.Truef(t, res.IsError, "an alpha-scoped inline with a beta callsite must be refused: %s", sourceScopeText(res))
+	assert.Contains(t, sourceScopeText(res), "some references lie outside the resolved scope")
+	assert.NotContains(t, sourceScopeText(res), "use.go", "the refusal must name no file of beta")
+	assert.Equal(t, before, readNestedModuleFiles(t, alphaDir), "a refused inline must write nothing")
 
-	cBytes, err := os.ReadFile(filepath.Join(alphaDir, "c", "c.go"))
-	require.NoError(t, err)
-	assert.NotContains(t, string(cBytes), "a.Foo()", "alpha's own caller is inlined")
-	assert.Contains(t, string(cBytes), "return 42")
-	after, err := os.ReadFile(betaUse)
-	require.NoError(t, err)
-	assert.Equal(t, string(before), string(after), "beta's use.go must stay byte-identical after inline")
+	res = callSourceTool(t, srv, context.Background(), srv.handleInlineSymbol, "inline_symbol", map[string]any{
+		"id": "alpha/a/a.go::Foo", "workspace": "shared",
+	})
+	require.Falsef(t, res.IsError, "a workspace-scoped inline must succeed: %s", sourceScopeText(res))
+	after := readNestedModuleFiles(t, alphaDir)
+	assert.NotContains(t, after["c/c.go"], "a.Foo()", "alpha's callsite is inlined")
+	assert.NotContains(t, after["nested/use.go"], "a.Foo()", "beta's callsite is inlined once in scope")
+	assert.NotContains(t, after["a/a.go"], "func Foo()", "Foo is deleted once every callsite is inlined")
 }
 
 func TestMoveSymbol_CrossPackage_CallerInTarget_BecomesBare(t *testing.T) {
@@ -595,14 +613,15 @@ func TestInlineSymbol_UnsupportedLanguage(t *testing.T) {
 // TestMoveInline_SymlinkOutsideRootsNotRewritten: a .go symlink inside alpha
 // whose target lies outside every tracked root is not a caller file of the
 // scoped walk, so neither move_symbol nor inline_symbol replaces the link
-// with an in-repo copy of the outside bytes (CR-04, SEC-01).
+// with an in-repo copy of the outside bytes (CR-04, SEC-01). The calls are
+// workspace-scoped so beta's indexed caller does not refuse them first.
 func TestMoveInline_SymlinkOutsideRootsNotRewritten(t *testing.T) {
 	for _, tc := range []struct {
 		tool string
 		args map[string]any
 	}{
-		{"move_symbol", map[string]any{"id": "alpha/a/a.go::Foo", "target_file": "alpha/b/b.go", "repo": "alpha"}},
-		{"inline_symbol", map[string]any{"id": "alpha/a/a.go::Foo", "repo": "alpha", "delete_after": false}},
+		{"move_symbol", map[string]any{"id": "alpha/a/a.go::Foo", "target_file": "alpha/b/b.go", "workspace": "shared"}},
+		{"inline_symbol", map[string]any{"id": "alpha/a/a.go::Foo", "workspace": "shared", "delete_after": false}},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			srv, alphaDir, _ := newNestedGoModuleServer(t)

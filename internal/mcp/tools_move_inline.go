@@ -29,7 +29,7 @@ import (
 func (s *Server) registerMoveInlineTools() {
 	s.addTool(
 		mcp.NewTool("move_symbol",
-			mcp.WithDescription("Relocate a Go function, type, method, variable, or const to another file. Same-package moves leave callers untouched; cross-package moves rewrite every qualified reference (`pkga.Foo` becomes `pkgb.Foo`), strip the import in the new home, and add the new import in the old home. Returns the touched files plus a per-file before/after summary. Non-Go symbols are refused with an explicit unsupported-language error."),
+			mcp.WithDescription("Relocate a Go function, type, method, variable, or const to another file. Same-package moves leave callers untouched; cross-package moves rewrite every qualified reference (`pkga.Foo` becomes `pkgb.Foo`), strip the import in the new home, and add the new import in the old home. A cross-package move whose indexed references include one outside the resolved scope is refused without writing anything; widen the scope with repo, project, or workspace. Unindexed references inside another tracked repository are not rewritten. Returns the touched files plus a per-file before/after summary. Non-Go symbols are refused with an explicit unsupported-language error."),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Symbol ID to move (e.g. pkga/a.go::Foo)")),
 			mcp.WithString("target_file", mcp.Required(), mcp.Description("Destination file path (relative repo-prefixed or absolute). The tool detects same-package vs cross-package by comparing the parent directories of the source and target files.")),
 			mcp.WithString("target_package", mcp.Description("Optional package-name override. When the target file does not yet exist and the target directory has no other Go files, this names the new package. Defaults to the existing target-dir package, then to the directory leaf name.")),
@@ -40,7 +40,7 @@ func (s *Server) registerMoveInlineTools() {
 
 	s.addTool(
 		mcp.NewTool("inline_symbol",
-			mcp.WithDescription("Replace every callsite of a trivial Go function with the callee's body. Supports single-statement / single-expression functions with at most one return value. Refuses (without partial inlines) when the callee contains a defer / go / closure, has multiple return values, or when any callsite passes a side-effecting argument (a call expression). With delete_after=true the callee definition is removed once every callsite has been rewritten. Non-Go callees are refused with an explicit unsupported-language error."),
+			mcp.WithDescription("Replace every callsite of a trivial Go function with the callee's body. Supports single-statement / single-expression functions with at most one return value. Refuses (without partial inlines) when the callee contains a defer / go / closure, has multiple return values, or when any callsite passes a side-effecting argument (a call expression), or when an indexed callsite lies outside the resolved scope (widen it with repo, project, or workspace; unindexed callsites inside another tracked repository are not inlined). With delete_after=true the callee definition is removed once every callsite has been rewritten. Non-Go callees are refused with an explicit unsupported-language error."),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Function symbol ID to inline (e.g. pkg/foo.go::Get)")),
 			mcp.WithBoolean("delete_after", mcp.Description("Remove the callee from disk after every callsite has been rewritten (default: true). Set false to keep the original function.")),
 			mcp.WithBoolean("dry_run", mcp.Description("Preview the change set without writing anything (default: false)")),
@@ -237,6 +237,12 @@ func (s *Server) handleMoveSymbol(ctx context.Context, req mcp.CallToolRequest) 
 		}
 		abs, rerr := s.resolveNodePath(ctx, fromNode)
 		if rerr != nil {
+			// A cross-package move rewrites every reference, so one the
+			// source gate refuses blocks the whole move, as in rename_symbol.
+			// A same-package move leaves references untouched.
+			if !samePackage && errors.Is(rerr, errSourceOutOfScope) {
+				return refsOutOfScopeResult("move_symbol", "rewrite every reference"), nil
+			}
 			continue
 		}
 		if abs == srcAbs || abs == tgtAbs {
@@ -249,8 +255,9 @@ func (s *Server) handleMoveSymbol(ctx context.Context, req mcp.CallToolRequest) 
 	// fallback, so each entry passes the same physical-owner gate the edge
 	// loop gets from resolveNodePath (D-20): a tracked root nested under the
 	// module, or a symlinked file, cannot bring another repository's file
-	// into the rewrite. A refused entry is skipped, as the edge loop skips an
-	// out-of-scope caller.
+	// into the rewrite. A refused entry is skipped, not refused: telling whether
+	// it references the symbol would mean reading out-of-scope bytes, so only
+	// an indexed reference (the edge loop above) refuses the move.
 	modRoot := findGoModRoot(srcAbs)
 	if modRoot != "" {
 		_ = filepath.Walk(modRoot, func(p string, info os.FileInfo, werr error) error {
@@ -1136,6 +1143,11 @@ func (s *Server) handleInlineSymbol(ctx context.Context, req mcp.CallToolRequest
 		}
 		abs, rerr := s.resolveNodePath(ctx, fromNode)
 		if rerr != nil {
+			// No partial inlines: a callsite the source gate refuses blocks
+			// the whole inline, as in rename_symbol.
+			if errors.Is(rerr, errSourceOutOfScope) {
+				return refsOutOfScopeResult("inline_symbol", "inline every callsite"), nil
+			}
 			continue
 		}
 		callerFiles[abs] = struct{}{}
