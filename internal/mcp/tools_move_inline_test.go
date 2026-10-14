@@ -591,3 +591,40 @@ func TestInlineSymbol_UnsupportedLanguage(t *testing.T) {
 	body := mustErrText(t, result)
 	assert.Contains(t, body, "unsupported language")
 }
+
+// TestMoveInline_SymlinkOutsideRootsNotRewritten: a .go symlink inside alpha
+// whose target lies outside every tracked root is not a caller file of the
+// scoped walk, so neither move_symbol nor inline_symbol replaces the link
+// with an in-repo copy of the outside bytes (CR-04, SEC-01).
+func TestMoveInline_SymlinkOutsideRootsNotRewritten(t *testing.T) {
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"move_symbol", map[string]any{"id": "alpha/a/a.go::Foo", "target_file": "alpha/b/b.go", "repo": "alpha"}},
+		{"inline_symbol", map[string]any{"id": "alpha/a/a.go::Foo", "repo": "alpha", "delete_after": false}},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			srv, alphaDir, _ := newNestedGoModuleServer(t)
+			outside := filepath.Join(t.TempDir(), "x.go")
+			outsideSrc := "package a\n\n// OUTSIDE-GO-SECRET\nfunc Bar() int { return Foo() }\n"
+			require.NoError(t, os.WriteFile(outside, []byte(outsideSrc), 0o644))
+			link := filepath.Join(alphaDir, "a", "zlink.go")
+			require.NoError(t, os.Symlink(outside, link))
+
+			handler := srv.handleMoveSymbol
+			if tc.tool == "inline_symbol" {
+				handler = srv.handleInlineSymbol
+			}
+			res := callSourceTool(t, srv, context.Background(), handler, tc.tool, tc.args)
+			require.Falsef(t, res.IsError, "%s: %s", tc.tool, sourceScopeText(res))
+
+			fi, err := os.Lstat(link)
+			require.NoError(t, err)
+			assert.NotZero(t, fi.Mode()&os.ModeSymlink, "zlink.go must stay a symlink")
+			got, err := os.ReadFile(outside)
+			require.NoError(t, err)
+			assert.Equal(t, outsideSrc, string(got), "the outside file must stay byte-identical")
+		})
+	}
+}

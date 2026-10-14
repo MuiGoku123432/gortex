@@ -270,7 +270,7 @@ func (s *Server) handleMoveSymbol(ctx context.Context, req mcp.CallToolRequest) 
 			if !isGoSourcePath(p) {
 				return nil
 			}
-			if s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
+			if s.guardSymlinkWithinRepo(ctx, p) != nil || s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
 				return nil
 			}
 			abs := filepath.Clean(p)
@@ -1163,7 +1163,7 @@ func (s *Server) handleInlineSymbol(ctx context.Context, req mcp.CallToolRequest
 			if !isGoSourcePath(p) {
 				return nil
 			}
-			if s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
+			if s.guardSymlinkWithinRepo(ctx, p) != nil || s.requirePathSourceScope(ctx, node.RepoPrefix, p) != nil {
 				return nil
 			}
 			callerFiles[filepath.Clean(p)] = struct{}{}

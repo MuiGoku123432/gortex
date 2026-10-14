@@ -177,7 +177,7 @@ func (s *Server) handleGenerateSkill(ctx context.Context, req mcp.CallToolReques
 			}
 			return nil
 		}
-		if s.requirePathSourceScope(ctx, rootRepo, path) != nil {
+		if s.guardSymlinkWithinRepo(ctx, path) != nil || s.requirePathSourceScope(ctx, rootRepo, path) != nil {
 			skipped++
 			return nil
 		}
