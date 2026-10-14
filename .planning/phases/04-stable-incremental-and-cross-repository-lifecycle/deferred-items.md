@@ -25,3 +25,8 @@
   status: open
   **What:** `gofmt -l internal/indexer/` lists `file_delta.go`: the multi-value `return fileDeltaFingerprints{...}, derivedFingerprints{...}` near line 586 is indented one level deeper than gofmt wants. Last touched by upstream commit 7aae60eb.
   **Why deferred:** 04-18 does not modify this file, and reformatting an upstream file outside the plan's scope widens the fork diff for no behavior change.
+
+- Lifecycle failure-path and concurrency warnings (accepted in 04-UAT test 2)
+  status: open
+  **What:** WR-06: when a declared repository fails to register, declared roots over-prune and nothing re-admits the nested files (probe: `TestVerifierR3_WR06`); only an explicit `IncrementalReindexRepo` restores them. WR-07: enclosing-reconcile failures are only logged (`internal/indexer/multi.go` near 2988-2993), so track/untrack report success. Also carried: REVIEW-FIX WR-01 (`cobolReconcileMu`, deferred reconcile), re-review WR-01/WR-02 (untrack restub under contention; reconcile sites outside the reach gate), and IN-05 (the "no `mi.mu` holder walks" rule is not enforced; hidden `mi.mu.RLock` on the walk path).
+  **Why deferred:** WR-06 and WR-07 trigger only after an indexing or reconcile failure that is already logged, and a clean rebuild recovers. The concurrency items depend on timing a deterministic test cannot reliably reach. Fix candidates: re-admit declared roots on registration failure (WR-06); surface reconcile errors in the track/untrack result (WR-07); a lock-order assertion or a lint for IN-05.
