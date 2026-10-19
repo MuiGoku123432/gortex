@@ -114,7 +114,7 @@ Depends on Phase 4. As of 2026-10-14, Phase 4's UAT is complete but its verifica
 - **D-09:** `EXTERNAL_UNRESOLVED` covers missing artifacts only:
   - the edge reason `missing` (a CALL, LINK, XCTL, or COPY target with no candidate in the allowed scope);
   - `idms_dictionary_member` (the IDMS dictionary was not retrieved);
-  - the producer's `external-reference` gaps (an `-INC` member that was not obtained, or a cyclic one).
+  - the producer's `external-reference` gaps (an `-INC` member that was not obtained, or a cyclic one). **Amended by D-17.**
 
   `ambiguous` and `dynamic` stay edge-only reasons. The artifact either exists more than once, or the target cannot be known statically. Neither is "not retrieved". Phase 6 QUERY-03 already distinguishes them through edge reasons.
 - **D-10:** `PARSE_UNRESOLVED` comes from the producer's gap list only:
@@ -127,7 +127,7 @@ Depends on Phase 4. As of 2026-10-14, Phase 4's UAT is complete but its verifica
   - **WR-09:** a procedure copybook's cursor use gets a copybook-scoped reason.
   - **IN-08:** a program nested under unresolved containment does not report a plain `missing`.
 
-  GAP-01 makes every named unparsed tail a finding. That includes the tail every `EXEC SQL` statement leaves under the pinned producer (WINDOWS.md 6), which yields one low-severity finding per SQL statement.
+  GAP-01 makes every named unparsed tail a finding. That includes the tail every `EXEC SQL` statement leaves under the pinned producer (WINDOWS.md 6), which yields one low-severity finding per SQL statement. **Amended by D-18** (the producer emits one tail gap per token, not per statement).
 - **D-11:** The GAP-05 placeholder is a **repository-scoped node**, one per (referencing repository, artifact type, normalized key). Artifact types are program, copybook, IDMS dictionary member, and `-INC` member.
 
   It carries:
@@ -165,6 +165,13 @@ Depends on Phase 4. As of 2026-10-14, Phase 4's UAT is complete but its verifica
 
   Keep `cobolprobe` as a flag-gated measurement harness for real corpora. It is not the gate.
 - **D-16:** A finding closes only through deterministic evidence: a source edit, a parser or extractor change that stops producing it, or retrieval or binding of the target. No API or tool may close or alter a finding in any other way. Phase 8 claims may cite findings but never change their status. There is no `closable_by` field, and nothing AI-specific is built in this phase.
+
+### Post-research amendments (2026-10-19, user-confirmed)
+Research (05-RESEARCH.md Pitfalls 1, 2, 7) ran the pinned producer and found three facts that contradict D-09/D-10 as written. The user confirmed each amendment below; they override the original text where they conflict.
+
+- **D-17 (amends D-09 bullet 3):** The producer's `external-reference` gaps are **not** mapped to findings. Gortex builds the analyzer with an empty `-INC` catalog (`transform.NewCatalog(nil)`), so the producer reports every `-INC` member as not obtained, including members the resolver later binds to a present copybook. `-INC` `EXTERNAL_UNRESOLVED` findings and placeholders come **only** from the resolver, when the `inc` edge (`cobol_copy_form=inc`) is decided `missing`. A file whose `-INC` edge is bound must have no `-INC` finding. (`cyclic` cannot fire with an empty catalog.)
+- **D-18 (amends D-10 last paragraph):** One `PARSE_UNRESOLVED` finding per producer `unparsed-tail` gap (the producer emits one per token), not one per SQL statement. Gortex does not aggregate tails. Identical tail text in the same container is disambiguated by the D-01 `#k` ordinal. Tests and `index_health` counts are sized to per-token volume.
+- **D-19 (narrows D-09 bullet 1 and D-11):** Edges with `sql_include_builtin=true` (`EXEC SQL INCLUDE SQLCA` / `SQLDA`) produce **no** `EXTERNAL_UNRESOLVED` finding and **no** placeholder. The edge keeps its existing `missing` reason unchanged.
 
 ### Claude's Discretion
 - **Meta key names** for finding fields. Follow the P2/P3 conventions (`prov_*` for provenance, plus a `finding_*` namespace or similar). Avoid secret-like substrings, because the Neo4j projection filters them.
