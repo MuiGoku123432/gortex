@@ -572,7 +572,7 @@ func cobolFindings(w *cobolWalk) {
 | A4 | Placeholder reuses `KindResource` with `synthetic=true` and `cobol_kind=missing_artifact`, ID `<repo>/cobol-missing::<type>/<key>` | Pattern 5 | Phase 6 QUERY-09 must filter resources by Meta; a later dedicated kind is a costly change |
 | A5 | `finding_history` records opens as well as closes/supersedes (ledger design) | Pattern 6 | If only close/supersede rows are allowed, the diff needs pre-eviction reads in every eviction path |
 | A6 | Evidence normalization drops byte columns 1-6 and 73+ and collapses whitespace (fixed-format assumption) | Pattern 2 | Free-format sources would lose code text from the digest (only causes extra ordinals, not collisions) |
-| A7 | WR-06 fallback applies to copybooks only; program analysis errors keep today's hard failure + `file_index_failures` | Pitfall 6 | A program that fails analysis still yields `missing` for its callers |
+| A7 | WR-06 fallback applies to copybooks only; program analysis errors keep today's hard failure + `file_index_failures`. **CONFIRMED by user 2026-10-19 as an accepted, documented limitation -> CONTEXT D-20.** | Pitfall 6 | A program that fails analysis still yields `missing` for its callers |
 | A8 | Lost-capture evidence is the anchor span text (literal D-01), accepting ordinal-based lineage among identical anchors such as `01` | Pattern 2 | History may attribute a closure to the last `#k` rather than the removed occurrence |
 
 ## Open Questions (RESOLVED)

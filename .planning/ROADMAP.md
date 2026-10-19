@@ -262,7 +262,41 @@ Plans:
   4. Unchanged evidence reuses finding identities; corrected source/parser evidence or retrieved artifacts close or supersede only the applicable finding class.
   5. Destructive parser-recovery cascades remain deterministic regression failures regardless of any later AI output.
 
-**Plans**: TBD
+**Plans**: 12 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md -- Tracer: finding kind, D-01 identity, program parse findings through SQLite to MCP/CLI get_symbol and search
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-02-PLAN.md -- Kind-guarded EvictFindingNodesByIDs on both backends, generation fence, storetest conformance
+- [ ] 05-03-PLAN.md -- Uncontained-cascade document finding (D-13), copybook findings, extractor version /6
+- [ ] 05-04-PLAN.md -- index_health finding counts by class (never scored), projection Meta proof, schema resource entry
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-05-PLAN.md -- Resolver: missing and IDMS edges retarget onto owned missing-artifact placeholders; downstream expectations
+- [ ] 05-06-PLAN.md -- Ledger diff (close vs supersede) and finding_history sidecar with latest-row index, schema v23
+- [ ] 05-07-PLAN.md -- D-14 cascade regression gate on the real path in the default race suite
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-08-PLAN.md -- Resolver: EXTERNAL_UNRESOLVED findings with the full Pattern 3 Meta contract; real-path persistence
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 05-09-PLAN.md -- Resolver change record and durable ledger at every COBOL settle point, including dependent repositories, batch-deferred tracks, and cold shadow-path tracks re-decided on the durable store; real-path history sequences
+- [ ] 05-10-PLAN.md -- Deferred Phase 3 reasons: WR-06 copybook-only analysis failure (D-20), WR-07, WR-09, IN-08
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 05-11-PLAN.md -- Search sync for resolver-created nodes (incl. dependent repositories and fallback master resolves), external real-path lifecycle, ledger scale benchmark
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 05-12-PLAN.md -- External/placeholder MCP+CLI acceptance, canonical equivalence, cross-container ledger case, D-16 writer inventory, docs (incl. D-20 limitation), full race gate
 
 ### Phase 6: Native Deterministic Acceptance and Pre-AI Release Gate
 
