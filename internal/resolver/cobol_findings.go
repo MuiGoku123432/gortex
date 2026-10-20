@@ -68,9 +68,10 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 	return graph.UnresolvedMarker + cobolIDMSCopyTargetPrefix + rest
 }
 
-// reconcileCobolFindings adds the missing-artifact placeholder each desired
-// entry of the binding pass targets, over the reconcile set repos (every
-// repository when repos is nil).
+// reconcileCobolFindings owns the missing-artifact placeholders of the
+// binding pass: it adds the placeholder each desired entry targets and
+// evicts every placeholder of the reconcile set repos (every repository
+// when repos is nil) that no code reference targets any more.
 //
 // PURPOSE — a reference whose target was never obtained points at one
 // KindResource node per (referencing repository, artifact type, key) with
@@ -79,24 +80,49 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // Meta: cobol_kind missing_artifact, artifact_type, artifact_key,
 // artifact_status not_obtained, synthetic, prov_evidence_class
 // EXTERNAL_UNRESOLVED, prov_range_exact false, prov_range_absence
-// not_obtained, and cobol_name_norm.
+// not_obtained, and cobol_name_norm. When the last code reference leaves
+// (bound to a retrieved target, deleted, or edited away) the placeholder is
+// evicted through EvictFile on its own path, as reconcileCobolResources
+// collects orphaned shared resources (GAP-07). Retrieval needs nothing more:
+// the binding pass binds the edge, the reference leaves desired, and the
+// sweep removes the placeholder.
 //
 // RATIONALE — the placeholder carries no source, body, range, parser stamp,
 // or as-written spelling (GAP-05, P4 D-18), and it is never a binding
 // candidate: candidates are KindFunction programs and KindFile copybooks
 // only. Owning it by the referencing repository keeps it scope-safe and
 // audited (SEC-01, SEC-08). Only placeholders absent from the store are
-// added, in one AddBatch, so an unchanged rerun writes nothing (ID-07).
+// added, in one AddBatch, and only unreferenced ones are evicted, so an
+// unchanged rerun writes nothing (ID-07). The sweep evicts only a
+// KindResource node with cobol_kind missing_artifact whose FilePath equals
+// its ID, so no node owned by a real file is ever removed (T-05-17). A
+// `references` edge from a finding (an EXTERNAL_UNRESOLVED finding, 05-08)
+// never keeps its placeholder: those findings are evicted before the sweep.
+// Any other in-edge does, including a code `references` edge such as a
+// literal EXEC CICS LOAD PROGRAM.
 //
 // KEYWORDS — cobol, missing artifact, placeholder, not obtained,
-// external unresolved, GAP-05, D-11.
+// external unresolved, sweep, orphan, evict, retrieval, GAP-05, GAP-07,
+// D-11.
 func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []cobolExternalRef) {
 	existing := make(map[string]struct{})
+	var owned []*graph.Node // sweep candidates: placeholders of the reconcile set
 	for n := range r.nodesByKindLang(graph.KindResource, "cobol") {
-		if n != nil && n.Meta["cobol_kind"] == cobolMissingArtifactKind {
-			existing[n.ID] = struct{}{}
+		if n == nil || n.Meta["cobol_kind"] != cobolMissingArtifactKind {
+			continue
 		}
+		existing[n.ID] = struct{}{}
+		if n.RepoPrefix == "" || n.FilePath != n.ID {
+			continue
+		}
+		if repos != nil {
+			if _, ok := repos[n.RepoPrefix]; !ok {
+				continue
+			}
+		}
+		owned = append(owned, n)
 	}
+
 	var added []*graph.Node
 	for _, d := range desired {
 		if _, ok := existing[d.placeholderID]; ok {
@@ -125,5 +151,32 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 	}
 	if len(added) > 0 {
 		r.graph.AddBatch(added, nil)
+	}
+
+	// Placeholders added above carry the edges that desired them, so only
+	// the ones found before the add can be orphaned.
+	if len(owned) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(owned))
+	for _, n := range owned {
+		ids = append(ids, n.ID)
+	}
+	inEdges := r.graph.GetInEdgesByNodeIDs(ids)
+	for _, n := range owned {
+		referenced := false
+		for _, e := range inEdges[n.ID] {
+			if e == nil {
+				continue
+			}
+			if e.Kind == graph.EdgeReferences && strings.Contains(e.From, "::@finding/") {
+				continue // a finding's own edge to the placeholder
+			}
+			referenced = true
+			break
+		}
+		if !referenced {
+			r.graph.EvictFile(n.FilePath)
+		}
 	}
 }
