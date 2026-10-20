@@ -4,23 +4,29 @@ package languages
 
 import (
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/grade"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
 
 	"github.com/zzet/gortex/internal/graph"
 )
 
 // cobolFindings maps every producer PARSE_UNRESOLVED gap of the walked
-// document onto one KindFinding node with a member_of edge to its container.
+// document onto one KindFinding node with a member_of edge to its container,
+// then adds one uncontained-cascade finding when the producer graded the
+// document with a cascade-family reason.
 //
 // PURPOSE — GAP-01: each gap the producer reports (error, missing,
 // unparsed-tail, lost-capture, unmapped-capture, and the document-scope
 // no-tree, budget-exceeded, invocation-failure) becomes a persisted,
 // retrievable finding (D-10). Every gap is one finding: per-token SQL tails
-// are never aggregated (D-18) and nothing is filtered or merged.
+// are never aggregated (D-18) and nothing is filtered or merged. A cascaded
+// document also gets one high-severity document finding carrying the
+// producer's reasons, alongside its localized gaps (D-13, GAP-08).
 //
 // RATIONALE — EXTERNAL_UNRESOLVED gaps are skipped: the analyzer runs with an
 // empty -INC catalog, so the producer reports every -INC member as not
@@ -28,13 +34,14 @@ import (
 // visited by generated span (start, end, list index), so the #k ordinal of
 // identical evidence in one container is the same on every rerun. Severity,
 // scope, and absence reasons are the producer's verbatim (D-12); the ID
-// never hashes a line, offset, gap ID, or version (D-01, D-02). Name is the
-// gap kind and Meta holds only the evidence digest and range, never source
-// text. Called before the document flags are written to docMeta, so they do
-// not leak into finding Meta.
+// never hashes a line, offset, gap ID, version, or producer reason (D-01,
+// D-02). Name is the gap kind and Meta holds only the evidence digest and
+// range, never source text. Programs call it before the document flags are
+// written to docMeta, and copybooks after their unmapped check on a cloned
+// docMeta, so neither leaks into finding Meta.
 //
-// KEYWORDS — cobol, finding, PARSE_UNRESOLVED, handoff gaps, GAP-01, D-10,
-// D-17, D-18, member_of.
+// KEYWORDS — cobol, finding, PARSE_UNRESOLVED, handoff gaps, cascade,
+// uncontained-cascade, GAP-01, GAP-08, D-10, D-13, D-17, D-18, member_of.
 func cobolFindings(w *cobolWalk) {
 	order := make([]int, 0, len(w.h.Gaps))
 	for i, g := range w.h.Gaps {
@@ -54,52 +61,91 @@ func cobolFindings(w *cobolWalk) {
 		}
 		return order[a] < order[b]
 	})
-	occurrences := make(map[string]int, len(order))
+	occurrences := make(map[string]int, len(order)+1)
 	for _, i := range order {
 		g := w.h.Gaps[i]
-		container := cobolFindingContainer(w, g.Container)
-		family := g.NodeKind
-		if family == "" {
-			family = g.ExpectedFamily
-		}
-		digest := graph.FindingEvidenceDigest(cobolFindingEvidence(w, g))
-		symbol := graph.FindingSymbol(container, graph.FindingClassParse, string(g.Kind), family, digest)
-		// note: the resolver assigns external finding ordinals the same way.
-		occurrences[symbol]++
-		if k := occurrences[symbol]; k >= 2 {
-			symbol += "#" + strconv.Itoa(k)
-		}
-
-		meta := maps.Clone(w.docMeta)
-		meta[graph.MetaEvidenceClass] = graph.FindingClassParse
-		meta[graph.MetaFindingKind] = string(g.Kind)
-		meta[graph.MetaFindingReason] = g.Reason
-		meta[graph.MetaFindingSeverity] = string(g.Severity)
-		meta[graph.MetaFindingSeverityRule] = graph.FindingSeverityRule
-		meta[graph.MetaFindingScope] = string(g.Scope)
-		if g.NodeKind != "" {
-			meta[graph.MetaFindingNodeKind] = g.NodeKind
-		}
-		if g.ExpectedFamily != "" {
-			meta[graph.MetaFindingExpectedFamily] = g.ExpectedFamily
-		}
-		meta[graph.MetaFindingContainer] = container
-		meta[graph.MetaFindingStatus] = graph.FindingStatusActive
-		meta[graph.MetaFindingEvidenceDigest] = digest
-		meta[graph.MetaFindingEvidenceRule] = graph.FindingEvidenceRule
-		meta[graph.MetaFindingIDRule] = graph.FindingIDRule
-		node := &graph.Node{
-			ID: w.filePath + "::" + symbol, Kind: graph.KindFinding, Name: string(g.Kind),
-			QualName: symbol, FilePath: w.filePath, Language: "cobol", Meta: meta,
-		}
-		cobolStampRange(node, g.Original)
-		if g.AbsenceReason != "" {
-			meta["prov_range_exact"] = false
-			meta["prov_range_absence"] = g.AbsenceReason
-		}
-		w.result.Nodes = append(w.result.Nodes, node)
-		w.memberOf(node.ID, container, node.StartLine)
+		cobolAddFinding(w, occurrences, g, cobolFindingEvidence(w, g))
 	}
+	if !slices.ContainsFunc(w.h.Assessment.Reasons, func(r string) bool {
+		return slices.Contains(cobolCascadeFamily, r)
+	}) {
+		return
+	}
+	// D-13: one document finding per cascaded document. Its evidence is the
+	// constant kind, so the producer reasons, re-stamped in Meta, never
+	// change the ID of a persisting cascade (D-01, D-02).
+	cascade := cobolAddFinding(w, occurrences, handoff.Gap{
+		Kind: cobolCascadeKind, Reason: cobolCascadeKind,
+		Severity: handoff.SeverityHigh, Scope: handoff.ScopeDocument,
+		Container: -1, AbsenceReason: "document_scope",
+	}, cobolCascadeKind)
+	cascade.Meta[graph.MetaFindingProducerReasons] = append([]string{}, w.h.Assessment.Reasons...)
+}
+
+// cobolCascadeKind is the kind, reason, and evidence of the Gortex-derived
+// uncontained-cascade finding (D-13).
+const cobolCascadeKind = "uncontained-cascade"
+
+// cobolCascadeFamily lists the producer grade reasons that mark an
+// uncontained recovery cascade (D-13). Gortex reads them from the
+// assessment and never re-derives a cascade from gaps.
+var cobolCascadeFamily = []string{
+	grade.ReasonDivisionScaleRecovery,
+	grade.ReasonRetainedStructureCollapse,
+	grade.ReasonMissingRequiredAnchor,
+	grade.ReasonLostCapture,
+}
+
+// cobolAddFinding appends the PARSE_UNRESOLVED finding for g, whose
+// normalized evidence text is evidence, with its member_of edge, and returns
+// it. The ID is graph.FindingSymbol over the container, kind, node kind or
+// expected family, and evidence digest, plus #k for the k-th (k >= 2)
+// identical symbol counted in occurrences. Severity, scope, and absence
+// reason come from g verbatim.
+func cobolAddFinding(w *cobolWalk, occurrences map[string]int, g handoff.Gap, evidence string) *graph.Node {
+	container := cobolFindingContainer(w, g.Container)
+	family := g.NodeKind
+	if family == "" {
+		family = g.ExpectedFamily
+	}
+	digest := graph.FindingEvidenceDigest(evidence)
+	symbol := graph.FindingSymbol(container, graph.FindingClassParse, string(g.Kind), family, digest)
+	// note: the resolver assigns external finding ordinals the same way.
+	occurrences[symbol]++
+	if k := occurrences[symbol]; k >= 2 {
+		symbol += "#" + strconv.Itoa(k)
+	}
+
+	meta := maps.Clone(w.docMeta)
+	meta[graph.MetaEvidenceClass] = graph.FindingClassParse
+	meta[graph.MetaFindingKind] = string(g.Kind)
+	meta[graph.MetaFindingReason] = g.Reason
+	meta[graph.MetaFindingSeverity] = string(g.Severity)
+	meta[graph.MetaFindingSeverityRule] = graph.FindingSeverityRule
+	meta[graph.MetaFindingScope] = string(g.Scope)
+	if g.NodeKind != "" {
+		meta[graph.MetaFindingNodeKind] = g.NodeKind
+	}
+	if g.ExpectedFamily != "" {
+		meta[graph.MetaFindingExpectedFamily] = g.ExpectedFamily
+	}
+	meta[graph.MetaFindingContainer] = container
+	meta[graph.MetaFindingStatus] = graph.FindingStatusActive
+	meta[graph.MetaFindingEvidenceDigest] = digest
+	meta[graph.MetaFindingEvidenceRule] = graph.FindingEvidenceRule
+	meta[graph.MetaFindingIDRule] = graph.FindingIDRule
+	node := &graph.Node{
+		ID: w.filePath + "::" + symbol, Kind: graph.KindFinding, Name: string(g.Kind),
+		QualName: symbol, FilePath: w.filePath, Language: "cobol", Meta: meta,
+	}
+	cobolStampRange(node, g.Original)
+	if g.AbsenceReason != "" {
+		meta["prov_range_exact"] = false
+		meta["prov_range_absence"] = g.AbsenceReason
+	}
+	w.result.Nodes = append(w.result.Nodes, node)
+	w.memberOf(node.ID, container, node.StartLine)
+	return node
 }
 
 // cobolFindingContainer returns the repository-relative node ID that

@@ -27,7 +27,9 @@ const cobolCopybookRoot = "@proc"
 // procedure sections, paragraphs, statements, and PERFORM/GO TO/CALL edges
 // (D-01, D-02, D-05), its IDMS, CICS, and DB2 edges (D-13, D-14, D-15),
 // and every COPY, -INC, COPY IDMS, and EXEC SQL INCLUDE
-// written in the member (D-11, D-19), so impact queries reach them.
+// written in the member (D-11, D-19), so impact queries reach them. Its
+// producer parse gaps and any uncontained cascade become findings, as for
+// a program (GAP-01, D-13).
 // RATIONALE: the producer's copybook mode wraps the member in a synthetic
 // header (D-16). Its first program_definition is that wrapper, registered as
 // the walk root so cobolReferences and cobolCopy name the file node instead.
@@ -83,4 +85,6 @@ func cobolCopybook(h handoff.Handoff, src []byte, filePath string, docMeta map[s
 	if len(result.Nodes) == 1 && len(result.Edges) == 0 && h.Assessment.Grade != grade.Green {
 		docMeta["prov_analysis_absence"] = "copybook_content_unmapped"
 	}
+	// Last, so the unmapped check above counts only member nodes and edges.
+	cobolFindings(w)
 }
