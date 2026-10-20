@@ -1,6 +1,8 @@
 package resolver
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -142,7 +144,10 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // cobol_kind missing_artifact whose FilePath equals its ID, so no node owned
 // by a real file is ever removed (T-05-17). A `references` edge from a
 // finding never keeps its placeholder; any other in-edge does, including a
-// code `references` edge such as a literal EXEC CICS LOAD PROGRAM.
+// code `references` edge such as a literal EXEC CICS LOAD PROGRAM. Every
+// pass ends by adding its repository set and the IDs it added and evicted
+// to the change record CobolFindingChanges drains; an unchanged rerun adds
+// only its repositories.
 //
 // KEYWORDS — cobol, missing artifact, placeholder, not obtained,
 // external unresolved, finding, external-reference, sweep, orphan, evict,
@@ -230,9 +235,12 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 			undesired = append(undesired, id)
 		}
 	}
+	var evicted []string
 	if len(undesired) > 0 {
 		sort.Strings(undesired)
-		if _, _, ok := graph.EvictFindingNodesByIDs(r.graph, undesired); !ok {
+		if _, _, ok := graph.EvictFindingNodesByIDs(r.graph, undesired); ok {
+			evicted = undesired
+		} else {
 			r.logger.Warn("cobol: store cannot evict finding nodes; stale EXTERNAL_UNRESOLVED findings remain",
 				zap.Int("findings", len(undesired)))
 		}
@@ -300,8 +308,61 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 		}
 		if !referenced {
 			r.graph.EvictFile(n.FilePath)
+			evicted = append(evicted, n.ID)
 		}
 	}
+
+	r.cobolFindingMu.Lock()
+	defer r.cobolFindingMu.Unlock()
+	if len(repos) > 0 && r.cobolFindingRepos == nil {
+		r.cobolFindingRepos = make(map[string]struct{}, len(repos))
+	}
+	for repo := range repos {
+		r.cobolFindingRepos[repo] = struct{}{}
+	}
+	if len(nodes) > 0 && r.cobolFindingAdded == nil {
+		r.cobolFindingAdded = make(map[string]struct{}, len(nodes))
+	}
+	for _, n := range nodes {
+		r.cobolFindingAdded[n.ID] = struct{}{}
+	}
+	if len(evicted) > 0 && r.cobolFindingEvicted == nil {
+		r.cobolFindingEvicted = make(map[string]struct{}, len(evicted))
+	}
+	for _, id := range evicted {
+		r.cobolFindingEvicted[id] = struct{}{}
+	}
+}
+
+// CobolFindingChanges returns, each sorted, the repositories the COBOL
+// reconcile passes reconciled and the finding and placeholder IDs they added
+// and evicted since the last call, and clears the record.
+//
+// PURPOSE — the indexer's COBOL settle points drain every resolver that
+// reconciled before running the finding ledger, so a reconcile that touches
+// a dependent repository (the set widened by resolve_from) or, with no set,
+// any repository's findings ledgers that repository at the same step (D-03
+// across repositories, roadmap SC4); 05-11 syncs search from the same IDs
+// (Pitfall 4). A pass over every edge (nil repository set) records no
+// repository, only IDs.
+//
+// RATIONALE — the record accumulates instead of being overwritten, because
+// two passes can precede one drain (a resolve's settle-window reconcile and
+// then a tail's ReconcileCobol) and the no-op second pass must not hide the
+// first one's changes. An ID may appear in both added and evicted when two
+// passes created and removed it. The record has its own leaf mutex, taken
+// here without mu, so a drain never waits on a running resolve.
+//
+// KEYWORDS — cobol, finding, placeholder, change record, drain, ledger,
+// search sync, resolve_from, dependent repository, D-03, Pitfall 4.
+func (r *Resolver) CobolFindingChanges() (repos, added, evicted []string) {
+	r.cobolFindingMu.Lock()
+	defer r.cobolFindingMu.Unlock()
+	repos = slices.Sorted(maps.Keys(r.cobolFindingRepos))
+	added = slices.Sorted(maps.Keys(r.cobolFindingAdded))
+	evicted = slices.Sorted(maps.Keys(r.cobolFindingEvicted))
+	r.cobolFindingRepos, r.cobolFindingAdded, r.cobolFindingEvicted = nil, nil, nil
+	return repos, added, evicted
 }
 
 // newCobolExternalFinding returns the EXTERNAL_UNRESOLVED finding node of

@@ -490,6 +490,19 @@ type Resolver struct {
 	// SetCobolReconcileLock.
 	cobolReconcileMu *sync.Mutex
 
+	// cobolFindingRepos, cobolFindingAdded, and cobolFindingEvicted are the
+	// COBOL finding change record: the repositories reconcileCobolFindings
+	// reconciled and the finding and placeholder IDs it added or evicted,
+	// accumulated across passes until CobolFindingChanges drains them.
+	// reconcileCobolFindings is the only writer, CobolFindingChanges the only
+	// reader. cobolFindingMu guards only these sets and is a leaf lock: no
+	// other lock is taken while it is held, and the reader takes it without
+	// mu, so a drain never waits on a running resolve.
+	cobolFindingMu      sync.Mutex
+	cobolFindingRepos   map[string]struct{}
+	cobolFindingAdded   map[string]struct{}
+	cobolFindingEvicted map[string]struct{}
+
 	// stampTerminal, when true, lets a FULL (unscoped) ResolveAll durably mark
 	// the edges it concludes are permanently external / stdlib / definition-
 	// less so a later SCOPED warm resolve can skip re-feeding them (see
