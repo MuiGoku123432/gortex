@@ -1,6 +1,12 @@
 package indexer
 
-import "github.com/zzet/gortex/internal/graph"
+import (
+	"maps"
+	"slices"
+
+	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/resolver"
+)
 
 // cobolMutationPaths returns the sorted COBOL paths an incremental mutation
 // lists, from the derived invalidation plan and the receipt's changed,
@@ -51,7 +57,9 @@ func cobolMutationTouched(result *IndexResult, receipt *graph.MutationReceipt) b
 // receipt that is not ResolutionRelevant can still move or remove a COBOL
 // target (WR-01). The pass is observable as catch-up kind cobol and is
 // skipped while incrementalResolveFilesHook is set, the test seam that
-// stands in for an interrupted resolve.
+// stands in for an interrupted resolve. It ends with the finding ledger on
+// the durable store over its own repository and every repository the
+// drained resolver reconciled; an unprefixed indexer trusts no ID prefix.
 func (idx *Indexer) reconcileCobolAfterMutation(result *IndexResult, receipt *graph.MutationReceipt) {
 	if idx == nil || !cobolMutationTouched(result, receipt) {
 		return
@@ -68,15 +76,32 @@ func (idx *Indexer) reconcileCobolAfterMutation(result *IndexResult, receipt *gr
 		repos = map[string]struct{}{idx.repoPrefix: {}}
 	}
 	idx.resolver.ReconcileCobol(repos)
+	recordCobolFindingLedger(idx.graph, []string{idx.repoPrefix}, nil, idx.logger, idx.resolver)
 }
 
 // reconcileCobolRepos runs the COBOL reconcile over repos (every edge when
 // repos is empty) through a master resolver, so the decision sees every
-// tracked repository's candidates and policy.
+// tracked repository's candidates and policy, then the finding ledger on the
+// durable store. The ledger drains the master and the resolver of every
+// tracked repository in its base (repos, or every tracked repository when
+// repos is empty), which catches a cold, full-retrack, or fallback
+// ResolveAll whose reconcile this master only repeats.
 func (mi *MultiIndexer) reconcileCobolRepos(repos map[string]struct{}) {
 	master := mi.newMasterResolver(false)
 	if master == nil {
 		return
 	}
 	master.ReconcileCobol(repos)
+	base := slices.Sorted(maps.Keys(repos))
+	if len(base) == 0 {
+		base = mi.RepoPrefixes()
+	}
+	resolvers := []*resolver.Resolver{master}
+	for _, p := range base {
+		if idx := mi.GetIndexer(p); idx != nil {
+			resolvers = append(resolvers, idx.resolver)
+		}
+	}
+	tracked := func(prefix string) bool { return mi.GetIndexer(prefix) != nil }
+	recordCobolFindingLedger(mi.graph, base, tracked, mi.logger, resolvers...)
 }

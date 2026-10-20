@@ -198,11 +198,12 @@ type MultiIndexer struct {
 	// batchCensusEligible is the daemon's one-shot full-coverage attestation
 	// for the armed batch scope — see ArmBatchCensusEligible.
 	batchCensusEligible bool
-	// batchCobolRepos collects the repositories whose warm-restart COBOL
-	// reconcile a parallel batch deferred: deciding one before every
-	// repository is registered would drop bindings into the unregistered
-	// ones. EndBatch and ResetBatch run one reconcile over the set. Guarded
-	// by mi.mu.
+	// batchCobolRepos collects the repositories whose COBOL reconcile a
+	// parallel batch deferred: the warm-restart reconcile and the cold-track
+	// reconcile and finding ledger. Deciding one before every repository is
+	// registered would drop bindings into the unregistered ones. EndBatch
+	// and ResetBatch run one reconcile, and with it the ledger, over the
+	// set. Guarded by mi.mu.
 	batchCobolRepos map[string]struct{}
 
 	// resolverLSPHelper is the resolve-time LSP helper propagated
@@ -2920,6 +2921,26 @@ func (mi *MultiIndexer) TrackRepoCtx(ctx context.Context, entry config.RepoEntry
 	if err == nil && result != nil && result.RepoPrefix != "" {
 		if meta := mi.GetMetadata(result.RepoPrefix); meta != nil {
 			mi.reconcileEnclosingRepos(ctx, meta.RootPath, true)
+		}
+		// The cold track's COBOL reconcile and finding ledger (D-09, D-11,
+		// D-03). While a parallel batch defers resolution the repository
+		// joins the batch set instead, which EndBatch reconciles once every
+		// repository is registered; checked and inserted under one mi.mu
+		// section, so EndBatch either consumes it or the tail runs inline.
+		mi.mu.Lock()
+		deferred := mi.deferResolve
+		if deferred {
+			if mi.batchCobolRepos == nil {
+				mi.batchCobolRepos = make(map[string]struct{})
+			}
+			mi.batchCobolRepos[result.RepoPrefix] = struct{}{}
+		}
+		mi.mu.Unlock()
+		if !deferred {
+			// A shadow-path resolve saw only this repository, so a master
+			// pass on the durable store re-decides it and every repository
+			// resolving from it, then ledgers: the warm-restart tail's shape.
+			mi.reconcileCobolRepos(map[string]struct{}{result.RepoPrefix: {}})
 		}
 	}
 	return result, err

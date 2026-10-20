@@ -139,21 +139,30 @@ func TestCobolFindings_HistoryIdenticalRerun(t *testing.T) {
 	idx := env.mi.GetIndexer("finda")
 	require.NotNil(t, idx)
 	var mu sync.Mutex
-	var cobolFiles []string
+	var cobolRuns [][]string
 	idx.incrementalCatchupHook = func(kind string, files []string) {
 		if kind != "cobol" {
 			return
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		cobolFiles = append(cobolFiles, files...)
+		cobolRuns = append(cobolRuns, files)
 	}
-	ranTail := func() bool {
+	// reindex re-extracts cobol/main.cbl and requires the COBOL reconcile
+	// and ledger tail to have run. Only the first identical rewrite after the
+	// cold track lists the path; a later one is classified inert (no listed
+	// file), and cobolMutationTouched runs the tail for the stale file anyway.
+	reindex := func(i int) {
+		res, err := env.mi.IncrementalReindexRepo("finda", nil)
+		require.NoError(t, err)
+		require.Equal(t, 1, res.StaleFileCount, "reindex %d re-extracted cobol/main.cbl", i)
 		mu.Lock()
 		defer mu.Unlock()
-		ran := slices.ContainsFunc(cobolFiles, func(p string) bool { return strings.HasSuffix(p, "cobol/main.cbl") })
-		cobolFiles = nil
-		return ran
+		require.Len(t, cobolRuns, 1, "reindex %d ran the COBOL reconcile and ledger tail once", i)
+		for _, p := range cobolRuns[0] {
+			assert.True(t, strings.HasSuffix(p, "cobol/main.cbl"), "reindex %d tail path %s", i, p)
+		}
+		cobolRuns = nil
 	}
 	ids := slices.Sorted(maps.Keys(cobolLedgerFindings(env, "finda")))
 	before := len(cobolHistory(t, env, "finda"))
@@ -162,8 +171,7 @@ func TestCobolFindings_HistoryIdenticalRerun(t *testing.T) {
 	for i := range 2 {
 		// Identical bytes, newer mtime: re-extracted, evicted, and re-added.
 		env.write(t, "finda", "cobol/main.cbl", cobolLedgerFixture)
-		env.reindex(t, "finda")
-		require.True(t, ranTail(), "reindex %d ran the COBOL reconcile and ledger tail", i)
+		reindex(i)
 		assert.Len(t, cobolHistory(t, env, "finda"), before, "reindex %d appends no row (GAP-06)", i)
 		assert.Equal(t, ids, slices.Sorted(maps.Keys(cobolLedgerFindings(env, "finda"))), "reindex %d keeps the IDs", i)
 	}
@@ -173,8 +181,7 @@ func TestCobolFindings_HistoryIdenticalRerun(t *testing.T) {
 	}
 
 	env.write(t, "finda", "cobol/main.cbl", cobolLedgerRetoken)
-	env.reindex(t, "finda")
-	require.True(t, ranTail())
+	reindex(2)
 	assert.Greater(t, len(cobolHistory(t, env, "finda")), before, "a token edit through the same path appends rows")
 }
 
