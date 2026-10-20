@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-10-20T16:44:07.948Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-10-20T17:32:46.452Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 56
+  completed_plans: 57
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -117,6 +117,7 @@ Progress: [█████████░] 88%
 | Phase 05 P02 | 10 min | 2 tasks | 7 files |
 | Phase 05 P03 | 14 min | 2 tasks | 8 files |
 | Phase 05 P04 | 16 min | 2 tasks | 4 files |
+| Phase 05 P05 | 43 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-03: gortex-cobol-grammar/6 is the single Phase 5 COBOL mapping bump; 05-10 keeps /6 until the phase gate
 - [Phase 05]: 05-04: index_health findings = {PARSE_UNRESOLVED, EXTERNAL_UNRESOLVED} counted from prov_evidence_class over the file scan's repoPrefixes, added after result is built; never feeds health_score or recommendation (D-14)
 - [Phase 05]: 05-04: the Neo4j kind label for findings is Finding (sanitizeLabel capitalizes); finding and placeholder Meta need no projection change; assertProjectedMeta is the shared key-by-key projection check
+- [Phase 05]: 05-05: missing and COPY IDMS COBOL edges target <callerRepo>/cobol-missing::<type>/<key> KindResource placeholders (D-11 Meta only, caller scope); reconcileCobol collects one cobolExternalRef per placeholder-targeted occurrence for 05-08
+- [Phase 05]: 05-05: the placeholder sweep ignores only references edges from findings (From contains ::@finding/), because a literal EXEC CICS LOAD PROGRAM is a references code edge that must keep its placeholder
+- [Phase 05]: 05-05: ResolveAll runs reconcileCobol on its no-pending early return; placeholder-targeted edges are not pending, so a clean track of the target repository never rebound them otherwise
 
 ### Pending Todos
 
@@ -270,6 +274,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T16:44:07.937Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-10-20T17:32:38.919Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None
