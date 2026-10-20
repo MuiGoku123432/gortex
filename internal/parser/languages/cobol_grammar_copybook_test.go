@@ -277,7 +277,7 @@ func TestCobolGrammar_CopybookProcedureFragment(t *testing.T) {
 	assert.Equal(t, "VALPARA", file.Meta["cobol_name_key"])
 	assert.NotContains(t, file.Meta, "prov_analysis_absence")
 	assertCobolNoWrapper(t, result)
-	require.Len(t, result.Nodes, 3)
+	require.Len(t, result.Nodes, 3+len(cobolFindingNodes(result, "")), "three non-finding nodes")
 
 	const para = path + "::@proc/VALIDATE-PARA"
 	const stmt = para + "/@move_statement"
@@ -624,8 +624,13 @@ func TestCobolGrammar_CopybookWrapperWindow(t *testing.T) {
 				return
 			}
 			assert.Equal(t, "copybook_content_unmapped", file.Meta["prov_analysis_absence"])
-			assert.Len(t, result.Nodes, 1)
-			assert.Empty(t, result.Edges)
+			// Only the file node and its parse findings; every edge is a
+			// finding's member_of edge.
+			findings := cobolFindingIDs(result)
+			assert.Len(t, result.Nodes, 1+len(findings))
+			for _, edge := range result.Edges {
+				assert.True(t, findings[edge.From], "edge %s -> %s is not from a finding", edge.From, edge.To)
+			}
 		})
 	}
 }
