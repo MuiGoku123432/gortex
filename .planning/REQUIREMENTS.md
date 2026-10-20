@@ -92,7 +92,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 - [ ] **GAP-05**: An external unresolved finding MUST preserve a placeholder for the observed target without fabricating target source, body, or attributes.
 - [ ] **GAP-06**: Reprocessing unchanged evidence MUST reuse the active finding identity rather than create a duplicate.
 - [ ] **GAP-07**: A finding MUST close or be superseded when its source, parser, or retrieved-artifact evidence resolves or replaces it.
-- [ ] **GAP-08**: An uncontained parser recovery cascade that removes expected downstream structure MUST remain a deterministic regression failure even if AI proposes a recovery.
+- [x] **GAP-08**: An uncontained parser recovery cascade that removes expected downstream structure MUST remain a deterministic regression failure even if AI proposes a recovery.
 
 ### Native Query Outcomes
 
@@ -264,7 +264,7 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | GAP-05 | Phase 5 | Pending |
 | GAP-06 | Phase 5 | Pending |
 | GAP-07 | Phase 5 | Pending |
-| GAP-08 | Phase 5 | Pending |
+| GAP-08 | Phase 5 | Complete |
 | QUERY-01 | Phase 6 | Pending |
 | QUERY-02 | Phase 6 | Pending |
 | QUERY-03 | Phase 6 | Pending |

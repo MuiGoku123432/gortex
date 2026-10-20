@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-10-20T18:01:12.032Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-10-20T18:11:01.689Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 58
+  completed_plans: 59
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 7 of 12
+Plan: 8 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -119,6 +119,7 @@ Progress: [█████████░] 91%
 | Phase 05 P04 | 16 min | 2 tasks | 4 files |
 | Phase 05 P05 | 43 min | 3 tasks | 11 files |
 | Phase 05 P06 | 26 min | 3 tasks | 10 files |
+| Phase 05 P07 | 8 min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -249,6 +250,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: ResolveAll runs reconcileCobol on its no-pending early return; placeholder-targeted edges are not pending, so a clean track of the target repository never rebound them otherwise
 - [Phase 05]: 05-06: graph.FindingLedgerTransitions is a pure ID-only diff; a gone finding is superseded by the k-th newly opened (or reopened) finding of the same (container, class, kind) in (StartByte, FindingID) order, leftovers close or open alone
 - [Phase 05]: 05-06: finding_history (v23, in-place) is keyed (view_gen, repo_prefix, seq), records opens too, is in viewGenSidecars/purge/orphan/rekey-drop registries but NOT the EvictRepo sweep (D-07); the ledger reads only LatestFindingTransitions (CROSS JOIN pins the indexed plan)
+- [Phase 05]: 05-07: the cascade gate (internal/indexer/cobol_cascade_gate_test.go) is test-only and flagless in the default go test -race; its RED was proven by emptying cobolCascadeFamily and reverting, so 05-07 has no feat commit
+- [Phase 05]: 05-07: the copybook gate control is CUST-REC with two 05 children (3 data items); 05 CUST-ID PIC X(8) WHATEVER. as the first child cascades and attaches to copy/cust.cpy via member_of
 
 ### Pending Todos
 
@@ -277,6 +280,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T18:01:05.263Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-10-20T18:10:55.413Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None
