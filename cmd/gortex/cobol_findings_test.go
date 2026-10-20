@@ -241,3 +241,95 @@ func TestCobolFindings_SearchByNameAndKind(t *testing.T) {
 	}
 	assert.False(t, strings.Contains(repo.tailID, cobolFindingsTailToken))
 }
+
+// TestCobolFindings_ExternalPersisted indexes the findings fixture through
+// the real path and proves its unobtained CALL 'NOPGM' and COPY NOCPY each
+// persist in SQLite as one EXTERNAL_UNRESOLVED finding carrying the full
+// RESEARCH Pattern 3 Meta, owned by its repository, with a member_of edge
+// to an existing node and a references edge to its placeholder. Findings
+// are located by finding_target_key, never by recomputing the hash.
+func TestCobolFindings_ExternalPersisted(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+
+	byKey := map[string][]*graph.Node{}
+	for n := range repo.store.NodesByKind(graph.KindFinding) {
+		if n.Meta[graph.MetaEvidenceClass] == graph.FindingClassExternal {
+			key, _ := n.Meta[graph.MetaFindingTargetKey].(string)
+			byKey[key] = append(byKey[key], n)
+		}
+	}
+	asInt := func(v any) (int, bool) {
+		switch n := v.(type) {
+		case int:
+			return n, true
+		case int64:
+			return int(n), true
+		case float64:
+			return int(n), true
+		}
+		return 0, false
+	}
+	idPattern := regexp.MustCompile(`^` + regexp.QuoteMeta(repo.fileID) + `::@finding/external/[0-9a-f]{32}$`)
+	for key, want := range map[string][3]string{
+		"NOPGM": {"program", repo.prefix + "/cobol-missing::program/NOPGM", "'NOPGM'"},
+		"NOCPY": {"copybook", repo.prefix + "/cobol-missing::copybook/NOCPY", ""},
+	} {
+		require.Len(t, byKey[key], 1, "one EXTERNAL_UNRESOLVED finding for %s", key)
+		n := byKey[key][0]
+		assert.Regexp(t, idPattern, n.ID)
+		assert.Equal(t, repo.fileID, n.FilePath)
+		assert.Equal(t, repo.prefix, n.RepoPrefix)
+		assert.Equal(t, key, n.Name)
+
+		meta := n.Meta
+		for _, k := range []string{"prov_start_row", "prov_start_column", "prov_end_row", "prov_end_column"} {
+			_, ok := asInt(meta[k])
+			assert.True(t, ok, "%s: meta lacks %s: %v", key, k, meta)
+		}
+		start, startOK := asInt(meta["prov_start_byte"])
+		end, endOK := asInt(meta["prov_end_byte"])
+		require.True(t, startOK && endOK, "%s: meta lacks an exact byte range: %v", key, meta)
+		assert.Contains(t, cobolFindingsFixture[start:end], key, "the range covers the referencing statement")
+		assert.Equal(t, true, meta["prov_range_exact"])
+		assert.NotEmpty(t, meta["prov_parser_tool_id"])
+		assert.NotEmpty(t, meta["prov_parser_grammar_id"])
+		assert.Equal(t, "gortex-cobol-grammar/6", meta["prov_extractor_version"])
+		assert.Equal(t, "external-reference", meta[graph.MetaFindingKind])
+		assert.Equal(t, "missing", meta[graph.MetaFindingReason])
+		assert.Equal(t, "medium", meta[graph.MetaFindingSeverity])
+		assert.Equal(t, graph.FindingSeverityRule, meta[graph.MetaFindingSeverityRule])
+		assert.Equal(t, "unavailable", meta[graph.MetaFindingScope])
+		assert.Equal(t, want[0], meta[graph.MetaFindingExpectedFamily])
+		assert.Equal(t, graph.FindingStatusActive, meta[graph.MetaFindingStatus])
+		assert.NotEmpty(t, meta[graph.MetaFindingEvidenceDigest])
+		assert.Equal(t, graph.FindingEvidenceRule, meta[graph.MetaFindingEvidenceRule])
+		assert.Equal(t, graph.FindingIDRule, meta[graph.MetaFindingIDRule])
+		assert.Equal(t, want[0], meta[graph.MetaFindingArtifactType])
+		assert.Equal(t, key, meta[graph.MetaFindingTargetKey])
+		for k, v := range meta {
+			assert.False(t, strings.HasPrefix(k, "cobol_"), "%s: no cobol_* key, found %s", key, k)
+			if want[2] != "" {
+				assert.NotEqual(t, want[2], v, "%s: the as-written target is never stored (%s)", key, k)
+			}
+		}
+
+		targets := map[graph.EdgeKind]string{}
+		for _, e := range repo.store.GetOutEdges(n.ID) {
+			targets[e.Kind] = e.To
+		}
+		require.Len(t, targets, 2, "%s: a member_of and a references edge: %v", key, targets)
+		assert.Equal(t, want[1], targets[graph.EdgeReferences])
+		require.NotNil(t, repo.store.GetNode(want[1]), "%s: the placeholder exists", key)
+		container := targets[graph.EdgeMemberOf]
+		require.NotNil(t, repo.store.GetNode(container), "%s: member_of target %s is a node", key, container)
+		assert.Equal(t, strings.TrimPrefix(container, repo.prefix+"/"), meta[graph.MetaFindingContainer])
+	}
+
+	diag, ok := graph.ReadPrefixDiagnostics(repo.store, 10)
+	require.True(t, ok)
+	assert.Zero(t, diag.UnownedCodeNodes, "unowned: %v", diag.UnownedSamples)
+	assert.Zero(t, diag.MisprefixedNodes, "misprefixed: %v", diag.MisprefixedSamples)
+
+	assert.Regexp(t, `^`+regexp.QuoteMeta(repo.fileID)+`::@finding/parse/[0-9a-f]{32}$`, repo.tailID)
+	assert.NotNil(t, repo.store.GetNode(repo.tailID), "the unparsed-tail finding keeps its ID")
+}
