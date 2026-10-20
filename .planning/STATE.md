@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-10-20T17:32:46.452Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-10-20T18:01:12.032Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 57
+  completed_plans: 58
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -118,6 +118,7 @@ Progress: [█████████░] 89%
 | Phase 05 P03 | 14 min | 2 tasks | 8 files |
 | Phase 05 P04 | 16 min | 2 tasks | 4 files |
 | Phase 05 P05 | 43 min | 3 tasks | 11 files |
+| Phase 05 P06 | 26 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -246,6 +247,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: missing and COPY IDMS COBOL edges target <callerRepo>/cobol-missing::<type>/<key> KindResource placeholders (D-11 Meta only, caller scope); reconcileCobol collects one cobolExternalRef per placeholder-targeted occurrence for 05-08
 - [Phase 05]: 05-05: the placeholder sweep ignores only references edges from findings (From contains ::@finding/), because a literal EXEC CICS LOAD PROGRAM is a references code edge that must keep its placeholder
 - [Phase 05]: 05-05: ResolveAll runs reconcileCobol on its no-pending early return; placeholder-targeted edges are not pending, so a clean track of the target repository never rebound them otherwise
+- [Phase 05]: 05-06: graph.FindingLedgerTransitions is a pure ID-only diff; a gone finding is superseded by the k-th newly opened (or reopened) finding of the same (container, class, kind) in (StartByte, FindingID) order, leftovers close or open alone
+- [Phase 05]: 05-06: finding_history (v23, in-place) is keyed (view_gen, repo_prefix, seq), records opens too, is in viewGenSidecars/purge/orphan/rekey-drop registries but NOT the EvictRepo sweep (D-07); the ledger reads only LatestFindingTransitions (CROSS JOIN pins the indexed plan)
 
 ### Pending Todos
 
@@ -274,6 +277,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T17:32:38.919Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-10-20T18:01:05.263Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None

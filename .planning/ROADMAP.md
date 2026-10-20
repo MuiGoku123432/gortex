@@ -262,7 +262,7 @@ Plans:
   4. Unchanged evidence reuses finding identities; corrected source/parser evidence or retrieved artifacts close or supersede only the applicable finding class.
   5. Destructive parser-recovery cascades remain deterministic regression failures regardless of any later AI output.
 
-**Plans**: 5/12 plans executed
+**Plans**: 6/12 plans executed
 
 Plans:
 **Wave 1**
@@ -278,7 +278,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 05-05-PLAN.md -- Resolver: missing and IDMS edges retarget onto owned missing-artifact placeholders; downstream expectations
-- [ ] 05-06-PLAN.md -- Ledger diff (close vs supersede) and finding_history sidecar with latest-row index, schema v23
+- [x] 05-06-PLAN.md -- Ledger diff (close vs supersede) and finding_history sidecar with latest-row index, schema v23
 - [ ] 05-07-PLAN.md -- D-14 cascade regression gate on the real path in the default race suite
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -390,7 +390,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
 | 3. Deterministic COBOL and Mainframe Breadth | 17/17 | In Progress|  |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 22/22 | In Progress|  |
-| 5. Explicit Unresolved Evidence | 5/12 | In Progress|  |
+| 5. Explicit Unresolved Evidence | 6/12 | In Progress|  |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |
 | 7. AI Contract, Policy, and Evaluation Foundation | 0/TBD | Deferred: Phase 6 | - |
 | 8. Evidence-Linked Claims and Human Review | 0/TBD | Deferred: Phase 7 | - |
