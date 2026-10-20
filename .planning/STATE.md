@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-10-20T16:10:51.794Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-10-20T16:26:17.474Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 54
+  completed_plans: 55
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -115,6 +115,7 @@ Progress: [████████░░] 84%
 | Phase 04 P22 | 15min | 3 tasks | 6 files |
 | Phase 05 P01 | 26 min | 2 tasks | 10 files |
 | Phase 05 P02 | 10 min | 2 tasks | 7 files |
+| Phase 05 P03 | 14 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -235,6 +236,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-01: cobolFindings container ladder walks ancestors separately for statement, then membership container, then section, so SQL tails attach to their exec_sql statement, not the paragraph
 - [Phase 05]: 05-01: Tracer gate under human_verify_mode=end-of-phase re-ran the automated verify and continued; human review of the slice deferred to end-of-phase UAT
 - [Phase 05]: 05-02: Finding eviction is a kind-guarded ID-set capability (graph.EvictFindingNodesByIDs) on both backends; memory delegates to evictSyntheticNodesByIDs, SQLite is a deliberate third copy of the config/contract evicter (fork hygiene); stores without it report unsupported, never an N+1 fallback
+- [Phase 05]: 05-03: uncontained-cascade is one high document-scope PARSE_UNRESOLVED finding per document whose producer reasons hold division-scale-recovery, retained-structure-collapse, missing-required-anchor, or lost-capture (grade constants); built through the shared cobolAddFinding path as a handoff.Gap with constant evidence, so producer reasons never enter the ID
+- [Phase 05]: 05-03: copybooks emit parse findings via cobolFindings(w) as the last statement of cobolCopybook, after the WR-04 copybook_content_unmapped check; an empty source grades red [missing-required-anchor] and gets a cascade finding on the file node (no special case)
+- [Phase 05]: 05-03: gortex-cobol-grammar/6 is the single Phase 5 COBOL mapping bump; 05-10 keeps /6 until the phase gate
 
 ### Pending Todos
 
@@ -263,6 +267,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T16:10:51.783Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-10-20T16:26:10.414Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
