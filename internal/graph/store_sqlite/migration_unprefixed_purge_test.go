@@ -214,8 +214,8 @@ func TestMigrationV22_PurgesUnprefixedRows(t *testing.T) {
 		}
 		assertStringsEqual(t, "nodes after open", queryIDs(t, s.db, `SELECT id FROM nodes ORDER BY id`),
 			[]string{"dep::go.uber.org/zap::Logger", "module::go:github.com/pkg/errors@v0.9.1", "rationale::mem1"})
-		if v, err := readUserVersion(s.db); err != nil || v != 22 {
-			t.Fatalf("open %d: user_version = %d (err %v), want 22", open, v, err)
+		if v, err := readUserVersion(s.db); err != nil || v != currentSchemaVersion {
+			t.Fatalf("open %d: user_version = %d (err %v), want %d", open, v, err, currentSchemaVersion)
 		}
 		if err := s.Close(); err != nil {
 			t.Fatalf("close %d: %v", open, err)

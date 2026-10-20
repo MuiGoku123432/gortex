@@ -34,7 +34,7 @@ import (
 // index changes in a way an old on-disk DB would not already have, and append a
 // matching schemaMigrations entry describing how to bring an older store
 // forward (in place, or by rebuild).
-const currentSchemaVersion = 22
+const currentSchemaVersion = 23
 
 // schemaMigration is one forward step. Exactly one strategy applies:
 //   - rebuild=true: the change introduces structure/data that can only come
@@ -123,6 +123,9 @@ var schemaMigrations = []schemaMigration{
 	// so any persistent store that picked them up is cleaned on open;
 	// empty-path globals (dep::, external::, …) survive as in v7.
 	{version: 22, name: "purge unprefixed solo-repo rows (embedded)", inPlace: purgeUnprefixedRepoRows},
+	// D-06/D-07: the finding lifecycle log is an additive sidecar, so an
+	// older store gains an empty table and its finding index in place.
+	{version: 23, name: "persist finding history", inPlace: createFindingHistoryTable},
 }
 
 // createGenerationMaskTables is the explicit v18 migration. The mask tables are
