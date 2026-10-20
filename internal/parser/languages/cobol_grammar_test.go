@@ -518,8 +518,16 @@ func TestCobolGrammar_EmptySource(t *testing.T) {
 	result, err := e.Extract("src/empty.cbl", nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Len(t, result.Nodes, 1, "no program is fabricated from an empty source")
-	assert.Empty(t, result.Edges)
+	// An empty source lacks the producer's required anchors, so it may carry
+	// PARSE_UNRESOLVED findings; it never gets a fabricated program.
+	findings := cobolFindingIDs(result)
+	for _, n := range cobolFindingNodes(result, "") {
+		assert.Equal(t, graph.FindingClassParse, n.Meta[graph.MetaEvidenceClass], n.ID)
+	}
+	require.Len(t, result.Nodes, len(findings)+1, "no program is fabricated from an empty source")
+	for _, edge := range result.Edges {
+		assert.True(t, findings[edge.From], "empty source edge %s -> %s is not from a finding", edge.From, edge.To)
+	}
 	file := cobolFileNode(t, result, "src/empty.cbl")
 	for _, key := range cobolDocumentKeys {
 		assert.Contains(t, file.Meta, key)

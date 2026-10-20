@@ -232,11 +232,18 @@ func TestCobolGrammar_Statements(t *testing.T) {
 		}
 	}
 
-	// An empty source still yields only the file node and no edges.
+	// An empty source still yields only the file node, plus any
+	// PARSE_UNRESOLVED findings and their member_of edges.
 	empty, err := e.Extract("src/empty.cbl", nil)
 	require.NoError(t, err)
-	require.Len(t, empty.Nodes, 1)
-	assert.Empty(t, empty.Edges)
+	emptyFindings := cobolFindingIDs(empty)
+	for _, n := range cobolFindingNodes(empty, "") {
+		assert.Equal(t, graph.FindingClassParse, n.Meta[graph.MetaEvidenceClass], n.ID)
+	}
+	require.Len(t, empty.Nodes, len(emptyFindings)+1)
+	for _, edge := range empty.Edges {
+		assert.True(t, emptyFindings[edge.From], "empty source edge %s -> %s is not from a finding", edge.From, edge.To)
+	}
 }
 
 const cobolStatementSymbolFixture = `       IDENTIFICATION DIVISION.

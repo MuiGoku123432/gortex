@@ -120,7 +120,8 @@ func TestCobolGrammar_ProvKeys(t *testing.T) {
 	kinds := map[string]int{}
 	for _, n := range result.Nodes {
 		assertCobolMetaContract(t, n.ID, n.Meta)
-		if n.ID == path {
+		// Findings have their own contract: TestCobolGrammar_FindingMetaContract.
+		if n.ID == path || n.Kind == graph.KindFinding {
 			continue
 		}
 		kinds[string(n.Kind)]++
@@ -141,7 +142,12 @@ func TestCobolGrammar_ProvKeys(t *testing.T) {
 	}
 
 	relations := map[graph.EdgeKind]int{}
+	findings := cobolFindingIDs(result)
 	for _, edge := range result.Edges {
+		// Finding member_of edges: TestCobolGrammar_FindingMetaContract.
+		if findings[edge.From] {
+			continue
+		}
 		owner := string(edge.Kind) + " " + edge.From + " -> " + edge.To
 		if edge.Kind == graph.EdgeDefines || edge.Kind == graph.EdgeMemberOf {
 			assert.Nil(t, edge.Meta, "structural edge carries Meta: %s", owner)
@@ -188,6 +194,10 @@ func TestCobolGrammar_DegradedBreadth(t *testing.T) {
 
 			emitted := map[string]int{}
 			for _, n := range result.Nodes {
+				// Findings have their own contract: TestCobolGrammar_FindingMetaContract.
+				if n.Kind == graph.KindFinding {
+					continue
+				}
 				cobolKind, _ := n.Meta["cobol_kind"].(string)
 				switch cobolKind {
 				case "section", "paragraph", "statement", "data_item":
