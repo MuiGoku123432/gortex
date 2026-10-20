@@ -727,6 +727,10 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 		return &ResolveStats{PendingBefore: pendingBefore, PendingAfter: pendingAfter}, pendingErr
 	}
 	if len(pending) == 0 && streamDone && !r.hasDeferredLSPRetryForScope() {
+		// A COBOL edge on a missing-artifact placeholder node is not pending,
+		// yet a candidate tracked since may now bind it (Pitfall 10), so the
+		// COBOL reconcile still runs; it is a no-op on a graph without COBOL.
+		r.reconcileCobol(r.scope)
 		return &ResolveStats{PendingBefore: pendingBefore, PendingAfter: pendingAfter}, nil
 	}
 

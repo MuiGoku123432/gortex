@@ -390,6 +390,24 @@ func TestCobolReconcile_PlaceholderRebindOnRetrieve(t *testing.T) {
 	})
 }
 
+// A placeholder-targeted edge is not pending, so a ResolveAll with nothing
+// pending must still run the COBOL reconcile to bind a retrieved target.
+func TestCobolReconcile_PlaceholderResolveAllNoPending(t *testing.T) {
+	const callNo = "unresolved::cobol::program::NOPGM"
+	cobolOnStores(t, func(t *testing.T, g graph.Store) {
+		seedCobol(g, "r1", "r1/main.cbl::MAINPGM", graph.KindFunction, "program", "MAINPGM")
+		cobolEdge(g, "r1/main.cbl::MAINPGM", 1, graph.EdgeCalls, callNo, placeholderMeta(callNo))
+		New(g).ResolveAll()
+		require.Equal(t, "r1/cobol-missing::program/NOPGM", cobolEdgeAt(t, g, "r1/main.cbl::MAINPGM", 1).To)
+
+		seedCobol(g, "r1", "r1/nopgm.cbl::NOPGM", graph.KindFunction, "program", "NOPGM")
+		New(g).ResolveAll()
+
+		assert.Equal(t, "r1/nopgm.cbl::NOPGM", cobolEdgeAt(t, g, "r1/main.cbl::MAINPGM", 1).To)
+		assert.Empty(t, cobolMissingNodes(g))
+	})
+}
+
 func TestCobolReconcile_PlaceholderPerRepository(t *testing.T) {
 	const callNo = "unresolved::cobol::program::NOPGM"
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {
