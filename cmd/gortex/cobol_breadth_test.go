@@ -258,6 +258,16 @@ func cobolBreadthOutEdge(t *testing.T, store *store_sqlite.Store, from, to strin
 	return found[0]
 }
 
+// assertCobolBreadthMissing asserts the store holds the missing-artifact
+// placeholder node id (D-11) with artifact_status not_obtained.
+func assertCobolBreadthMissing(t *testing.T, store *store_sqlite.Store, id string) {
+	t.Helper()
+	n := store.GetNode(id)
+	require.NotNil(t, n, "no placeholder node %s", id)
+	assert.Equal(t, graph.KindResource, n.Kind, id)
+	assert.Equal(t, "not_obtained", n.Meta["artifact_status"], id)
+}
+
 // cobolBreadthStrings reads a []string Meta value, which a SQLite round
 // trip may decode as []any.
 func cobolBreadthStrings(t *testing.T, value any) []string {
@@ -378,9 +388,10 @@ func TestCobolBreadth_CallsAndCopy(t *testing.T) {
 		repos.prefixA + "/cobol/twin2.cbl::TWINPGM",
 	}, cobolBreadthStrings(t, twin.Meta["cobol_candidate_ids"]))
 
-	onlyB := calls["unresolved::cobol::program::ONLYB"]
+	onlyB := calls[repos.prefixA+"/cobol-missing::program/ONLYB"]
 	require.NotNil(t, onlyB, "CALL 'ONLYB' was bound across repositories")
 	assert.Equal(t, "missing", onlyB.Meta["cobol_unresolved_reason"])
+	assertCobolBreadthMissing(t, repos.store, onlyB.To)
 	require.NotNil(t, repos.store.GetNode(repos.prefixB+"/cobol/onlyb.cbl::ONLYB"),
 		"ONLYB must exist in repository B for the missing outcome to mean anything")
 
@@ -394,9 +405,10 @@ func TestCobolBreadth_CallsAndCopy(t *testing.T) {
 	assert.Equal(t, "copy", copybook.Meta["cobol_copy_form"])
 	assert.NotContains(t, copybook.Meta, "cobol_unresolved_reason")
 	idms := cobolBreadthOutEdge(t, repos.store, programID,
-		"unresolved::cobol::copybook::idms/RECORD/EMP-REC", graph.EdgeImports)
+		repos.prefixA+"/cobol-missing::idms_dictionary_member/RECORD/EMP-REC", graph.EdgeImports)
 	assert.Equal(t, "idms", idms.Meta["cobol_copy_form"])
 	assert.Equal(t, "idms_dictionary_member", idms.Meta["cobol_unresolved_reason"])
+	assertCobolBreadthMissing(t, repos.store, idms.To)
 
 	for _, e := range []*graph.Edge{sub, twin, onlyB, dynamic, copybook, idms} {
 		assertCobolBreadthLine(t, e)
@@ -521,9 +533,10 @@ func TestCobolBreadth_NestedProgramScope(t *testing.T) {
 	assert.NotContains(t, same.Meta, "cobol_unresolved_reason")
 
 	cross := cobolBreadthOutEdge(t, repos.store, repos.prefixA+"/cobol/nestcall.cbl::NESTCALL/@proc/NESTCALL-PARA",
-		"unresolved::cobol::program::INNER", graph.EdgeCalls)
+		repos.prefixA+"/cobol-missing::program/INNER", graph.EdgeCalls)
 	assert.Equal(t, "missing", cross.Meta["cobol_unresolved_reason"])
 	assert.NotContains(t, cross.Meta, "cobol_candidate_ids")
+	assertCobolBreadthMissing(t, repos.store, cross.To)
 
 	for _, e := range []*graph.Edge{same, cross} {
 		assertCobolBreadthLine(t, e)

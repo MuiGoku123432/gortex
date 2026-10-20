@@ -105,17 +105,37 @@ func cobolPlaceholderEdge(t *testing.T, edges []cobolDumpEdge, repo, placeholder
 	return found[0]
 }
 
+// requireCobolMissingNode asserts the dump holds the missing-artifact
+// placeholder node id (D-11) with artifact_status not_obtained.
+func requireCobolMissingNode(t *testing.T, res graphdump.Result, id string) {
+	t.Helper()
+	for _, line := range res.Rows {
+		fields := strings.Split(line, "\x1f")
+		if fields[0] != "N" || fields[1] != id {
+			continue
+		}
+		var meta map[string]any
+		require.NoError(t, json.Unmarshal([]byte(fields[len(fields)-1]), &meta), line)
+		assert.Equal(t, "not_obtained", meta["artifact_status"], id)
+		return
+	}
+	t.Fatalf("no placeholder node %s in the dump", id)
+}
+
 // requireCrossRepoUnbound asserts the same-repository-only outcome: XPGM and
-// XCPY missing, SUBPGM bound to crossa's own program.
+// XCPY missing on crossa's placeholder nodes, SUBPGM bound to crossa's own
+// program.
 func requireCrossRepoUnbound(t *testing.T, res graphdump.Result) {
 	t.Helper()
 	edges := cobolDumpEdges(t, res)
 	xpgm := cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::program::XPGM")
-	assert.Equal(t, "unresolved::cobol::program::XPGM", xpgm.to)
+	assert.Equal(t, "crossa/cobol-missing::program/XPGM", xpgm.to)
 	assert.Equal(t, "missing", xpgm.meta["cobol_unresolved_reason"])
+	requireCobolMissingNode(t, res, xpgm.to)
 	xcpy := cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::copybook::XCPY")
-	assert.Equal(t, "unresolved::cobol::copybook::XCPY", xcpy.to)
+	assert.Equal(t, "crossa/cobol-missing::copybook/XCPY", xcpy.to)
 	assert.Equal(t, "missing", xcpy.meta["cobol_unresolved_reason"])
+	requireCobolMissingNode(t, res, xcpy.to)
 	sub := cobolPlaceholderEdge(t, edges, "crossa", "unresolved::cobol::program::SUBPGM")
 	assert.Equal(t, "crossa/cobol/sub.cbl::SUBPGM", sub.to)
 	assert.NotContains(t, sub.meta, "cobol_unresolved_reason")

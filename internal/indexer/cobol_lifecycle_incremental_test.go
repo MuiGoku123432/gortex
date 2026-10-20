@@ -252,9 +252,11 @@ func TestCobolLifecycle_CrossFile(t *testing.T) {
 			"PROGRAM-ID. SUBPGM.", "PROGRAM-ID. SUBPGX.", 1)
 		env.write(t, "lifea", "cobol/sub.cbl", renamed)
 		env.reindex(t, "lifea")
-		call := callEdge(t, env.requireCleanEquivalent(t))
-		assert.Equal(t, callSub, call.to)
+		res := env.requireCleanEquivalent(t)
+		call := callEdge(t, res)
+		assert.Equal(t, "lifea/cobol-missing::program/SUBPGM", call.to)
 		assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+		requireCobolMissingNode(t, res, call.to)
 
 		env.write(t, "lifea", "cobol/sub.cbl", cobolLifecycleRepoA["cobol/sub.cbl"])
 		env.reindex(t, "lifea")
@@ -267,18 +269,22 @@ func TestCobolLifecycle_CrossFile(t *testing.T) {
 // allowed by its resolve_from, binds and returns to missing (D-09).
 func TestCobolLifecycle_CrossRepoIncremental(t *testing.T) {
 	const callX = "unresolved::cobol::program::XPGM"
+	const missingX = "crossa/cobol-missing::program/XPGM"
 	repos := cobolCrossRepos(map[string]string{".gortex.yaml": cobolCrossAllowlist})
 	repos["crossb"] = maps.Clone(repos["crossb"])
 	xpgm := repos["crossb"]["cobol/xpgm.cbl"]
 	delete(repos["crossb"], "cobol/xpgm.cbl")
 	env := newCobolLifecycleEnv(t, repos)
 	env.track(t, "crossa", "crossb")
+	var res graphdump.Result
 	callEdge := func() cobolDumpEdge {
-		return cobolPlaceholderEdge(t, cobolDumpEdges(t, env.requireCleanEquivalent(t)), "crossa", callX)
+		res = env.requireCleanEquivalent(t)
+		return cobolPlaceholderEdge(t, cobolDumpEdges(t, res), "crossa", callX)
 	}
 	call := callEdge()
-	require.Equal(t, callX, call.to)
+	require.Equal(t, missingX, call.to)
 	require.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+	requireCobolMissingNode(t, res, missingX)
 
 	env.write(t, "crossb", "cobol/xpgm.cbl", xpgm)
 	env.reindex(t, "crossb")
@@ -289,8 +295,9 @@ func TestCobolLifecycle_CrossRepoIncremental(t *testing.T) {
 	env.remove(t, "crossb", "cobol/xpgm.cbl")
 	env.reindex(t, "crossb")
 	call = callEdge()
-	assert.Equal(t, callX, call.to)
+	assert.Equal(t, missingX, call.to)
 	assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+	requireCobolMissingNode(t, res, missingX)
 }
 
 // TestCobolLifecycle_CrossRepoUntrack binds crossa's CALL and COPY into
@@ -311,11 +318,16 @@ func TestCobolLifecycle_CrossRepoUntrack(t *testing.T) {
 	require.NoError(t, err)
 	crossb := env.repos["crossb"]
 	delete(env.repos, "crossb")
-	edges = cobolDumpEdges(t, env.requireCleanEquivalent(t))
-	for _, placeholder := range []string{"unresolved::cobol::program::XPGM", "unresolved::cobol::copybook::XCPY"} {
+	res := env.requireCleanEquivalent(t)
+	edges = cobolDumpEdges(t, res)
+	for placeholder, missing := range map[string]string{
+		"unresolved::cobol::program::XPGM":  "crossa/cobol-missing::program/XPGM",
+		"unresolved::cobol::copybook::XCPY": "crossa/cobol-missing::copybook/XCPY",
+	} {
 		e := cobolPlaceholderEdge(t, edges, "crossa", placeholder)
-		assert.Equal(t, placeholder, e.to)
+		assert.Equal(t, missing, e.to)
 		assert.Equal(t, "missing", e.meta["cobol_unresolved_reason"])
+		requireCobolMissingNode(t, res, missing)
 	}
 
 	env.repos["crossb"] = crossb

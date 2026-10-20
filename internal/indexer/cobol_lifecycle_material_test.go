@@ -131,10 +131,13 @@ func TestCobolLifecycle_ConfigChange(t *testing.T) {
 // COPY into crossb, and dropping it returns them to missing.
 func TestCobolLifecycle_ConfigReloadRedecides(t *testing.T) {
 	const callX = "unresolved::cobol::program::XPGM"
+	const missingX = "crossa/cobol-missing::program/XPGM"
 	env := newCobolLifecycleEnv(t, cobolCrossRepos(nil))
 	env.track(t, "crossa", "crossb")
-	call := cobolPlaceholderEdge(t, cobolDumpEdges(t, env.dump(t)), "crossa", callX)
-	require.Equal(t, callX, call.to)
+	res := env.dump(t)
+	call := cobolPlaceholderEdge(t, cobolDumpEdges(t, res), "crossa", callX)
+	require.Equal(t, missingX, call.to)
+	requireCobolMissingNode(t, res, missingX)
 
 	// Written straight to disk: the reload, not a reindex, must re-decide.
 	cfgPath := filepath.Join(env.roots["crossa"], ".gortex.yaml")
@@ -147,9 +150,11 @@ func TestCobolLifecycle_ConfigReloadRedecides(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(cfgPath, []byte("index:\n  cobol: {}\n"), 0o600))
 	env.mi.RefreshRepoConfigs()
-	call = cobolPlaceholderEdge(t, cobolDumpEdges(t, env.dump(t)), "crossa", callX)
-	assert.Equal(t, callX, call.to)
+	res = env.dump(t)
+	call = cobolPlaceholderEdge(t, cobolDumpEdges(t, res), "crossa", callX)
+	assert.Equal(t, missingX, call.to)
 	assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
+	requireCobolMissingNode(t, res, missingX)
 }
 
 // TestCobolLifecycle_UnrelatedConfig proves the fingerprint reads only the
