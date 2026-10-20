@@ -20,9 +20,9 @@ const (
 	cobolIDMSCopyTargetPrefix = "cobol::copybook::idms/"
 
 	// Edge Meta written by this pass (D-12 reason vocabulary: missing,
-	// ambiguous, caller_unowned; a COPY IDMS edge keeps the extractor's
-	// idms_dictionary_member). A missing or IDMS edge's To is its
-	// repository's missing-artifact placeholder node (D-11).
+	// ambiguous, caller_unowned, containment_unresolved; a COPY IDMS edge
+	// keeps the extractor's idms_dictionary_member). A missing or IDMS
+	// edge's To is its repository's missing-artifact placeholder node (D-11).
 	metaCobolUnresolvedReason = "cobol_unresolved_reason"
 	metaCobolCandidateIDs     = "cobol_candidate_ids"
 	// Edge Meta written on a COPY bound by library rank (D-10): the
@@ -37,9 +37,12 @@ const (
 
 	// Program node Meta read by this pass: true on a program contained in
 	// another program, stamped by the extractor from END PROGRAM nesting,
-	// and the node ID of that directly containing program.
-	metaCobolNested    = "cobol_nested"
-	metaCobolContainer = "cobol_container"
+	// the node ID of that directly containing program, and true on a
+	// contained program whose END PROGRAM containment the extractor could
+	// not resolve (IN-08), so its nesting is a guess.
+	metaCobolNested           = "cobol_nested"
+	metaCobolContainer        = "cobol_container"
+	metaCobolNestedUnresolved = "cobol_nested_unresolved"
 	// Literal CALL edge Meta read by this pass: the calling program's node ID.
 	metaCobolCallerProgram = "cobol_caller_program"
 )
@@ -106,7 +109,12 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // cobol_candidate_ids. A COPY IDMS member is never bound (P3 D-19): it keeps
 // idms_dictionary_member and targets its idms_dictionary_member placeholder
 // node. A caller node with no RepoPrefix never binds and gets no placeholder
-// node: its edge keeps the unresolved placeholder with caller_unowned.
+// node: its edge keeps the unresolved placeholder with caller_unowned. A
+// CALL left with no candidate only because contained programs under END
+// PROGRAM containment the extractor could not resolve (cobol_nested_unresolved)
+// were dropped is never reported missing (IN-08): it keeps the unresolved
+// placeholder with containment_unresolved and gets no placeholder node or
+// finding, since nothing is unobtained.
 //
 // RATIONALE — a placeholder-only pass can never re-check a bound edge, so a
 // second same-named program or a deleted target left a stale binding (WR-01).
@@ -412,8 +420,12 @@ func (r *Resolver) decideCobol(e *graph.Edge, ref cobolRef, index map[string][]*
 	if ref.isProgram {
 		caller, _ := e.Meta[metaCobolCallerProgram].(string)
 		var contained, sameFile, otherFile, allowedRepo []*graph.Node
+		// guessed: a candidate dropped only for its nesting, where the
+		// extractor could not resolve that nesting (IN-08).
+		guessed := false
 		for _, c := range candidates {
 			nested, known := c.Meta[metaCobolNested].(bool)
+			unresolved, _ := c.Meta[metaCobolNestedUnresolved].(bool)
 			switch {
 			case !known:
 				// Indexed before the flag existed: fail closed until reindex.
@@ -421,10 +433,14 @@ func (r *Resolver) decideCobol(e *graph.Edge, ref cobolRef, index map[string][]*
 				// Another allowed repository: top-level programs only (D-19).
 				if !nested {
 					allowedRepo = append(allowedRepo, c)
+				} else if unresolved {
+					guessed = true
 				}
 			case nested:
 				if container, _ := c.Meta[metaCobolContainer].(string); caller != "" && container == caller {
 					contained = append(contained, c)
+				} else if unresolved {
+					guessed = true
 				}
 			case e.FilePath != "" && c.FilePath == e.FilePath:
 				sameFile = append(sameFile, c)
@@ -439,6 +455,11 @@ func (r *Resolver) decideCobol(e *graph.Edge, ref cobolRef, index map[string][]*
 			candidates = append(sameFile, allowedRepo...)
 		default:
 			candidates = append(otherFile, allowedRepo...)
+		}
+		if len(candidates) == 0 && guessed {
+			// The program exists; only its guessed nesting hid it, so it
+			// is neither missing nor a placeholder (IN-08, D-09).
+			return cobolDecision{reason: "containment_unresolved"}
 		}
 	}
 
