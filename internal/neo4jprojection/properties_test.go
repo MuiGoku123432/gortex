@@ -273,40 +273,7 @@ func TestProjectNode_CobolProvenance(t *testing.T) {
 	}
 
 	for _, node := range []*graph.Node{program, file} {
-		projected, warnings, err := projectNode("owner", "generation", node)
-		if err != nil {
-			t.Fatalf("%s: %v", node.ID, err)
-		}
-		if warnings.Secret != 0 || warnings.Unsupported != 0 {
-			t.Fatalf("%s: warnings = %+v, want no secret and no unsupported", node.ID, warnings)
-		}
-		for key, want := range node.Meta {
-			if encoded := encodeMetadataKey(key); encoded != key {
-				t.Fatalf("%s: key %q encoded as %q, want it unchanged", node.ID, key, encoded)
-			}
-			got, ok := projected.Properties["meta_"+key]
-			if !ok {
-				t.Fatalf("%s: missing property meta_%s", node.ID, key)
-			}
-			switch typed := want.(type) {
-			case int:
-				want = int64(typed)
-			case []string:
-				list, isList := got.([]any)
-				if !isList || len(list) != len(typed) {
-					t.Fatalf("%s: meta_%s = %#v, want %v", node.ID, key, got, typed)
-				}
-				for i := range typed {
-					if list[i] != typed[i] {
-						t.Fatalf("%s: meta_%s[%d] = %#v, want %q", node.ID, key, i, list[i], typed[i])
-					}
-				}
-				continue
-			}
-			if got != want {
-				t.Fatalf("%s: meta_%s = %#v, want %#v", node.ID, key, got, want)
-			}
-		}
+		assertProjectedMeta(t, node)
 	}
 
 	for _, meta := range []map[string]any{program.Meta, file.Meta} {
@@ -357,43 +324,127 @@ func TestProjectNode_CobolBreadthMeta(t *testing.T) {
 	}
 
 	for _, node := range nodes {
-		projected, warnings, err := projectNode("owner", "generation", node)
-		if err != nil {
-			t.Fatalf("%s: %v", node.ID, err)
+		assertProjectedMeta(t, node)
+	}
+}
+
+// TestProjectNode_FindingMeta proves GAP-04 and D-05: a finding node and a
+// missing-artifact placeholder resource project every finding_*, artifact_*,
+// and prov_* Meta key as an equal meta_<key> property, with no secret or
+// unsupported warning. The finding carries the Finding kind label and the
+// synthetic placeholder the GortexUnresolved label.
+func TestProjectNode_FindingMeta(t *testing.T) {
+	hex32 := strings.Repeat("ab", 16)
+	hex64 := strings.Repeat("ab", 32)
+	// One node carries every 05-01 finding key, which no single real
+	// finding does, so a dropped or renamed key cannot hide.
+	finding := &graph.Node{
+		ID: "repo/cobol/ordpgm.cbl::@finding/external/" + hex32, Kind: graph.KindFinding, Name: "missing",
+		QualName: "@finding/external/" + hex32, FilePath: "repo/cobol/ordpgm.cbl", RepoPrefix: "repo", Language: "cobol",
+		Meta: map[string]any{
+			graph.MetaEvidenceClass:          graph.FindingClassExternal,
+			graph.MetaFindingKind:            "missing",
+			graph.MetaFindingReason:          "missing",
+			graph.MetaFindingSeverity:        "medium",
+			graph.MetaFindingSeverityRule:    graph.FindingSeverityRule,
+			graph.MetaFindingScope:           "localized",
+			graph.MetaFindingNodeKind:        "call_statement",
+			graph.MetaFindingExpectedFamily:  "statement",
+			graph.MetaFindingContainer:       "cobol/ordpgm.cbl::ORDPGM/@proc/P1/@call_statement",
+			graph.MetaFindingStatus:          graph.FindingStatusActive,
+			graph.MetaFindingEvidenceDigest:  hex32,
+			graph.MetaFindingEvidenceRule:    graph.FindingEvidenceRule,
+			graph.MetaFindingIDRule:          graph.FindingIDRule,
+			graph.MetaFindingProducerReasons: []string{"division-scale-recovery", "lost-capture"},
+			graph.MetaFindingArtifactType:    "program",
+			graph.MetaFindingTargetKey:       "NOPGM",
+			"prov_source_path":               "cobol/ordpgm.cbl",
+			"prov_source_id":                 hex64,
+			"prov_revision_content_id":       hex64,
+			"prov_vcs_commit":                strings.Repeat("c", 40),
+			"prov_parser_tool_id":            hex64,
+			"prov_parser_grammar_id":         hex64,
+			"prov_parser_module":             "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/forest-shim/cobol@v0.0.0-20260101000000-000000000000",
+			"prov_preprocessor_module":       "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor@v0.0.0-20260101000000-000000000000",
+			"prov_parse_config_id":           hex64,
+			"prov_transform_config_id":       hex64,
+			"prov_handoff_schema":            "cobol-handoff-v1",
+			"prov_extractor_version":         "gortex-cobol-grammar/6",
+			"prov_origin":                    "ast_resolved",
+			"prov_confidence":                1.0,
+			"prov_document_grade":            "red",
+			"prov_document_grade_reasons":    []string{"division-scale-recovery", "lost-capture"},
+			"prov_grade_policy":              "policy-v1",
+			"prov_start_row":                 9,
+			"prov_start_column":              11,
+			"prov_end_row":                   9,
+			"prov_end_column":                26,
+			"prov_start_byte":                402,
+			"prov_end_byte":                  417,
+			"prov_range_exact":               true,
+		},
+	}
+	placeholder := &graph.Node{
+		ID: "repo/cobol-missing::program/NOPGM", Kind: graph.KindResource, Name: "NOPGM",
+		FilePath: "repo/cobol-missing::program/NOPGM", RepoPrefix: "repo",
+		Meta: map[string]any{
+			"cobol_kind": "missing_artifact", "artifact_type": "program", "artifact_key": "NOPGM",
+			"artifact_status": "not_obtained", "synthetic": true,
+			"prov_evidence_class": graph.FindingClassExternal, "prov_range_exact": false,
+			"prov_range_absence": "not_obtained", "cobol_name_norm": "cobol-name-norm/1",
+		},
+	}
+
+	// sanitizeLabel capitalizes the kind, so Neo4j queries match :Finding.
+	if labels := assertProjectedMeta(t, finding).Labels; !slices.Contains(labels, "Finding") {
+		t.Fatalf("finding labels = %v, want the Finding kind label", labels)
+	}
+	if labels := assertProjectedMeta(t, placeholder).Labels; !slices.Contains(labels, "GortexUnresolved") {
+		t.Fatalf("placeholder labels = %v, want GortexUnresolved", labels)
+	}
+}
+
+// assertProjectedMeta projects node and requires zero secret and zero
+// unsupported warnings, every Meta key unchanged by key encoding, and every
+// Meta value equal to its meta_<key> property. It returns the projection for
+// label checks.
+func assertProjectedMeta(t *testing.T, node *graph.Node) projectedNode {
+	t.Helper()
+	projected, warnings, err := projectNode("owner", "generation", node)
+	if err != nil {
+		t.Fatalf("%s: %v", node.ID, err)
+	}
+	if warnings.Secret != 0 || warnings.Unsupported != 0 {
+		t.Fatalf("%s: warnings = %+v, want no secret and no unsupported", node.ID, warnings)
+	}
+	for key, want := range node.Meta {
+		if encoded := encodeMetadataKey(key); encoded != key {
+			t.Fatalf("%s: key %q encoded as %q, want it unchanged", node.ID, key, encoded)
 		}
-		if warnings.Secret != 0 || warnings.Unsupported != 0 {
-			t.Fatalf("%s: warnings = %+v, want no secret and no unsupported", node.ID, warnings)
+		got, ok := projected.Properties["meta_"+key]
+		if !ok {
+			t.Fatalf("%s: missing property meta_%s", node.ID, key)
 		}
-		// note: second occurrence of TestProjectNode_CobolProvenance's
-		// key-by-key comparison.
-		for key, want := range node.Meta {
-			if encoded := encodeMetadataKey(key); encoded != key {
-				t.Fatalf("%s: key %q encoded as %q, want it unchanged", node.ID, key, encoded)
+		switch typed := want.(type) {
+		case int:
+			want = int64(typed)
+		case []string:
+			list, isList := got.([]any)
+			if !isList || len(list) != len(typed) {
+				t.Fatalf("%s: meta_%s = %#v, want %v", node.ID, key, got, typed)
 			}
-			got, ok := projected.Properties["meta_"+key]
-			if !ok {
-				t.Fatalf("%s: missing property meta_%s", node.ID, key)
-			}
-			switch typed := want.(type) {
-			case int:
-				want = int64(typed)
-			case []string:
-				list, isList := got.([]any)
-				if !isList || len(list) != len(typed) {
-					t.Fatalf("%s: meta_%s = %#v, want %v", node.ID, key, got, typed)
+			for i := range typed {
+				if list[i] != typed[i] {
+					t.Fatalf("%s: meta_%s[%d] = %#v, want %q", node.ID, key, i, list[i], typed[i])
 				}
-				for i := range typed {
-					if list[i] != typed[i] {
-						t.Fatalf("%s: meta_%s[%d] = %#v, want %q", node.ID, key, i, list[i], typed[i])
-					}
-				}
-				continue
 			}
-			if got != want {
-				t.Fatalf("%s: meta_%s = %#v, want %#v", node.ID, key, got, want)
-			}
+			continue
+		}
+		if got != want {
+			t.Fatalf("%s: meta_%s = %#v, want %#v", node.ID, key, got, want)
 		}
 	}
+	return projected
 }
 
 func completeProjectionNode() *graph.Node {
