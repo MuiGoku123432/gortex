@@ -329,7 +329,7 @@ func TestCobolBreadth_StructureAndFlow(t *testing.T) {
 		meta, ok := payload.Node["meta"].(map[string]any)
 		require.True(t, ok, "%s has no meta", tc.id)
 		assert.Equal(t, tc.cobolKind, meta["cobol_kind"], tc.id)
-		assert.Equal(t, "gortex-cobol-grammar/5", meta["prov_extractor_version"], tc.id)
+		assert.Equal(t, "gortex-cobol-grammar/6", meta["prov_extractor_version"], tc.id)
 	}
 
 	chain := cobolBreadthNodeIDs(t, callCobolTracerTool(t, socket, repos.rootA, "get_call_chain",
@@ -447,7 +447,7 @@ func TestCobolBreadth_CopybookProcedure(t *testing.T) {
 		assert.Equal(t, tc.row, n.Meta["prov_start_row"], tc.id)
 		assert.Equal(t, true, n.Meta["prov_range_exact"], tc.id)
 		assert.Equal(t, "cobol-grade-policy-copybook-v1", n.Meta["prov_grade_policy"], tc.id)
-		assert.Equal(t, "gortex-cobol-grammar/5", n.Meta["prov_extractor_version"], tc.id)
+		assert.Equal(t, "gortex-cobol-grammar/6", n.Meta["prov_extractor_version"], tc.id)
 	}
 	stmt := repos.store.GetNode(validate + "/@call_statement")
 	require.NotNil(t, stmt, "missing the CALL statement node")

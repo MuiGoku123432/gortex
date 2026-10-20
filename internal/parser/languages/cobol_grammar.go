@@ -39,11 +39,11 @@ const (
 	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20261002100409-e64234cc493c"
 	// cobolGrammarExtractorVersion identifies this handoff-to-graph mapping.
 	// Bump it whenever the emitted nodes, edges, or prov_* keys change.
-	// /5 is the Phase 4 mapping: shared resources own their ID path and
-	// normalized Name with writer-independent Meta (D-18), plus the 04-02
-	// identity changes. Later Phase 4 extractor changes keep /5 until the
-	// phase gate, as Phase 2 kept /1.
-	cobolGrammarExtractorVersion = "gortex-cobol-grammar/5"
+	// /6 is the Phase 5 mapping: finding nodes for producer parse gaps and
+	// uncontained cascades, on programs and copybooks (D-05, D-10, D-13).
+	// Later Phase 5 extractor changes (05-10: WR-06, WR-07, IN-08) keep /6
+	// until the phase gate, as Phase 4 kept /5.
+	cobolGrammarExtractorVersion = "gortex-cobol-grammar/6"
 	// cobolForestModulePath is the module path the enhanced grammar is
 	// linked under; go.mod replaces it with the fork's forest-shim.
 	cobolForestModulePath = "github.com/alexaandru/go-sitter-forest/cobol"

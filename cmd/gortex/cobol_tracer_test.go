@@ -203,7 +203,7 @@ func assertCobolTracerProgram(t *testing.T, node map[string]any, prefix, commit 
 	assert.True(t, strings.HasPrefix(module, "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/forest-shim/cobol@v0.0.0-"),
 		"prov_parser_module = %q", module)
 	assert.Equal(t, cobolTracerApprovedPreprocessorModule, meta["prov_preprocessor_module"])
-	assert.Equal(t, "gortex-cobol-grammar/5", meta["prov_extractor_version"])
+	assert.Equal(t, "gortex-cobol-grammar/6", meta["prov_extractor_version"])
 	assert.Equal(t, "DETERMINISTIC", meta["prov_evidence_class"])
 	assert.Equal(t, "ast_resolved", meta["prov_origin"])
 	assert.InDelta(t, 1.0, meta["prov_confidence"], 0)
@@ -530,7 +530,7 @@ func TestCobolTracer_ParagraphFlow(t *testing.T) {
 	require.True(t, ok, "paragraph has no meta: %v", payload.Node)
 	assert.Equal(t, "paragraph", meta["cobol_kind"])
 	assert.InDelta(t, 1, meta["cobol_ordinal"], 0)
-	assert.Equal(t, "gortex-cobol-grammar/5", meta["prov_extractor_version"])
+	assert.Equal(t, "gortex-cobol-grammar/6", meta["prov_extractor_version"])
 	assert.Equal(t, true, meta["prov_range_exact"])
 
 	// Edge Meta is not part of the MCP JSON, so the persisted row is the proof.
@@ -547,7 +547,7 @@ func TestCobolTracer_ParagraphFlow(t *testing.T) {
 	assert.Equal(t, graph.OriginASTResolved, edge.Origin)
 	assert.Equal(t, "perform", edge.Meta["cobol_flow"])
 	assert.Equal(t, "perform_statement_call_proc", edge.Meta["prov_observation_kind"])
-	assert.Equal(t, "gortex-cobol-grammar/5", edge.Meta["prov_extractor_version"])
+	assert.Equal(t, "gortex-cobol-grammar/6", edge.Meta["prov_extractor_version"])
 	startRow, ok := edge.Meta["prov_start_row"].(int)
 	require.True(t, ok, "prov_start_row = %#v", edge.Meta["prov_start_row"])
 	assert.Equal(t, startRow+1, edge.Line)
