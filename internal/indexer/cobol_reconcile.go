@@ -59,7 +59,8 @@ func cobolMutationTouched(result *IndexResult, receipt *graph.MutationReceipt) b
 // skipped while incrementalResolveFilesHook is set, the test seam that
 // stands in for an interrupted resolve. It ends with the finding ledger on
 // the durable store over its own repository and every repository the
-// drained resolver reconciled; an unprefixed indexer trusts no ID prefix.
+// drained resolver reconciled (an unprefixed indexer trusts no ID prefix),
+// then syncs symbol search from the drained IDs (Pitfall 4).
 func (idx *Indexer) reconcileCobolAfterMutation(result *IndexResult, receipt *graph.MutationReceipt) {
 	if idx == nil || !cobolMutationTouched(result, receipt) {
 		return
@@ -76,7 +77,8 @@ func (idx *Indexer) reconcileCobolAfterMutation(result *IndexResult, receipt *gr
 		repos = map[string]struct{}{idx.repoPrefix: {}}
 	}
 	idx.resolver.ReconcileCobol(repos)
-	recordCobolFindingLedger(idx.graph, []string{idx.repoPrefix}, nil, idx.logger, idx.resolver)
+	added, evicted := recordCobolFindingLedger(idx.graph, []string{idx.repoPrefix}, nil, idx.logger, idx.resolver)
+	idx.syncCobolFindingFTS(added, evicted)
 }
 
 // reconcileCobolRepos runs the COBOL reconcile over repos (every edge when
@@ -85,7 +87,8 @@ func (idx *Indexer) reconcileCobolAfterMutation(result *IndexResult, receipt *gr
 // durable store. The ledger drains the master and the resolver of every
 // tracked repository in its base (repos, or every tracked repository when
 // repos is empty), which catches a cold, full-retrack, or fallback
-// ResolveAll whose reconcile this master only repeats.
+// ResolveAll whose reconcile this master only repeats. The drained IDs then
+// sync symbol search, each through its own repository's Indexer.
 func (mi *MultiIndexer) reconcileCobolRepos(repos map[string]struct{}) {
 	master := mi.newMasterResolver(false)
 	if master == nil {
@@ -103,5 +106,6 @@ func (mi *MultiIndexer) reconcileCobolRepos(repos map[string]struct{}) {
 		}
 	}
 	tracked := func(prefix string) bool { return mi.GetIndexer(prefix) != nil }
-	recordCobolFindingLedger(mi.graph, base, tracked, mi.logger, resolvers...)
+	added, evicted := recordCobolFindingLedger(mi.graph, base, tracked, mi.logger, resolvers...)
+	mi.syncCobolFindingFTSByRepo(added, evicted)
 }

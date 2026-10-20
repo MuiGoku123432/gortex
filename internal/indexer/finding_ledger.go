@@ -182,3 +182,91 @@ func recordCobolFindingLedger(
 	recordFindingLedger(store, slices.Sorted(maps.Keys(ledger)), logger)
 	return slices.Sorted(maps.Keys(addedSet)), slices.Sorted(maps.Keys(evictedSet))
 }
+
+// syncCobolFindingFTS brings this indexer's symbol search index in step with
+// the finding and placeholder IDs COBOL reconciles added and evicted.
+//
+// PURPOSE — symbol FTS is written by the indexer, never by AddBatch or the
+// evicters, so a node reconcileCobolFindings creates stays unsearchable and
+// one it removes stays searchable until something rewrites it (Pitfall 4).
+// Evicted IDs are deleted from FTS; added IDs whose node is in the store and
+// passes shouldIndexForSearch are upserted with ftsTokensFor tokens: the
+// writes the incremental stage path makes (deleteSymbolFTS,
+// upsertIncrementalFTS), invoking no new index.
+//
+// RATIONALE — the delete runs first and an added ID is upserted only while
+// its node exists, so an ID in both lists (created and removed, or the
+// reverse, between two drains) ends in the right state, including a
+// shadow-built node a master pass evicted. The upsert is idempotent, so
+// re-writing a node the cold path already indexed is harmless. The
+// in-process text backend (idx.search) is not written: on a store with a
+// symbol searcher its Add and Remove are no-ops, and the evicted node that
+// removeFromSearch's admission gate reads is already gone. Write errors are
+// logged like the incremental path's, with no Meta or source.
+//
+// KEYWORDS — cobol, finding, placeholder, search, symbol FTS, sync, settle
+// point, Pitfall 4.
+func (idx *Indexer) syncCobolFindingFTS(added, evicted []string) {
+	if len(evicted) > 0 {
+		idx.deleteSymbolFTS(evicted)
+	}
+	batcher, ok := idx.graph.(graph.SymbolFTSBatchUpserter)
+	if !ok || len(added) == 0 {
+		return
+	}
+	nodes := idx.graph.GetNodesByIDs(added)
+	var items []graph.SymbolFTSItem
+	for _, id := range added {
+		if n := nodes[id]; n != nil && idx.shouldIndexForSearch(n) {
+			items = append(items, graph.SymbolFTSItem{NodeID: n.ID, Tokens: ftsTokensFor(n, idx.projectName)})
+		}
+	}
+	if len(items) == 0 {
+		return
+	}
+	if err := batcher.BatchUpsertSymbolFTS(items); err != nil {
+		idx.logger.Debug("indexer: backend FTS batch upsert failed",
+			zap.Int("symbols", len(items)), zap.Error(err))
+	}
+}
+
+// syncCobolFindingFTSByRepo syncs search from drained added and evicted
+// finding and placeholder IDs, each through the Indexer of the repository
+// its ID names.
+//
+// PURPOSE — one reconcile writes nodes other repositories own: a change in
+// one repository closes or reopens findings and placeholders of every
+// repository whose resolve_from names it, and a master ResolveAll, including
+// the fallback masters, reconciles its whole scope. Routing each ID to its
+// own repository makes those nodes searchable or gone at the step that
+// drained them (Pitfall 4, D-03 across repositories).
+//
+// RATIONALE — the IDs are grouped by graph.RepoPrefixOfID and written only
+// through a tracked prefix's Indexer, whose projectName yields the tokens;
+// an empty or untracked prefix is skipped, because RepoPrefixOfID returns a
+// directory name for an unprefixed ID.
+//
+// KEYWORDS — cobol, finding, placeholder, search, symbol FTS, dependent
+// repository, resolve_from, master resolve, D-03, Pitfall 4.
+func (mi *MultiIndexer) syncCobolFindingFTSByRepo(added, evicted []string) {
+	addedBy, evictedBy := map[string][]string{}, map[string][]string{}
+	prefixes := map[string]struct{}{}
+	for _, id := range added {
+		p := graph.RepoPrefixOfID(id)
+		addedBy[p] = append(addedBy[p], id)
+		prefixes[p] = struct{}{}
+	}
+	for _, id := range evicted {
+		p := graph.RepoPrefixOfID(id)
+		evictedBy[p] = append(evictedBy[p], id)
+		prefixes[p] = struct{}{}
+	}
+	for _, p := range slices.Sorted(maps.Keys(prefixes)) {
+		if p == "" {
+			continue
+		}
+		if idx := mi.GetIndexer(p); idx != nil {
+			idx.syncCobolFindingFTS(addedBy[p], evictedBy[p])
+		}
+	}
+}

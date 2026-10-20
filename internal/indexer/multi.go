@@ -1024,6 +1024,12 @@ func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope
 	}
 	mt := time.Now()
 	stats, err := master.ResolveAllContext(ctx)
+	// A master's COBOL reconcile can add or evict findings and placeholders
+	// that no following settle point would sync (Pitfall 4): the incremental
+	// no-frontier fallback, resolveDeferredMutations' full fallback, and
+	// RunPreEnrichResolve all run this function.
+	_, added, evicted := master.CobolFindingChanges()
+	mi.syncCobolFindingFTSByRepo(added, evicted)
 	mi.logger.Info("DEFERRED-TIMING master.ResolveAll",
 		zap.Duration("elapsed", time.Since(mt)),
 		zap.Bool("scoped", scoped),
