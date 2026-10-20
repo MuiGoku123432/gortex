@@ -3236,6 +3236,33 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 		}
 	}
 
+	// Active finding counts by resolution class (D-08, GAP-03), over the
+	// repository set the file scan above collected. The class is read from
+	// prov_evidence_class, never parsed from the ID, so any other value is
+	// not counted.
+	var parseFindings, externalFindings int
+	scanned = 0
+	for n := range s.graph.NodesByKind(graph.KindFinding) {
+		if scanned%healthScanCancelStride == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		scanned++
+		if n == nil {
+			continue
+		}
+		if _, ok := repoPrefixes[n.RepoPrefix]; !ok {
+			continue
+		}
+		switch n.Meta[graph.MetaEvidenceClass] {
+		case graph.FindingClassParse:
+			parseFindings++
+		case graph.FindingClassExternal:
+			externalFindings++
+		}
+	}
+
 	// A graph holding files that no longer exist is not a healthy graph,
 	// whatever the parse ratio says. Worst-of rather than a blend: the two
 	// scores answer different questions ("did the files we found parse" vs
@@ -3507,6 +3534,12 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 			ownership["mixed"] = true
 		}
 		result["repo_ownership"] = ownership
+	}
+	// D-08 visibility. D-14 and P4 D-15: findings are reported, never
+	// enforced, so these counts feed neither healthScore nor recommendation.
+	result["findings"] = map[string]any{
+		graph.FindingClassParse:    parseFindings,
+		graph.FindingClassExternal: externalFindings,
 	}
 	// Path liveness. Reported whenever the audit had something to look at, not
 	// only when it found a defect: "checked 2581, 0 orphans" is the evidence
