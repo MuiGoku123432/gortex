@@ -1,0 +1,196 @@
+//go:build darwin || linux
+
+package languages
+
+import (
+	"maps"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
+
+	"github.com/zzet/gortex/internal/graph"
+)
+
+// cobolFindings maps every producer PARSE_UNRESOLVED gap of the walked
+// document onto one KindFinding node with a member_of edge to its container.
+//
+// PURPOSE — GAP-01: each gap the producer reports (error, missing,
+// unparsed-tail, lost-capture, unmapped-capture, and the document-scope
+// no-tree, budget-exceeded, invocation-failure) becomes a persisted,
+// retrievable finding (D-10). Every gap is one finding: per-token SQL tails
+// are never aggregated (D-18) and nothing is filtered or merged.
+//
+// RATIONALE — EXTERNAL_UNRESOLVED gaps are skipped: the analyzer runs with an
+// empty -INC catalog, so the producer reports every -INC member as not
+// obtained; -INC findings come only from the resolver (D-17). Gaps are
+// visited by generated span (start, end, list index), so the #k ordinal of
+// identical evidence in one container is the same on every rerun. Severity,
+// scope, and absence reasons are the producer's verbatim (D-12); the ID
+// never hashes a line, offset, gap ID, or version (D-01, D-02). Name is the
+// gap kind and Meta holds only the evidence digest and range, never source
+// text. Called before the document flags are written to docMeta, so they do
+// not leak into finding Meta.
+//
+// KEYWORDS — cobol, finding, PARSE_UNRESOLVED, handoff gaps, GAP-01, D-10,
+// D-17, D-18, member_of.
+func cobolFindings(w *cobolWalk) {
+	order := make([]int, 0, len(w.h.Gaps))
+	for i, g := range w.h.Gaps {
+		if g.ResolutionClass == handoff.ResolutionParseUnresolved {
+			order = append(order, i)
+		}
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		ga, gb := w.h.Gaps[order[a]].Generated, w.h.Gaps[order[b]].Generated
+		switch {
+		case ga == nil || gb == nil:
+			return ga == nil && gb != nil
+		case ga.Start != gb.Start:
+			return ga.Start < gb.Start
+		case ga.End != gb.End:
+			return ga.End < gb.End
+		}
+		return order[a] < order[b]
+	})
+	occurrences := make(map[string]int, len(order))
+	for _, i := range order {
+		g := w.h.Gaps[i]
+		container := cobolFindingContainer(w, g.Container)
+		family := g.NodeKind
+		if family == "" {
+			family = g.ExpectedFamily
+		}
+		digest := graph.FindingEvidenceDigest(cobolFindingEvidence(w, g))
+		symbol := graph.FindingSymbol(container, graph.FindingClassParse, string(g.Kind), family, digest)
+		// note: the resolver assigns external finding ordinals the same way.
+		occurrences[symbol]++
+		if k := occurrences[symbol]; k >= 2 {
+			symbol += "#" + strconv.Itoa(k)
+		}
+
+		meta := maps.Clone(w.docMeta)
+		meta[graph.MetaEvidenceClass] = graph.FindingClassParse
+		meta[graph.MetaFindingKind] = string(g.Kind)
+		meta[graph.MetaFindingReason] = g.Reason
+		meta[graph.MetaFindingSeverity] = string(g.Severity)
+		meta[graph.MetaFindingSeverityRule] = graph.FindingSeverityRule
+		meta[graph.MetaFindingScope] = string(g.Scope)
+		if g.NodeKind != "" {
+			meta[graph.MetaFindingNodeKind] = g.NodeKind
+		}
+		if g.ExpectedFamily != "" {
+			meta[graph.MetaFindingExpectedFamily] = g.ExpectedFamily
+		}
+		meta[graph.MetaFindingContainer] = container
+		meta[graph.MetaFindingStatus] = graph.FindingStatusActive
+		meta[graph.MetaFindingEvidenceDigest] = digest
+		meta[graph.MetaFindingEvidenceRule] = graph.FindingEvidenceRule
+		meta[graph.MetaFindingIDRule] = graph.FindingIDRule
+		node := &graph.Node{
+			ID: w.filePath + "::" + symbol, Kind: graph.KindFinding, Name: string(g.Kind),
+			QualName: symbol, FilePath: w.filePath, Language: "cobol", Meta: meta,
+		}
+		cobolStampRange(node, g.Original)
+		if g.AbsenceReason != "" {
+			meta["prov_range_exact"] = false
+			meta["prov_range_absence"] = g.AbsenceReason
+		}
+		w.result.Nodes = append(w.result.Nodes, node)
+		w.memberOf(node.ID, container, node.StartLine)
+	}
+}
+
+// cobolFindingContainer returns the repository-relative node ID that
+// contains observation c: the innermost statement, else the procedure
+// membership container (paragraph, section, or procedure division), else a
+// data or environment section, each found by walking Parent links; else the
+// owning program, else the walk root. A document-scope gap (c < 0) or one
+// nothing contains attaches to the single named program when exactly one
+// exists, else to the file node.
+func cobolFindingContainer(w *cobolWalk, c int) string {
+	if c >= 0 && c < len(w.h.Facts.Observations) {
+		levels := []func(i int) string{
+			func(i int) string {
+				if n := w.statement[i]; n != nil {
+					return n.ID
+				}
+				return ""
+			},
+			func(i int) string {
+				if s := w.container[i]; s != "" {
+					return w.id(s)
+				}
+				return ""
+			},
+			func(i int) string {
+				if n := w.sections[i]; n != nil {
+					return n.ID
+				}
+				return ""
+			},
+		}
+		for _, level := range levels {
+			for i := c; ; {
+				if id := level(i); id != "" {
+					return id
+				}
+				p, ok := w.parent(i)
+				if !ok {
+					break
+				}
+				i = p
+			}
+		}
+		if s := w.programSymbol(c); s != "" {
+			return w.id(s)
+		}
+		if w.root != "" {
+			return w.id(w.root)
+		}
+	}
+	if len(w.programs) == 1 {
+		for _, s := range w.programs {
+			return w.id(s)
+		}
+	}
+	return w.filePath
+}
+
+// cobolFindingEvidence returns the normalized evidence text of g
+// (gortex-finding-evidence/1): the imaged original bytes with the
+// fixed-format sequence and identification areas dropped, else the
+// generated bytes, whitespace-collapsed, else the gap kind and its absence
+// reason. A zero-width span yields the empty string; the ID still differs by
+// kind and node kind.
+func cobolFindingEvidence(w *cobolWalk, g handoff.Gap) string {
+	if o := g.Original; o != nil && !o.NoImage && !o.Synthetic &&
+		o.Start.Byte <= o.End.Byte && uint64(o.End.Byte) <= uint64(len(w.src)) {
+		return cobolFixedEvidenceText(w.src[o.Start.Byte:o.End.Byte], int(o.Start.Column))
+	}
+	if s := g.Generated; s != nil && s.Start <= s.End && uint64(s.End) <= uint64(len(w.h.Generated)) {
+		return strings.Join(strings.Fields(string(w.h.Generated[s.Start:s.End])), " ")
+	}
+	return string(g.Kind) + "\x00" + g.AbsenceReason
+}
+
+// cobolFixedEvidenceText keeps only the bytes of b at 0-based columns 6
+// through 71 of each physical line, b starting at column, then collapses
+// whitespace runs to one space and trims. Renumbering columns 1-6 or
+// stamping columns 73-80 therefore never changes a finding ID. Case is kept.
+func cobolFixedEvidenceText(b []byte, column int) string {
+	kept := make([]byte, 0, len(b))
+	for _, c := range b {
+		if c == '\n' {
+			kept = append(kept, ' ')
+			column = 0
+			continue
+		}
+		if column >= 6 && column < 72 {
+			kept = append(kept, c)
+		}
+		column++
+	}
+	return strings.Join(strings.Fields(string(kept)), " ")
+}

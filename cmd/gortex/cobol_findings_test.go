@@ -1,0 +1,243 @@
+//go:build darwin || linux
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/zzet/gortex/internal/config"
+	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
+	"github.com/zzet/gortex/internal/indexer"
+	"github.com/zzet/gortex/internal/parser"
+	"github.com/zzet/gortex/internal/parser/languages"
+	"github.com/zzet/gortex/internal/testenv"
+)
+
+// cobolFindingsFixture is an invented 7-column fixed-format program. Its
+// EXEC SQL statement leaves one producer unparsed-tail gap on the token
+// ZQXCOL; the CALL and COPY name artifacts that do not exist, for the
+// external findings later plans add to this fixture. It must never be
+// replaced with estate-derived source: this repository is public.
+const cobolFindingsFixture = "       IDENTIFICATION DIVISION.\n" +
+	"       PROGRAM-ID. FINDPGM.\n" +
+	"       PROCEDURE DIVISION.\n" +
+	"       MAIN-PARA.\n" +
+	"           EXEC SQL SELECT ZQXCOL FROM APP.ZQXTAB END-EXEC.\n" +
+	"           CALL 'NOPGM'.\n" +
+	"           COPY NOCPY.\n" +
+	"           STOP RUN.\n"
+
+// cobolFindingsTailToken is the source text of the tail gap. No finding
+// Name, ID, or Meta value may carry it (GAP-01 privacy).
+const cobolFindingsTailToken = "ZQXCOL"
+
+// cobolFindingsRepo is the tracked, indexed findings fixture repository.
+type cobolFindingsRepo struct {
+	dir, root string
+	store     *store_sqlite.Store
+	idx       *indexer.Indexer
+	mi        *indexer.MultiIndexer
+	cm        *config.ConfigManager
+	prefix    string
+	fileID    string
+	tailID    string
+}
+
+// indexCobolFindingsRepo commits the findings fixture to a fresh git
+// repository and tracks it through the real MultiIndexer into a SQLite
+// store, shadow off (AddBatch, not BulkLoad) and AI providers off, then
+// locates the persisted unparsed-tail finding of cobol/findpgm.cbl. It
+// asserts only on that finding, never on a total finding count.
+func indexCobolFindingsRepo(t *testing.T) cobolFindingsRepo {
+	t.Helper()
+	t.Setenv("GORTEX_SHADOW_MAX_FILES", "0")
+	t.Setenv("GORTEX_LLM_PROVIDER", "")
+
+	dir := testenv.ShortTempDir(t)
+	root := filepath.Join(dir, "repo")
+	gitInitRepo(t, root)
+	rel := "cobol/findpgm.cbl"
+	require.NoError(t, os.MkdirAll(filepath.Join(root, filepath.Dir(rel)), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte(cobolFindingsFixture), 0o644))
+	for _, args := range [][]string{{"add", rel}, {"commit", "-m", "add cobol findings fixture"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		require.NoErrorf(t, err, "git %v: %s", args, out)
+	}
+
+	store, err := store_sqlite.Open(filepath.Join(dir, "store.sqlite"))
+	require.NoError(t, err)
+	recorder := &cobolAddBatchRecorder{Store: store, ids: map[string]bool{}}
+	reg := parser.NewRegistry()
+	languages.RegisterAll(reg)
+	idx := indexer.New(recorder, reg, config.Default().Index, zap.NewNop())
+	cm, err := config.NewConfigManager(filepath.Join(dir, "config.yaml"))
+	require.NoError(t, err)
+	mi := indexer.NewMultiIndexer(recorder, reg, idx.Search(), cm, zap.NewNop())
+	t.Cleanup(func() {
+		_ = mi.Close(context.Background())
+		_ = store.Close()
+	})
+	res, err := mi.TrackRepoCtx(context.Background(), config.RepoEntry{Path: root})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.RepoPrefix)
+
+	repo := cobolFindingsRepo{
+		dir: dir, root: root, store: store, idx: idx, mi: mi, cm: cm,
+		prefix: res.RepoPrefix, fileID: res.RepoPrefix + "/" + rel,
+	}
+	var tails []string
+	for n := range store.NodesByKind(graph.KindFinding) {
+		if n.FilePath == repo.fileID && n.Meta[graph.MetaFindingKind] == "unparsed-tail" {
+			tails = append(tails, n.ID)
+		}
+	}
+	require.Len(t, tails, 1, "want one unparsed-tail finding in %s", repo.fileID)
+	repo.tailID = tails[0]
+	// Asserted before any retrieval: get_symbol's ensureFresh may reindex.
+	require.True(t, recorder.saw(repo.tailID), "AddBatch never received %s", repo.tailID)
+	return repo
+}
+
+// cobolFindingSymbol is the get_symbol detail=full payload.
+type cobolFindingSymbol struct {
+	Node     map[string]any   `json:"node"`
+	OutEdges []map[string]any `json:"out_edges"`
+}
+
+// assertCobolTailFinding checks the decoded get_symbol payload of the tail
+// finding against the GAP-04 contract. Numbers compare as float64 because
+// JSON decoding yields float64.
+func assertCobolTailFinding(t *testing.T, repo cobolFindingsRepo, payload cobolFindingSymbol) {
+	t.Helper()
+	node := payload.Node
+	require.Equal(t, repo.tailID, node["id"])
+	idPattern := regexp.MustCompile(`^` + regexp.QuoteMeta(repo.fileID) + `::@finding/parse/[0-9a-f]{32}$`)
+	assert.Regexp(t, idPattern, node["id"])
+	assert.Equal(t, string(graph.KindFinding), node["kind"])
+	assert.Equal(t, "unparsed-tail", node["name"])
+	assert.Equal(t, repo.fileID, node["file_path"])
+
+	meta, ok := node["meta"].(map[string]any)
+	require.True(t, ok, "node has no meta: %v", node)
+	assert.Equal(t, graph.FindingClassParse, meta[graph.MetaEvidenceClass])
+	assert.Equal(t, "unparsed-tail", meta[graph.MetaFindingKind])
+	assert.Equal(t, "low", meta[graph.MetaFindingSeverity])
+	assert.Equal(t, graph.FindingSeverityRule, meta[graph.MetaFindingSeverityRule])
+	assert.Equal(t, graph.FindingStatusActive, meta[graph.MetaFindingStatus])
+	assert.Equal(t, graph.FindingIDRule, meta[graph.MetaFindingIDRule])
+	assert.Equal(t, graph.FindingEvidenceRule, meta[graph.MetaFindingEvidenceRule])
+	assert.Equal(t, graph.FindingEvidenceDigest(cobolFindingsTailToken), meta[graph.MetaFindingEvidenceDigest])
+	assert.NotEmpty(t, meta[graph.MetaFindingContainer])
+	for _, key := range []string{"prov_parser_tool_id", "prov_parser_grammar_id", "prov_extractor_version"} {
+		assert.NotEmpty(t, meta[key], "meta lacks %s", key)
+	}
+	assert.Equal(t, true, meta["prov_range_exact"])
+	start, startOK := meta["prov_start_byte"].(float64)
+	end, endOK := meta["prov_end_byte"].(float64)
+	require.True(t, startOK && endOK, "meta lacks an exact byte range: %v", meta)
+	assert.Equal(t, cobolFindingsTailToken, cobolFindingsFixture[int(start):int(end)])
+	for _, key := range []string{"prov_start_row", "prov_start_column", "prov_end_row", "prov_end_column"} {
+		assert.Contains(t, meta, key)
+	}
+
+	var container string
+	for _, e := range payload.OutEdges {
+		if e["kind"] == string(graph.EdgeMemberOf) {
+			container, _ = e["to"].(string)
+		}
+	}
+	require.NotEmpty(t, container, "out_edges lacks member_of: %v", payload.OutEdges)
+	assert.NotNil(t, repo.store.GetNode(container), "member_of target %s is not a node", container)
+}
+
+// TestCobolFindings_MCPGetSymbol retrieves the persisted tail finding by its
+// exact prefixed ID through the real daemon relay and MCP get_symbol.
+func TestCobolFindings_MCPGetSymbol(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	socket, _ := serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	// detail=full: the brief detail omits Meta and edges.
+	text := callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": repo.tailID, "detail": "full", "format": "json"})
+	var payload cobolFindingSymbol
+	require.NoError(t, json.Unmarshal([]byte(text), &payload), "get_symbol output: %s", text)
+	assertCobolTailFinding(t, repo, payload)
+}
+
+// TestCobolFindings_CLIGetSymbol retrieves the same finding through the
+// matching CLI verb, `gortex call get_symbol`, over the real daemon relay.
+func TestCobolFindings_CLIGetSymbol(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	cmd, buf := newCallTestCmd(t)
+	callIndex = repo.root
+	callArgs = []string{"id=" + repo.tailID, "detail=full"}
+	require.NoError(t, runCall(cmd, []string{"get_symbol"}))
+
+	var payload cobolFindingSymbol
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &payload), "CLI output: %s", buf.String())
+	assertCobolTailFinding(t, repo, payload)
+}
+
+// TestCobolFindings_SearchByNameAndKind finds the tail finding through MCP
+// search_symbols filtered to kind finding by its name term, and proves the
+// tail's source text is in neither its Name nor any Meta value.
+func TestCobolFindings_SearchByNameAndKind(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	socket, _ := serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	text := callCobolTracerTool(t, socket, repo.root, "search_symbols",
+		map[string]any{"query": "kind:finding unparsed", "format": "json"})
+	var found struct {
+		Results []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &found), "search_symbols output: %s", text)
+	var ids []string
+	for _, r := range found.Results {
+		ids = append(ids, r.ID)
+		assert.Equal(t, string(graph.KindFinding), r.Kind, "kind:finding returned %s", r.ID)
+	}
+	assert.Contains(t, ids, repo.tailID)
+
+	node := repo.store.GetNode(repo.tailID)
+	require.NotNil(t, node)
+	assert.NotContains(t, node.Name, cobolFindingsTailToken)
+	assert.NotContains(t, node.QualName, cobolFindingsTailToken)
+	for key, value := range node.Meta {
+		switch v := value.(type) {
+		case string:
+			assert.NotContains(t, v, cobolFindingsTailToken, "meta %s carries source text", key)
+		case []string:
+			for _, s := range v {
+				assert.NotContains(t, s, cobolFindingsTailToken, "meta %s carries source text", key)
+			}
+		case []any:
+			for _, s := range v {
+				str, _ := s.(string)
+				assert.NotContains(t, str, cobolFindingsTailToken, "meta %s carries source text", key)
+			}
+		}
+	}
+	assert.False(t, strings.Contains(repo.tailID, cobolFindingsTailToken))
+}

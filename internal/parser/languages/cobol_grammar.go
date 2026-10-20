@@ -286,8 +286,9 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	cobolReferences(w, data)
 	cobolMainframe(w, data)
 	cobolSQL(w, data)
+	cobolFindings(w)
 	// Set after the loop so these document-level flags stay on the file
-	// node and are not cloned into program Meta.
+	// node and are not cloned into program or finding Meta.
 	if containmentUnresolved {
 		docMeta["prov_containment_unresolved"] = true
 	}
