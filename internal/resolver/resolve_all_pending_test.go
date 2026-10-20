@@ -129,9 +129,19 @@ func TestPendingNeedsProvidesIndexAcceptsSparsePreparationEdge(t *testing.T) {
 	}
 }
 
+// languageProbedStore adds the disk backend's HasLanguage probe to the
+// counting store. The zero-work pass gates its COBOL reconcile on that
+// probe, as the SQLite store answers it; a store without the probe is
+// assumed to hold every language.
+type languageProbedStore struct{ *lazyResolveCountingStore }
+
+func (s languageProbedStore) HasLanguage(lang string) bool {
+	return len(s.Store.GetNodesByLanguage(lang)) > 0
+}
+
 func TestResolveAllZeroWorkSkipsGlobalIndexesAndBackendBulk(t *testing.T) {
 	store := newLazyResolveCountingStore(graph.New())
-	stats := New(store).ResolveAll()
+	stats := New(languageProbedStore{store}).ResolveAll()
 	if stats.PendingBefore != 0 || stats.PendingAfter != 0 {
 		t.Fatalf("pending stats = %d/%d, want 0/0", stats.PendingBefore, stats.PendingAfter)
 	}
