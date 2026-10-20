@@ -183,7 +183,8 @@ func TestCobolLifecycle_Delete(t *testing.T) {
 		}
 	}
 	require.NotNil(t, copyEdge, "COPY CUSTREC edge of main.cbl")
-	assert.Equal(t, placeholder, copyEdge[2])
+	assert.Equal(t, "lifea/cobol-missing::copybook/CUSTREC", copyEdge[2])
+	requireCobolMissingNode(t, got, copyEdge[2])
 	var meta map[string]any
 	require.NoError(t, json.Unmarshal([]byte(copyEdge[6]), &meta))
 	assert.Equal(t, "missing", meta["cobol_unresolved_reason"])
