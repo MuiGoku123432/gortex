@@ -270,11 +270,16 @@ func TestCobolGrammar_SQL(t *testing.T) {
 	})
 
 	t.Run("cursor_unknown", func(t *testing.T) {
-		for k, cursor := range []string{"C9", "C2"} {
+		// C9 is never declared; C2 is declared twice, so it is ambiguous
+		// (WR-07).
+		for k, tc := range []struct{ cursor, reason string }{
+			{"C9", "cursor_not_declared"},
+			{"C2", "ambiguous"},
+		} {
 			assert.Empty(t, cobolStatementEdges(cursors, cstmt("P3", k+1)))
 			n := cobolNodeByID(t, cursors, cpath+"::"+cstmt("P3", k+1))
-			assert.Equal(t, "cursor_not_declared", n.Meta["cobol_unresolved_reason"])
-			assert.Equal(t, cursor, n.Meta["sql_cursor"])
+			assert.Equal(t, tc.reason, n.Meta["cobol_unresolved_reason"])
+			assert.Equal(t, tc.cursor, n.Meta["sql_cursor"])
 		}
 		// Both DECLAREs of C2 keep their own reads edges.
 		assert.Equal(t, []string{"reads db2::_unqualified/T8"}, cobolEdgeTargets(cobolStatementEdges(cursors, cstmt("P0", 3))))
