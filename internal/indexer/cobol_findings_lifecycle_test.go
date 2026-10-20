@@ -3,8 +3,10 @@
 package indexer
 
 import (
+	"context"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -721,4 +723,155 @@ func TestCobolFindings_CrossRepoDependentLedgerAndSearch(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestCobolFindings_ExternalClosesOnRetrieve adds the missing copybook: only
+// the COPY NOCPY external finding closes and its placeholder goes; the
+// parse findings and the unrelated missing CALL's finding get no row (D-03,
+// D-11, GAP-07).
+func TestCobolFindings_ExternalClosesOnRetrieve(t *testing.T) {
+	const placeholder = "finda/cobol-missing::copybook/NOCPY"
+	env := newCobolLedgerEnv(t)
+	require.NotNil(t, env.store.GetNode(placeholder))
+	id := cobolExternalFindingFor(t, env, "finda", "NOCPY")
+	before := len(cobolHistory(t, env, "finda"))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(env.roots["finda"], "copy"), 0o755))
+	env.write(t, "finda", "copy/nocpy.cpy", "       01 NOCPY-REC.\n          05 NOCPY-ID PIC X(8).\n")
+	env.reindex(t, "finda")
+
+	rows := cobolHistory(t, env, "finda")[before:]
+	require.Len(t, rows, 1, "only the COPY NOCPY finding's row: %+v", rows)
+	assert.Equal(t, id, rows[0].FindingID)
+	assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+	assert.Nil(t, env.store.GetNode(id))
+	assert.Nil(t, env.store.GetNode(placeholder), "the retrieved copybook's placeholder is gone")
+	assert.NotNil(t, env.store.GetNode("finda/cobol-missing::program/NOPGM"), "the missing CALL keeps its placeholder")
+}
+
+// TestCobolFindings_PlaceholderSweptOnLastReference removes the only CALL
+// 'NOPGM': its external finding closes and its placeholder is swept (D-11,
+// GAP-05).
+func TestCobolFindings_PlaceholderSweptOnLastReference(t *testing.T) {
+	const placeholder = "finda/cobol-missing::program/NOPGM"
+	env := newCobolLedgerEnv(t)
+	require.NotNil(t, env.store.GetNode(placeholder))
+	id := cobolExternalFindingFor(t, env, "finda", "NOPGM")
+	before := len(cobolHistory(t, env, "finda"))
+
+	noCall := strings.Replace(cobolLedgerFixture, "           CALL 'NOPGM'.\n", "", 1)
+	require.NotEqual(t, cobolLedgerFixture, noCall)
+	env.write(t, "finda", "cobol/main.cbl", noCall)
+	env.reindex(t, "finda")
+
+	rows := cobolHistory(t, env, "finda")[before:]
+	require.Len(t, rows, 1, "only the CALL NOPGM finding's row: %+v", rows)
+	assert.Equal(t, id, rows[0].FindingID)
+	assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+	assert.Nil(t, env.store.GetNode(id))
+	assert.Nil(t, env.store.GetNode(placeholder), "the last reference's placeholder is swept")
+}
+
+// TestCobolFindings_HistorySurvivesRestart reopens the same SQLite file and
+// warm-reconciles finda: every row survives and none is appended (D-07).
+func TestCobolFindings_HistorySurvivesRestart(t *testing.T) {
+	env := newCobolLedgerEnv(t)
+	rows := cobolHistory(t, env, "finda")
+	require.NotEmpty(t, rows)
+
+	env.restart(t)
+	env.warmReconcile(t, "finda")
+	assert.Equal(t, rows, cobolHistory(t, env, "finda"))
+}
+
+// TestCobolFindings_HistoryPurgedOnUntrack untracks finda: its history goes
+// with it (D-07, PurgeRepo).
+func TestCobolFindings_HistoryPurgedOnUntrack(t *testing.T) {
+	env := newCobolLedgerEnv(t)
+	require.NotEmpty(t, cobolHistory(t, env, "finda"))
+
+	_, _, err := env.mi.UntrackRepoChecked(context.Background(), "finda")
+	require.NoError(t, err)
+	assert.Empty(t, cobolHistory(t, env, "finda"))
+}
+
+// BenchmarkRecordFindingLedger_LargeRepo measures recordFindingLedger over
+// one repository of 100000 findings in 1000 files on SQLite: FirstPass
+// appends one open row per finding over empty history, NoChangePass appends
+// none (the measurement half of 05-09 T-05-45). Seeding and opening a store
+// run outside the timer.
+func BenchmarkRecordFindingLedger_LargeRepo(b *testing.B) {
+	const (
+		repo     = "bigrepo"
+		findings = 100000
+		files    = 1000
+	)
+	seeded := func(b *testing.B) *store_sqlite.Store {
+		b.Helper()
+		store, err := store_sqlite.Open(filepath.Join(b.TempDir(), "ledger.sqlite"))
+		if err != nil {
+			b.Fatalf("open: %v", err)
+		}
+		b.Cleanup(func() { _ = store.Close() })
+		nodes := make([]*graph.Node, 0, findings)
+		for i := range findings {
+			file := fmt.Sprintf("src/f%04d.cbl", i%files)
+			nodes = append(nodes, &graph.Node{
+				ID:   fmt.Sprintf("%s/%s::@finding/parse/%032x", repo, file, i),
+				Kind: graph.KindFinding, Name: "error", FilePath: repo + "/" + file, Language: "cobol", RepoPrefix: repo,
+				Meta: map[string]any{
+					graph.MetaEvidenceClass:         graph.FindingClassParse,
+					graph.MetaFindingKind:           "error",
+					graph.MetaFindingContainer:      file + "::PGM",
+					graph.MetaFindingEvidenceDigest: fmt.Sprintf("%016x", i),
+					"prov_start_byte":               i / files,
+				},
+			})
+		}
+		store.AddBatch(nodes, nil)
+		return store
+	}
+	rowCount := func(b *testing.B, store *store_sqlite.Store) int {
+		b.Helper()
+		rows, err := store.FindingHistory(repo)
+		if err != nil {
+			b.Fatalf("history: %v", err)
+		}
+		return len(rows)
+	}
+
+	b.Run("FirstPass", func(b *testing.B) {
+		b.StopTimer()
+		for range b.N {
+			store := seeded(b)
+			b.StartTimer()
+			recordFindingLedger(store, []string{repo}, zap.NewNop())
+			b.StopTimer()
+			if n := rowCount(b, store); n != findings {
+				b.Fatalf("first pass appended %d rows, want %d", n, findings)
+			}
+		}
+		b.ReportMetric(findings, "rows/op")
+	})
+
+	b.Run("NoChangePass", func(b *testing.B) {
+		b.StopTimer()
+		store := seeded(b)
+		recordFindingLedger(store, []string{repo}, zap.NewNop())
+		want := rowCount(b, store)
+		if want != findings {
+			b.Fatalf("setup pass appended %d rows, want %d", want, findings)
+		}
+		for range b.N {
+			b.StartTimer()
+			recordFindingLedger(store, []string{repo}, zap.NewNop())
+			b.StopTimer()
+			if n := rowCount(b, store); n != want {
+				b.Fatalf("no-change pass appended %d rows, want 0", n-want)
+			}
+		}
+		b.ReportMetric(0, "rows/op")
+	})
 }
