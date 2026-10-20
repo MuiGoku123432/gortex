@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-10-20T16:26:17.474Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-10-20T16:44:07.948Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 55
+  completed_plans: 56
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -116,6 +116,7 @@ Progress: [█████████░] 86%
 | Phase 05 P01 | 26 min | 2 tasks | 10 files |
 | Phase 05 P02 | 10 min | 2 tasks | 7 files |
 | Phase 05 P03 | 14 min | 2 tasks | 8 files |
+| Phase 05 P04 | 16 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -239,6 +240,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-03: uncontained-cascade is one high document-scope PARSE_UNRESOLVED finding per document whose producer reasons hold division-scale-recovery, retained-structure-collapse, missing-required-anchor, or lost-capture (grade constants); built through the shared cobolAddFinding path as a handoff.Gap with constant evidence, so producer reasons never enter the ID
 - [Phase 05]: 05-03: copybooks emit parse findings via cobolFindings(w) as the last statement of cobolCopybook, after the WR-04 copybook_content_unmapped check; an empty source grades red [missing-required-anchor] and gets a cascade finding on the file node (no special case)
 - [Phase 05]: 05-03: gortex-cobol-grammar/6 is the single Phase 5 COBOL mapping bump; 05-10 keeps /6 until the phase gate
+- [Phase 05]: 05-04: index_health findings = {PARSE_UNRESOLVED, EXTERNAL_UNRESOLVED} counted from prov_evidence_class over the file scan's repoPrefixes, added after result is built; never feeds health_score or recommendation (D-14)
+- [Phase 05]: 05-04: the Neo4j kind label for findings is Finding (sanitizeLabel capitalizes); finding and placeholder Meta need no projection change; assertProjectedMeta is the shared key-by-key projection check
 
 ### Pending Todos
 
@@ -267,6 +270,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T16:26:10.414Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-10-20T16:44:07.937Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
