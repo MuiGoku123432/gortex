@@ -85,9 +85,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Explicit Unresolved Evidence
 
-- [ ] **GAP-01**: A named unparsed tail, localized Tree-sitter `ERROR`, or localized `MISSING` node with surviving context MUST produce a persisted `PARSE_UNRESOLVED` finding.
+- [x] **GAP-01**: A named unparsed tail, localized Tree-sitter `ERROR`, or localized `MISSING` node with surviving context MUST produce a persisted `PARSE_UNRESOLVED` finding.
 - [ ] **GAP-02**: A deterministic reference whose target artifact was not retrieved MUST produce an `EXTERNAL_UNRESOLVED` finding.
-- [ ] **GAP-03**: `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` MUST remain distinct in storage and query results.
+- [x] **GAP-03**: `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` MUST remain distinct in storage and query results.
 - [ ] **GAP-04**: Each finding MUST retain a stable ID, source scope, exact range, containing symbol, resolution class, normalized reason, severity, parser version, and lifecycle status.
 - [ ] **GAP-05**: An external unresolved finding MUST preserve a placeholder for the observed target without fabricating target source, body, or attributes.
 - [ ] **GAP-06**: Reprocessing unchanged evidence MUST reuse the active finding identity rather than create a duplicate.
@@ -257,9 +257,9 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | ID-07 | Phase 4 | Gaps Found |
 | ID-08 | Phase 4 | Gaps Found |
 | ID-09 | Phase 4 | Gaps Found |
-| GAP-01 | Phase 5 | Pending |
+| GAP-01 | Phase 5 | Complete |
 | GAP-02 | Phase 5 | Pending |
-| GAP-03 | Phase 5 | Pending |
+| GAP-03 | Phase 5 | Complete |
 | GAP-04 | Phase 5 | Pending |
 | GAP-05 | Phase 5 | Pending |
 | GAP-06 | Phase 5 | Pending |

@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-10-20T19:02:58.221Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-10-20T19:21:42.098Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 61
+  completed_plans: 62
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 10 of 12
+Plan: 11 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [██████████] 95%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -122,6 +122,7 @@ Progress: [██████████] 95%
 | Phase 05 P07 | 8 min | 2 tasks | 1 files |
 | Phase 05 P08 | 20min | 2 tasks | 4 files |
 | Phase 05 P09 | 28 min | 3 tasks | 7 files |
+| Phase 05 P10 | 15 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -259,6 +260,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-09: every COBOL settle point drains resolver change records before the finding ledger and ledgers own, reconciled, and tracked-ID-prefix repositories (D-03 across repositories)
 - [Phase 05]: 05-09: a cold TrackRepoCtx ends with reconcileCobolRepos({repo}) on the durable store, or joins batchCobolRepos under mi.mu while a parallel batch defers resolution
 - [Phase 05]: 05-09: undesired external findings count as evicted only when the store reports the evicter capability
+- [Phase 05]: 05-10: a copybook whose analysis fails returns an identity-only file node (prov_analysis_absence=copybook_analysis_failed) plus one high analysis-failed PARSE_UNRESOLVED document finding with reason analysis-error; program analysis errors still fail (D-20)
+- [Phase 05]: 05-10: a cursor declared two or more times is ambiguous; cursor_not_in_copybook stays only for zero declarations in a copybook
+- [Phase 05]: 05-10: the extractor stamps cobol_nested_unresolved=true on nested programs under unresolved END PROGRAM containment; a CALL left with no candidate only because such programs were dropped is containment_unresolved, keeps its unresolved:: target, and gets no placeholder or finding
 
 ### Pending Todos
 
@@ -287,6 +291,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T19:02:58.210Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-10-20T19:21:42.089Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None
