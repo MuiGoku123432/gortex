@@ -262,12 +262,12 @@ Plans:
   4. Unchanged evidence reuses finding identities; corrected source/parser evidence or retrieved artifacts close or supersede only the applicable finding class.
   5. Destructive parser-recovery cascades remain deterministic regression failures regardless of any later AI output.
 
-**Plans**: 12 plans
+**Plans**: 1/12 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md -- Tracer: finding kind, D-01 identity, program parse findings through SQLite to MCP/CLI get_symbol and search
+- [x] 05-01-PLAN.md -- Tracer: finding kind, D-01 identity, program parse findings through SQLite to MCP/CLI get_symbol and search
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -390,7 +390,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
 | 3. Deterministic COBOL and Mainframe Breadth | 17/17 | In Progress|  |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 22/22 | In Progress|  |
-| 5. Explicit Unresolved Evidence | 0/TBD | Deferred: Phase 4 | - |
+| 5. Explicit Unresolved Evidence | 1/12 | In Progress|  |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |
 | 7. AI Contract, Policy, and Evaluation Foundation | 0/TBD | Deferred: Phase 6 | - |
 | 8. Evidence-Linked Claims and Human Review | 0/TBD | Deferred: Phase 7 | - |

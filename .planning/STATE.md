@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
-current_phase: 04
-current_phase_name: Stable Incremental and Cross-Repository Lifecycle
+current_phase: 05
+current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-10-19T21:13:21.574Z"
-last_activity: 2026-10-13
-last_activity_desc: Phase 04 execution started
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-10-20T15:59:05.854Z"
+last_activity: 2026-10-20
+last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 52
+  completed_plans: 53
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -25,16 +25,16 @@ state_head: b23a688f39d205a044579929357e2d8b206c71d9
 See: .planning/PROJECT.md (updated 2026-09-21)
 
 **Core value:** A trustworthy graph representation of a mainframe estate that modernization cutover decisions can be made against -- deterministic and reproducible first, enriched and simulated later.
-**Current focus:** Phase 04 — Stable Incremental and Cross-Repository Lifecycle
+**Current focus:** Phase 05 — explicit-unresolved-evidence
 
 ## Current Position
 
-Phase: 04 (Stable Incremental and Cross-Repository Lifecycle) — EXECUTING
-Plan: 5 of 22
+Phase: 05 (explicit-unresolved-evidence) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-10-13 — Phase 04 execution started
+Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [██░░░░░░░░] 20%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -113,6 +113,7 @@ Progress: [██░░░░░░░░] 20%
 | Phase 04 P20 | 35min | 2 tasks | 5 files |
 | Phase 04 P21 | 38min | 3 tasks | 5 files |
 | Phase 04 P22 | 15min | 3 tasks | 6 files |
+| Phase 05 P01 | 26 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -229,6 +230,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-21: ReconcileRepoCtx (warm-restart) intentionally does not reconcile enclosing repos; MCP outer_indexed_first fixture uses it to keep exercising the physical-owner gate
 - [Phase 04]: 04-22: filesystem walks under a gated root (move_symbol, inline_symbol, generate_skill) gate each entry by physical owner via requirePathSourceScope; out-of-scope entries are skipped, not refused (refusal policy stays with WR-04/IN-06)
 - [Phase 04]: 04-22: find_declaration regex branch filters by scope before capping (GrepRegexpForRepos per-repo cap, WR-05)
+- [Phase 05]: 05-01: Finding IDs are <path>::@finding/<parse|external>/<32 hex>[#k] from graph.FindingSymbol (length-framed BLAKE3 over rule, repo-relative container, class, kind, family, evidence digest); no line, offset, gap ID, or version is hashed
+- [Phase 05]: 05-01: cobolFindings container ladder walks ancestors separately for statement, then membership container, then section, so SQL tails attach to their exec_sql statement, not the paragraph
+- [Phase 05]: 05-01: Tracer gate under human_verify_mode=end-of-phase re-ran the automated verify and continued; human review of the slice deferred to end-of-phase UAT
 
 ### Pending Todos
 
@@ -257,6 +261,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-16T21:14:48.569Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-explicit-unresolved-evidence/05-CONTEXT.md
+Last session: 2026-10-20T15:59:05.839Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
