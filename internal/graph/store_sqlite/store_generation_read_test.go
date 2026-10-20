@@ -1758,6 +1758,7 @@ func generationCapabilityChecklist() []capabilityCase {
 		{iface: (*graph.FileSubGraphCountReader)(nil), probe: "GetFileSubGraphCounts"},
 		{iface: (*graph.FileSubGraphReader)(nil), probe: "GetFileSubGraph"},
 		{iface: (*graph.FileSymbolNamesByPaths)(nil), probe: "FileSymbolNamesByPaths"},
+		{iface: (*graph.FindingNodeBatchEvicter)(nil), skip: skipWrite, writeFence: writerFamilyFence("finding_node_evict")},
 		{iface: (*graph.FnValuePlaceholderScanner)(nil), probe: "FnValuePlaceholderEdges"},
 		{iface: (*graph.FrameworkCensusEdgeSequencer)(nil), probe: "FrameworkCensusEdgesSeq"},
 		{iface: (*graph.FrontierExpander)(nil), probe: "ExpandFrontier"},

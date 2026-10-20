@@ -110,6 +110,7 @@ func RunConformance(t *testing.T, factory Factory, semantics Semantics) {
 	t.Run("EvictFile_NoNodes", func(t *testing.T) { testEvictFileNoNodes(t, factory) })
 	t.Run("EvictRepo", func(t *testing.T) { testEvictRepo(t, factory) })
 	t.Run("EvictRepo_NoNodes", func(t *testing.T) { testEvictRepoNoNodes(t, factory) })
+	t.Run("FindingNodeEvict", func(t *testing.T) { testFindingNodeEvict(t, factory) })
 	t.Run("NodeAndEdgeCount", func(t *testing.T) { testNodeAndEdgeCount(t, factory) })
 	t.Run("AllNodesAndEdges", func(t *testing.T) { testAllNodesAndEdges(t, factory) })
 	t.Run("FindNodesByName", func(t *testing.T) { testFindNodesByName(t, factory) })
@@ -5145,4 +5146,44 @@ func testEmptyRepoPrefix(t *testing.T, factory Factory, semantics Semantics) {
 			t.Fatalf("EvictRepo(\"\") must never touch a prefixed repository")
 		}
 	})
+}
+
+// testFindingNodeEvict pins the finding eviction capability (D-05, D-06) on
+// every backend: the dispatcher must reach the backend's set-oriented evicter,
+// which removes only the finding among the IDs, once, with its one incident
+// edge, and leaves the resource named in the same list untouched.
+func testFindingNodeEvict(t *testing.T, factory Factory) {
+	t.Helper()
+	s := factory(t)
+	const (
+		file     = "r1/app.cbl"
+		finding  = "r1/app.cbl::@finding/parse/0123456789abcdef0123456789abcdef"
+		resource = "r1/app.cbl::QUEUE"
+		program  = "r1/app.cbl::APP"
+	)
+	s.AddNode(mkRepoNode(finding, "unparsed-tail", file, "r1", graph.KindFinding))
+	s.AddNode(mkRepoNode(resource, "QUEUE", file, "r1", graph.KindResource))
+	s.AddNode(mkRepoNode(program, "APP", file, "r1", graph.KindFunction))
+	s.AddEdge(mkEdge(finding, program, graph.EdgeMemberOf))
+	s.AddEdge(mkEdge(program, resource, graph.EdgeReferences))
+
+	if nodes, edges, supported := graph.EvictFindingNodesByIDs(s, nil); nodes != 0 || edges != 0 || !supported {
+		t.Fatalf("EvictFindingNodesByIDs(empty) = (%d, %d, %v), want (0, 0, true)", nodes, edges, supported)
+	}
+	nodes, edges, supported := graph.EvictFindingNodesByIDs(s, []string{finding, finding, resource})
+	if !supported {
+		t.Fatal("EvictFindingNodesByIDs reported the capability unsupported")
+	}
+	if nodes != 1 || edges != 1 {
+		t.Fatalf("EvictFindingNodesByIDs = (%d, %d), want (1, 1)", nodes, edges)
+	}
+	if s.GetNode(finding) != nil {
+		t.Fatalf("finding %q survived eviction", finding)
+	}
+	if s.GetNode(resource) == nil || s.GetNode(program) == nil {
+		t.Fatalf("kind guard failed: resource=%v program=%v", s.GetNode(resource), s.GetNode(program))
+	}
+	if got := s.EdgeCount(); got != 1 {
+		t.Fatalf("EdgeCount after eviction = %d, want 1 (the program's reference survives)", got)
+	}
 }
