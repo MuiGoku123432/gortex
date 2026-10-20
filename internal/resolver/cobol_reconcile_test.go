@@ -80,7 +80,7 @@ func TestCobolReconcile_TargetGone(t *testing.T) {
 	New(g).ReconcileCobol(map[string]struct{}{"a": {}})
 
 	e := cobolEdgeAt(t, g, caller, 2)
-	assert.Equal(t, placeholder, e.To)
+	assert.Equal(t, "a/cobol-missing::copybook/CUSTREC", e.To, "a missing copybook targets its placeholder node")
 	assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	assert.NotContains(t, e.Meta, "cobol_candidate_ids")
 
@@ -271,7 +271,7 @@ func TestCobolReconcile_Allowlist(t *testing.T) {
 		r.SetCobolPolicyLookup(allowB)
 		r.ReconcileCobol(nil)
 		e := cobolEdgeAt(t, g, caller, 3)
-		assert.Equal(t, callNested, e.To, "a nested program in another repository is never a candidate")
+		assert.Equal(t, "repoA/cobol-missing::program/INNER", e.To, "a nested program in another repository is never a candidate")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	})
 
@@ -367,7 +367,7 @@ func TestCobolReconcile_SearchOrder(t *testing.T) {
 		r.SetCobolPolicyLookup(libs(CobolLibrary{Path: "copy/prod"}))
 		r.ReconcileCobol(nil)
 		e := cobolEdgeAt(t, g, caller, 2)
-		assert.Equal(t, copyCust, e.To, "a copybook outside every library is not a candidate")
+		assert.Equal(t, "repoA/cobol-missing::copybook/CUSTREC", e.To, "a copybook outside every library is not a candidate")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 		assert.NotContains(t, e.Meta, "cobol_copy_search_rank")
 	})

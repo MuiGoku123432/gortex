@@ -139,7 +139,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, caller, 4)
-		assert.Equal(t, target, e.To, "never bound to another repository's program")
+		assert.Equal(t, "a/cobol-missing::program/SUBPGM", e.To, "never bound to another repository's program")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
 	})
@@ -198,7 +198,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, crossCaller, 5)
-		assert.Equal(t, innerTarget, e.To, "a contained program is not callable from another file")
+		assert.Equal(t, "a/cobol-missing::program/INNER", e.To, "a contained program is not callable from another file")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
 	})
@@ -274,7 +274,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, "a/p.cbl::P/Y", 12)
-		assert.Equal(t, "unresolved::cobol::program::X", e.To, "a sibling is unreachable unless COMMON, which is not observed")
+		assert.Equal(t, "a/cobol-missing::program/X", e.To, "a sibling is unreachable unless COMMON, which is not observed")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	})
 
@@ -288,7 +288,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, crossCaller, 5)
-		assert.Equal(t, innerTarget, e.To, "a program without cobol_nested is never a candidate")
+		assert.Equal(t, "a/cobol-missing::program/INNER", e.To, "a program without cobol_nested is never a candidate")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	})
 
@@ -368,22 +368,20 @@ func TestCobolReferences_Copybook(t *testing.T) {
 	cobolEdge(g, caller, 2, graph.EdgeImports, "unresolved::cobol::copybook::X", nil)
 	cobolEdge(g, caller, 3, graph.EdgeImports, "unresolved::cobol::copybook::ONLYB", nil)
 
+	// A COPY IDMS member is never bound, even where a same-named copybook
+	// exists; it moves onto its dictionary-member placeholder node (D-11).
+	cobolEdge(g, caller, 4, graph.EdgeImports, "unresolved::cobol::copybook::idms/RECORD/EMP", cobolIDMSMeta())
 	// Owned targets the pass must never rebind or restamp, even where a
 	// same-named copybook or program exists.
 	untouched := map[int]string{
-		4: "unresolved::cobol::copybook::idms/RECORD/EMP",
 		5: "unresolved::cobol::dynamic::program::a/main.cbl::MAINPGM::EMP",
 		6: "unresolved::cobol::label::a/main.cbl::MAINPGM::EMP",
 		7: "unresolved::cobol::data::a/main.cbl::MAINPGM::CUSTREC",
 		8: "unresolved::cobol::idms_scope::_unqualified/EMP",
 	}
-	reasons := map[int]string{4: "idms_dictionary_member", 5: "dynamic", 6: "label_not_found", 7: "missing", 8: "scope_role_unknown"}
+	reasons := map[int]string{5: "dynamic", 6: "label_not_found", 7: "missing", 8: "scope_role_unknown"}
 	for line, to := range untouched {
-		kind := graph.EdgeReferences
-		if line == 4 {
-			kind = graph.EdgeImports
-		}
-		cobolEdge(g, caller, line, kind, to, map[string]any{"cobol_unresolved_reason": reasons[line]})
+		cobolEdge(g, caller, line, graph.EdgeReferences, to, map[string]any{"cobol_unresolved_reason": reasons[line]})
 	}
 
 	New(g).ResolveAll()
@@ -399,8 +397,12 @@ func TestCobolReferences_Copybook(t *testing.T) {
 	assert.Equal(t, []string{"a/c1/x.cpy", "a/c2/x.cpy"}, amb.Meta["cobol_candidate_ids"])
 
 	other := cobolEdgeAt(t, g, caller, 3)
-	assert.Equal(t, "unresolved::cobol::copybook::ONLYB", other.To, "no cross-repository copybook binding")
+	assert.Equal(t, "a/cobol-missing::copybook/ONLYB", other.To, "no cross-repository copybook binding")
 	assert.Equal(t, "missing", other.Meta["cobol_unresolved_reason"])
+
+	idms := cobolEdgeAt(t, g, caller, 4)
+	assert.Equal(t, "a/cobol-missing::idms_dictionary_member/RECORD/EMP", idms.To, "an IDMS member targets its placeholder node")
+	assert.Equal(t, cobolIDMSMeta(), idms.Meta, "the IDMS edge Meta is unchanged")
 
 	for line, to := range untouched {
 		e := cobolEdgeAt(t, g, caller, line)

@@ -13,13 +13,16 @@ import (
 
 // COBOL placeholder shapes this pass owns, after the unresolved:: marker.
 // COPY IDMS members (`copybook::idms/…`) are dictionary members, never files
-// (D-19), so they are excluded from the copybook prefix explicitly.
+// (D-19), so they are matched before the copybook prefix and never bound.
 const (
 	cobolProgramTargetPrefix  = "cobol::program::"
 	cobolCopybookTargetPrefix = "cobol::copybook::"
 	cobolIDMSCopyTargetPrefix = "cobol::copybook::idms/"
 
-	// Edge Meta written by this pass (D-12 reason vocabulary).
+	// Edge Meta written by this pass (D-12 reason vocabulary: missing,
+	// ambiguous, caller_unowned; a COPY IDMS edge keeps the extractor's
+	// idms_dictionary_member). A missing or IDMS edge's To is its
+	// repository's missing-artifact placeholder node (D-11).
 	metaCobolUnresolvedReason = "cobol_unresolved_reason"
 	metaCobolCandidateIDs     = "cobol_candidate_ids"
 	// Edge Meta written on a COPY bound by library rank (D-10): the
@@ -60,9 +63,10 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 	r.reconcileCobol(changed)
 }
 
-// reconcileCobol decides every literal COBOL CALL and non-IDMS COPY edge
-// whose caller repository is in the reconcile set, binding it to exactly one
-// candidate or returning it to its placeholder. The set is changed plus every
+// reconcileCobol decides every literal COBOL CALL and COPY edge whose caller
+// repository is in the reconcile set, binding it to exactly one candidate,
+// moving it onto its repository's missing-artifact placeholder node, or
+// returning it to its unresolved placeholder. The set is changed plus every
 // repository whose policy's ResolveFrom names a changed repository; an empty
 // changed means every edge.
 //
@@ -70,9 +74,11 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // literal CALL / LINK / XCTL and `unresolved::cobol::copybook::<key>` for a
 // COPY / -INC / SQL INCLUDE, with <key> already normalized under
 // cobol-name-norm/1, and keeps that target in cobol_placeholder. This pass
-// visits both the edges still on a placeholder (EdgesWithUnresolvedTarget)
-// and the edges already bound to a program or copybook candidate (their
-// in-edges that carry cobol_placeholder), and decides each one again from
+// visits the edges still on a placeholder (EdgesWithUnresolvedTarget), the
+// edges already bound to a program or copybook candidate (their in-edges
+// that carry cobol_placeholder), and the edges on a missing-artifact
+// placeholder node (its in-edges; a COPY IDMS edge's unresolved target is
+// recovered from the node ID), and decides each one again from
 // (placeholder, candidate set, caller policy) alone. A candidate is the
 // KindFunction program (Meta cobol_kind=program) or KindFile copybook
 // (cobol_kind=copybook) whose cobol_name_key equals <key> and that the
@@ -91,11 +97,16 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // candidate ranks by the first library (configured order, narrowed to the
 // OF/IN library when the edge names one) whose repository and directory hold
 // it; unranked candidates drop out and the lowest rank wins (D-10), recorded
-// in cobol_copy_search_rank and cobol_copy_search_rule. One candidate binds. Zero sets To back to the placeholder with
-// cobol_unresolved_reason=missing; two or more set it back with ambiguous
-// plus the sorted candidate IDs in cobol_candidate_ids. A caller node with
-// no RepoPrefix never binds: its edge keeps the placeholder with
-// caller_unowned.
+// in cobol_copy_search_rank and cobol_copy_search_rule. One candidate binds.
+// Zero stamps cobol_unresolved_reason=missing and sets To to the caller
+// repository's placeholder node `<repo>/cobol-missing::<type>/<key>` (D-11),
+// except an EXEC SQL INCLUDE of SQLCA or SQLDA (sql_include_builtin), which
+// keeps its unresolved target (D-19). Two or more set To back to the
+// unresolved placeholder with ambiguous plus the sorted candidate IDs in
+// cobol_candidate_ids. A COPY IDMS member is never bound (P3 D-19): it keeps
+// idms_dictionary_member and targets its idms_dictionary_member placeholder
+// node. A caller node with no RepoPrefix never binds and gets no placeholder
+// node: its edge keeps the unresolved placeholder with caller_unowned.
 //
 // RATIONALE — a placeholder-only pass can never re-check a bound edge, so a
 // second same-named program or a deleted target left a stale binding (WR-01).
@@ -110,17 +121,20 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // no second normalization rule (D-18). The pass reads the extractor's
 // cobol_nested flag and never infers nesting from the shape of a node ID or
 // QualName (a literal PROGRAM-ID may itself contain '/'). Dynamic, label,
-// data, idms_scope, and COPY IDMS targets are never touched (D-19, DET-04).
+// data, and idms_scope targets are never touched (D-19, DET-04).
 //
 // Runs serially in ResolveAll's relative-import settle window, after
 // resolveLuaRequires, with changed = the resolve scope. It writes only the
 // edges whose decision differs from their current state, so a second run
-// issues no write and leaves every edge byte-identical. It ends with
-// reconcileCobolResources over the same repository set.
+// issues no write and leaves every edge byte-identical. Every edge that
+// targets a missing-artifact placeholder, unchanged ones included, is one
+// desired entry (cobolExternalRef) handed to reconcileCobolFindings, which
+// owns the placeholder nodes; the pass ends with reconcileCobolResources over
+// the same repository set.
 //
 // KEYWORDS — cobol, call, copybook, reconcile, rebind, exactly-one,
 // allowlist, resolve_from, union, library, search-order, ambiguous, missing,
-// caller_unowned.
+// caller_unowned, placeholder, missing artifact, idms.
 func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	if !r.graphHasLanguage("cobol") {
 		return
@@ -166,7 +180,9 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 		ref := cobolRef{e: e, placeholder: placeholder}
 		switch {
 		case strings.HasPrefix(target, cobolIDMSCopyTargetPrefix):
-			return
+			// A dictionary member: never bound, but its edge targets a
+			// placeholder (P3 D-19, D-09).
+			ref.key, ref.idms = strings.TrimPrefix(target, cobolCopybookTargetPrefix), true
 		case strings.HasPrefix(target, cobolProgramTargetPrefix):
 			ref.key, ref.isProgram = strings.TrimPrefix(target, cobolProgramTargetPrefix), true
 		case strings.HasPrefix(target, cobolCopybookTargetPrefix):
@@ -213,21 +229,68 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 			}
 		}
 	}
+	// Edges on a missing-artifact placeholder node: off EdgesWithUnresolvedTarget,
+	// so they are reached through the placeholders' in-edges (Pitfall 10). A
+	// COPY IDMS edge carries no cobol_placeholder; its unresolved target is
+	// recovered from the placeholder ID. Edges from findings carry neither and
+	// are skipped.
+	var placeholderIDs []string
+	for n := range r.nodesByKindLang(graph.KindResource, "cobol") {
+		if n != nil && n.Meta["cobol_kind"] == cobolMissingArtifactKind {
+			placeholderIDs = append(placeholderIDs, n.ID)
+		}
+	}
+	if len(placeholderIDs) > 0 {
+		for _, edges := range r.graph.GetInEdgesByNodeIDs(placeholderIDs) {
+			for _, e := range edges {
+				if e == nil {
+					continue
+				}
+				placeholder, _ := e.Meta[metaCobolPlaceholder].(string)
+				if form, _ := e.Meta[metaCobolCopyForm].(string); placeholder == "" && form == "idms" {
+					placeholder = cobolUnresolvedFromPlaceholder(e.To)
+				}
+				if placeholder != "" {
+					add(e, placeholder)
+				}
+			}
+		}
+	}
 
 	scopes := make(map[string]graph.Scope)
 	var rebound []graph.EdgeReindex
 	var stamped []*graph.Edge
+	var desired []cobolExternalRef
 	for _, ref := range refs {
 		e := ref.e
-		index := copybooks
-		if ref.isProgram {
-			index = programs
+		var d cobolDecision
+		if ref.idms {
+			d = cobolDecision{reason: "idms_dictionary_member"}
+		} else {
+			index := copybooks
+			if ref.isProgram {
+				index = programs
+			}
+			d = r.decideCobol(e, ref, index, policies, scopes)
 		}
-		d := r.decideCobol(e, ref, index, policies, scopes)
 
 		to, origin, crossRepo := ref.placeholder, e.Origin, false
-		if d.bind != nil {
+		builtin, _ := e.Meta[metaSQLIncludeBuiltin].(bool)
+		switch {
+		case d.bind != nil:
 			to, origin, crossRepo = d.bind.ID, graph.OriginASTResolved, d.crossRepo
+		case ref.idms || (d.reason == "missing" && !builtin):
+			// A target never obtained moves onto its repository's
+			// placeholder node (D-11); a SQLCA/SQLDA include keeps its
+			// unresolved target (D-19). Unchanged edges are collected too.
+			if callerRepo := r.callerRepoPrefix(e); callerRepo != "" {
+				id, artifactType, key := cobolPlaceholderTarget(callerRepo, ref)
+				to = id
+				desired = append(desired, cobolExternalRef{
+					e: e, callerRepo: callerRepo, placeholderID: id,
+					artifactType: artifactType, key: key, reason: d.reason,
+				})
+			}
 		}
 		reason, _ := e.Meta[metaCobolUnresolvedReason].(string)
 		if e.To == to && e.Origin == origin && e.CrossRepo == crossRepo &&
@@ -285,17 +348,19 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 			p.PersistEdgeAttributesBatch(stamped)
 		}
 	}
+	r.reconcileCobolFindings(repos, desired)
 	r.reconcileCobolResources(repos, policies)
 }
 
 // cobolRef is one literal COBOL CALL or COPY edge the pass decides: its
 // placeholder target and the normalized key after the program or copybook
-// prefix.
+// prefix (for a COPY IDMS member, idms/<kind>/<key>, and idms is set).
 type cobolRef struct {
 	e           *graph.Edge
 	placeholder string
 	key         string
 	isProgram   bool
+	idms        bool
 }
 
 // cobolDecision is one edge's reconcile outcome: the single bound candidate
