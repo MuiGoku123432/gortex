@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-08-PLAN.md
-last_updated: "2026-10-20T18:32:07.646Z"
+stopped_at: Completed 05-09-PLAN.md
+last_updated: "2026-10-20T19:02:58.221Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 60
+  completed_plans: 61
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 9 of 12
+Plan: 10 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [█████████░] 94%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -121,6 +121,7 @@ Progress: [█████████░] 94%
 | Phase 05 P06 | 26 min | 3 tasks | 10 files |
 | Phase 05 P07 | 8 min | 2 tasks | 1 files |
 | Phase 05 P08 | 20min | 2 tasks | 4 files |
+| Phase 05 P09 | 28 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -255,6 +256,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-07: the copybook gate control is CUST-REC with two 05 children (3 data items); 05 CUST-ID PIC X(8) WHATEVER. as the first child cascades and attaches to copy/cust.cpy via member_of
 - [Phase 05]: 05-08: External finding evidence is cobol_call (else cobol_copy_form), cobol_copy_idms_kind when present, and the as-written target, whitespace-collapsed and NUL-joined; CALL/LINK/XCTL to one target in one container share a base ID and take #k
 - [Phase 05]: 05-08: Existing EXTERNAL_UNRESOLVED findings are read from the reconcile set's placeholder references in-edges (one GetInEdgesByNodeIDs shared with the sweep) and evicted with EvictFindingNodesByIDs before the sweep; no KindFinding streaming
+- [Phase 05]: 05-09: every COBOL settle point drains resolver change records before the finding ledger and ledgers own, reconciled, and tracked-ID-prefix repositories (D-03 across repositories)
+- [Phase 05]: 05-09: a cold TrackRepoCtx ends with reconcileCobolRepos({repo}) on the durable store, or joins batchCobolRepos under mi.mu while a parallel batch defers resolution
+- [Phase 05]: 05-09: undesired external findings count as evicted only when the store reports the evicter capability
 
 ### Pending Todos
 
@@ -283,6 +287,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T18:32:07.635Z
-Stopped at: Completed 05-08-PLAN.md
+Last session: 2026-10-20T19:02:58.210Z
+Stopped at: Completed 05-09-PLAN.md
 Resume file: None
