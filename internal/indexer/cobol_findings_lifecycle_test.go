@@ -525,3 +525,200 @@ func TestCobolFindings_HistoryParserRestamp(t *testing.T) {
 	assert.Len(t, cobolHistory(t, env, "finda"), before, "a re-stamp appends no row")
 	assert.Contains(t, cobolLedgerFindings(env, "finda"), tailID, "and keeps the ID")
 }
+
+// cobolSearchHits returns, by tier, the node IDs the store's symbol search
+// returns for name. The identifier query name is answered by the exact-name
+// tier, which reads the node table, so it alone cannot see the search index;
+// the two-word query "missing <name>" skips that tier and ranks the symbol
+// FTS corpus, the index the COBOL search sync writes (Pitfall 4).
+func cobolSearchHits(t *testing.T, env *cobolLifecycleEnv, name string) map[string]map[string]bool {
+	t.Helper()
+	out := map[string]map[string]bool{}
+	for tier, query := range map[string]string{"exact-name": name, "fts": "missing " + name} {
+		hits, err := env.store.SearchSymbols(query, 50)
+		require.NoError(t, err)
+		out[tier] = map[string]bool{}
+		for _, h := range hits {
+			out[tier][h.NodeID] = true
+		}
+	}
+	return out
+}
+
+// assertCobolSearch asserts that both search tiers return each of ids for
+// name when want is set, and that neither returns any of them otherwise; it
+// reports whether every check held.
+func assertCobolSearch(t *testing.T, env *cobolLifecycleEnv, name string, want bool, ids ...string) bool {
+	t.Helper()
+	ok := true
+	for tier, hits := range cobolSearchHits(t, env, name) {
+		for _, id := range ids {
+			ok = assert.Equal(t, want, hits[id], "%s tier for %q: %s in %v",
+				tier, name, id, slices.Sorted(maps.Keys(hits))) && ok
+		}
+	}
+	return ok
+}
+
+// cobolExternalFindingFor returns the ID of repo's one EXTERNAL_UNRESOLVED
+// finding whose target key is key, located through the store.
+func cobolExternalFindingFor(t *testing.T, env *cobolLifecycleEnv, repo, key string) string {
+	t.Helper()
+	var ids []string
+	for id, n := range cobolLedgerFindings(env, repo) {
+		if n.Meta[graph.MetaEvidenceClass] == graph.FindingClassExternal && n.Meta[graph.MetaFindingTargetKey] == key {
+			ids = append(ids, id)
+		}
+	}
+	require.Len(t, ids, 1, "one external finding for %s in %s", key, repo)
+	return ids[0]
+}
+
+// TestCobolFindings_SearchAfterIncremental proves an incremental edit makes
+// the resolver-created placeholder and external finding searchable, and
+// that removing the reference takes both out of search (Pitfall 4).
+func TestCobolFindings_SearchAfterIncremental(t *testing.T) {
+	const placeholder = "finda/cobol-missing::program/NEWPGM"
+	env := newCobolLedgerEnv(t)
+
+	withCall := strings.Replace(cobolLedgerFixture, "           CALL 'NOPGM'.\n",
+		"           CALL 'NOPGM'.\n           CALL 'NEWPGM'.\n", 1)
+	require.NotEqual(t, cobolLedgerFixture, withCall)
+	env.write(t, "finda", "cobol/main.cbl", withCall)
+	env.reindex(t, "finda")
+	require.NotNil(t, env.store.GetNode(placeholder))
+	id := cobolExternalFindingFor(t, env, "finda", "NEWPGM")
+	assertCobolSearch(t, env, "NEWPGM", true, placeholder, id)
+
+	env.write(t, "finda", "cobol/main.cbl", cobolLedgerFixture)
+	env.reindex(t, "finda")
+	require.Nil(t, env.store.GetNode(placeholder))
+	require.Nil(t, env.store.GetNode(id))
+	assertCobolSearch(t, env, "NEWPGM", false, placeholder, id)
+}
+
+// TestCobolFindings_SearchAfterFallbackMasterResolve proves a master
+// ResolveAll (the incremental "needed, no frontier files" fallback's exact
+// call) syncs search from its own reconcile: with no other settle point in
+// between, the placeholder and finding it removes leave search.
+func TestCobolFindings_SearchAfterFallbackMasterResolve(t *testing.T) {
+	const placeholder = "finda/cobol-missing::program/NOPGM"
+	env := newCobolLedgerEnv(t)
+	id := cobolExternalFindingFor(t, env, "finda", "NOPGM")
+	idx := env.mi.GetIndexer("finda")
+	require.NotNil(t, idx)
+
+	// The interrupted reindex adds NOPGM but skips every COBOL reconcile.
+	idx.incrementalResolveFilesHook = func([]string) {}
+	env.write(t, "finda", "cobol/nopgm.cbl", cobolDepNopgm)
+	env.reindex(t, "finda")
+	require.NotNil(t, env.store.GetNode(placeholder), "precondition: the interruption kept the placeholder")
+	require.NotNil(t, env.store.GetNode(id), "precondition: the interruption kept the finding")
+	require.True(t, assertCobolSearch(t, env, "NOPGM", true, placeholder, id), "precondition: both searchable")
+	idx.incrementalResolveFilesHook = nil
+	before := len(cobolHistory(t, env, "finda"))
+
+	env.mi.runMasterResolve(map[string]struct{}{"finda": {}}, false)
+	assert.Nil(t, env.store.GetNode(placeholder), "the master swept the placeholder")
+	assert.Nil(t, env.store.GetNode(id), "the master closed the finding")
+	assertCobolSearch(t, env, "NOPGM", false, placeholder, id)
+	assert.Len(t, cobolHistory(t, env, "finda"), before, "no ledger at the master drain")
+
+	// The next settle point records the transition (state-based ledger).
+	env.mi.reconcileCobolRepos(map[string]struct{}{"finda": {}})
+	rows := cobolHistory(t, env, "finda")[before:]
+	require.Len(t, rows, 1, "%+v", rows)
+	assert.Equal(t, id, rows[0].FindingID)
+	assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+	assertCobolSearch(t, env, "NOPGM", false, placeholder, id)
+}
+
+// TestCobolFindings_CrossRepoDependentLedgerAndSearch proves the nodes a
+// reconcile creates or removes in a dependent repository (resolve_from)
+// enter and leave search at the step that ledgers them, incrementally and
+// on both cold-track orders with the shadow off and on (D-03 across
+// repositories, D-09, GAP-02).
+func TestCobolFindings_CrossRepoDependentLedgerAndSearch(t *testing.T) {
+	const placeholder = "fdepb/cobol-missing::program/NOPGM"
+
+	t.Run("incremental", func(t *testing.T) {
+		env := newCobolLifecycleEnv(t, cobolDepRepos(false))
+		env.track(t, "fdepa", "fdepb")
+		id := cobolLedgerFindingOf(t, env, "fdepb", graph.FindingClassExternal, "external-reference")
+		require.True(t, assertCobolSearch(t, env, "NOPGM", true, placeholder, id), "before the change both are searchable")
+
+		env.write(t, "fdepa", "cobol/nopgm.cbl", cobolDepNopgm)
+		env.reindex(t, "fdepa")
+		rows := cobolHistory(t, env, "fdepb")[1:]
+		require.Len(t, rows, 1, "%+v", rows)
+		assert.Equal(t, id, rows[0].FindingID)
+		assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+		assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+		assertCobolSearch(t, env, "NOPGM", false, placeholder, id)
+
+		env.remove(t, "fdepa", "cobol/nopgm.cbl")
+		env.reindex(t, "fdepa")
+		rows = cobolHistory(t, env, "fdepb")[2:]
+		require.Len(t, rows, 1, "%+v", rows)
+		assert.Equal(t, id, rows[0].FindingID, "the same finding reopens")
+		assert.Equal(t, graph.FindingStatusClosed, rows[0].PriorStatus)
+		assert.Equal(t, graph.FindingStatusActive, rows[0].NewStatus)
+		assertCobolSearch(t, env, "NOPGM", true, placeholder, id)
+	})
+
+	for _, shadow := range []bool{false, true} {
+		name := "shadow=off"
+		if shadow {
+			name = "shadow=on"
+		}
+		t.Run(name, func(t *testing.T) {
+			// note: the same env-and-track closure is in
+			// TestCobolFindings_HistoryDependentRepo (two occurrences).
+			newEnv := func(t *testing.T) (*cobolLifecycleEnv, func(name string)) {
+				env := newCobolLifecycleEnv(t, cobolDepRepos(true))
+				if shadow {
+					// newCobolLifecycleEnv sets the cap to 0 on every call.
+					t.Setenv("GORTEX_SHADOW_MAX_FILES", "1000000")
+				}
+				return env, func(name string) {
+					before := cobolShadowAdmissions(env)
+					env.track(t, name)
+					if shadow {
+						require.Greater(t, cobolShadowAdmissions(env), before, "track of %s took the shadow", name)
+					}
+				}
+			}
+
+			t.Run("fdepb-then-fdepa", func(t *testing.T) {
+				env, track := newEnv(t)
+				track("fdepb")
+				id := cobolLedgerFindingOf(t, env, "fdepb", graph.FindingClassExternal, "external-reference")
+				require.True(t, assertCobolSearch(t, env, "NOPGM", true, placeholder, id), "fdepb alone: both searchable")
+
+				// fdepa supplies NOPGM: fdepb's finding closes and both
+				// nodes leave search at this track.
+				track("fdepa")
+				rows := cobolHistory(t, env, "fdepb")[1:]
+				require.Len(t, rows, 1, "%+v", rows)
+				assert.Equal(t, id, rows[0].FindingID)
+				assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+				assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+				assertCobolSearch(t, env, "NOPGM", false, placeholder, id)
+			})
+
+			t.Run("fdepa-then-fdepb", func(t *testing.T) {
+				env, track := newEnv(t)
+				track("fdepa")
+				track("fdepb")
+				for tier, hits := range cobolSearchHits(t, env, "NOPGM") {
+					for hit := range hits {
+						assert.NotEqual(t, placeholder, hit, "%s tier: no not-obtained placeholder", tier)
+						assert.False(t, strings.HasPrefix(hit, "fdepb/") && strings.Contains(hit, "::@finding/external/"),
+							"%s tier: no fabricated external finding: %s", tier, hit)
+					}
+				}
+			})
+		})
+	}
+}
