@@ -154,6 +154,26 @@ func TestFindingHistory_SurvivesEvictRepo(t *testing.T) {
 	}
 }
 
+func TestFindingHistory_PurgedWithRepo(t *testing.T) {
+	s := openFindingHistoryStore(t)
+	appendHistory(t, s, "r1",
+		historyRow("r1", "a", "", graph.FindingStatusActive, "", 10),
+		historyRow("r1", "a", graph.FindingStatusActive, graph.FindingStatusClosed, "", 10),
+	)
+	kept := []graph.FindingTransition{historyRow("r2", "x", "", graph.FindingStatusActive, "", 4)}
+	appendHistory(t, s, "r2", kept...)
+
+	if err := s.PurgeRepo("r1"); err != nil {
+		t.Fatalf("PurgeRepo: %v", err)
+	}
+	if got := readHistory(t, s, "r1"); len(got) != 0 {
+		t.Fatalf("history after PurgeRepo = %#v, want none", got)
+	}
+	if got := readHistory(t, s, "r2"); !reflect.DeepEqual(got, kept) {
+		t.Fatalf("other repository history after PurgeRepo = %#v, want %#v", got, kept)
+	}
+}
+
 func findingHistoryIndexCount(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	return scalarInt(t, db, `SELECT COUNT(*) FROM sqlite_master
