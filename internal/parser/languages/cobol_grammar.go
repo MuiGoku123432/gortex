@@ -187,7 +187,9 @@ func (e *CobolGrammarExtractor) MaterialIdentity() string {
 
 // Extract analyzes one COBOL document and maps its handoff onto graph nodes
 // and edges. filePath is the unprefixed repository-relative path; the
-// indexer applies the repository prefix and scope fields afterwards.
+// indexer applies the repository prefix and scope fields afterwards. A
+// copybook whose analysis fails yields an identity-only result (WR-06);
+// every other failure returns an error and no result.
 func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.ExtractionResult, error) {
 	e.once.Do(e.init)
 	if e.initErr != nil {
@@ -212,7 +214,9 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 	}()
 	switch {
 	case err != nil && copybook:
-		return nil, fmt.Errorf("enhanced COBOL copybook analysis of %s: %w", filePath, err)
+		// WR-06: the copybook exists, so it stays a binding candidate with
+		// a parse finding instead of failing. Programs keep failing (D-20).
+		return e.cobolCopybookAnalysisFailed(filePath, src, sourceID), nil
 	case err != nil:
 		return nil, fmt.Errorf("enhanced COBOL analysis of %s: %w", filePath, err)
 	}
@@ -262,6 +266,11 @@ func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.Ex
 		meta["cobol_nested"] = p.nested
 		if p.nested {
 			meta["cobol_container"] = filePath + "::" + p.container
+			if containmentUnresolved {
+				// IN-08: the nesting is a guess, so the resolver must not
+				// report a cross-file call it drops as plainly missing.
+				meta["cobol_nested_unresolved"] = true
+			}
 		}
 		meta["prov_observation_kind"] = o.Kind
 		meta["prov_affected"] = o.Affected

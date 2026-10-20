@@ -3,16 +3,20 @@
 package languages
 
 import (
+	"bytes"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/grade"
 	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
 
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/parser"
 )
 
 // cobolFindings maps every producer PARSE_UNRESOLVED gap of the walked
@@ -85,6 +89,64 @@ func cobolFindings(w *cobolWalk) {
 // cobolCascadeKind is the kind, reason, and evidence of the Gortex-derived
 // uncontained-cascade finding (D-13).
 const cobolCascadeKind = "uncontained-cascade"
+
+// cobolAnalysisFailedKind is the kind and evidence of the WR-06 finding on a
+// copybook whose analysis failed; cobolAnalysisFailedReason is its coarse
+// reason class. The producer's error text is never persisted (T-05-32).
+const (
+	cobolAnalysisFailedKind   = "analysis-failed"
+	cobolAnalysisFailedReason = "analysis-error"
+)
+
+// cobolCopybookAnalysisFailed returns the identity-only result for the
+// copybook at filePath whose analysis failed.
+//
+// PURPOSE — WR-06: a copybook that exists but could not be analyzed must not
+// look missing. Its file node keeps the COPY binding keys, so every COPY of
+// it still binds, and one high-severity document PARSE_UNRESOLVED finding
+// records the failure (D-10); it never becomes EXTERNAL_UNRESOLVED.
+//
+// RATIONALE — no handoff exists, so the file node carries only identity and
+// the stamps known without one (source, content revision, approved grammar,
+// modules, extractor version) plus
+// prov_analysis_absence=copybook_analysis_failed; no handoff-derived key is
+// invented. The finding goes through cobolAddFinding with a constant
+// evidence, so its ID is stable. Programs get no such fallback (D-20):
+// Gortex never derives a program identity from a filename.
+func (e *CobolGrammarExtractor) cobolCopybookAnalysisFailed(filePath string, src []byte, sourceID preprocessor.SourceID) *parser.ExtractionResult {
+	docMeta := map[string]any{
+		"prov_source_path":         filePath,
+		"prov_source_id":           string(sourceID),
+		"prov_revision_content_id": string(preprocessor.NewContentID(src)),
+		"prov_parser_grammar_id":   e.approvedGrammarID,
+		"prov_parser_module":       e.parserModule,
+		"prov_preprocessor_module": e.preprocessorModule,
+		"prov_extractor_version":   cobolGrammarExtractorVersion,
+		"prov_evidence_class":      "DETERMINISTIC",
+		"prov_origin":              graph.OriginASTResolved,
+		"prov_confidence":          1.0,
+	}
+	// note: the same binding keys as cobolCopybook writes on an analyzed
+	// copybook; keep the two in step.
+	fileMeta := maps.Clone(docMeta)
+	base := filepath.Base(filePath)
+	fileMeta["cobol_kind"] = "copybook"
+	fileMeta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(strings.TrimSuffix(base, filepath.Ext(base))))
+	fileMeta["cobol_name_norm"] = cobolNameNormRule
+	fileMeta["prov_analysis_absence"] = "copybook_analysis_failed"
+	result := &parser.ExtractionResult{Nodes: []*graph.Node{{
+		ID: filePath, Kind: graph.KindFile, Name: filePath,
+		FilePath: filePath, StartLine: 1, EndLine: bytes.Count(src, []byte("\n")) + 1,
+		Language: "cobol", Meta: fileMeta,
+	}}}
+	w := newCobolWalk(handoff.Handoff{}, src, filePath, docMeta, nil, result)
+	cobolAddFinding(w, map[string]int{}, handoff.Gap{
+		Kind: cobolAnalysisFailedKind, Reason: cobolAnalysisFailedReason,
+		Severity: handoff.SeverityHigh, Scope: handoff.ScopeDocument,
+		Container: -1, AbsenceReason: "document_scope",
+	}, cobolAnalysisFailedKind)
+	return result
+}
 
 // cobolCascadeFamily lists the producer grade reasons that mark an
 // uncontained recovery cascade (D-13). Gortex reads them from the

@@ -57,7 +57,9 @@ var cobolSQLOrientation = map[string]bool{
 // only from source (D-13, D-15). Aliases, CTE names, and derived tables are
 // statement-scoped Meta, never nodes; EXEC SQL INCLUDE stays on the COPY
 // path. OPEN, FETCH, and CLOSE read the tables of the one same-program
-// DECLARE of their cursor, else are marked cursor_not_declared, or cursor_not_in_copybook in a copybook (D-12).
+// DECLARE of their cursor. Otherwise they are marked ambiguous when the
+// cursor is declared more than once (WR-07), else cursor_not_declared, or
+// cursor_not_in_copybook in a copybook (D-12).
 // PREPARE goes to a per-program dynamic placeholder that is never bound, and
 // EXECUTE only marks its statement, so no table is invented for dynamic SQL.
 // Every key passes through the SQL clause of cobol-name-norm/1 and
@@ -155,7 +157,12 @@ func cobolSQL(w *cobolWalk, data *cobolDataIndex) {
 		if len(decls) != 1 {
 			if n != nil {
 				reason := "cursor_not_declared"
-				if len(decls) == 0 && w.root != "" {
+				switch {
+				case len(decls) > 1:
+					// WR-07: the cursor exists, more than once; which DECLARE
+					// a use reads is not known statically.
+					reason = "ambiguous"
+				case w.root != "":
 					// A copybook does not declare it; an including program may.
 					reason = "cursor_not_in_copybook"
 				}
