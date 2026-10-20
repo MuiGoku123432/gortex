@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-10-20T15:59:05.854Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-10-20T16:10:51.794Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 53
+  completed_plans: 54
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [████████░░] 83%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
@@ -114,6 +114,7 @@ Progress: [████████░░] 83%
 | Phase 04 P21 | 38min | 3 tasks | 5 files |
 | Phase 04 P22 | 15min | 3 tasks | 6 files |
 | Phase 05 P01 | 26 min | 2 tasks | 10 files |
+| Phase 05 P02 | 10 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -233,6 +234,7 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-01: Finding IDs are <path>::@finding/<parse|external>/<32 hex>[#k] from graph.FindingSymbol (length-framed BLAKE3 over rule, repo-relative container, class, kind, family, evidence digest); no line, offset, gap ID, or version is hashed
 - [Phase 05]: 05-01: cobolFindings container ladder walks ancestors separately for statement, then membership container, then section, so SQL tails attach to their exec_sql statement, not the paragraph
 - [Phase 05]: 05-01: Tracer gate under human_verify_mode=end-of-phase re-ran the automated verify and continued; human review of the slice deferred to end-of-phase UAT
+- [Phase 05]: 05-02: Finding eviction is a kind-guarded ID-set capability (graph.EvictFindingNodesByIDs) on both backends; memory delegates to evictSyntheticNodesByIDs, SQLite is a deliberate third copy of the config/contract evicter (fork hygiene); stores without it report unsupported, never an N+1 fallback
 
 ### Pending Todos
 
@@ -261,6 +263,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T15:59:05.839Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-10-20T16:10:51.783Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
