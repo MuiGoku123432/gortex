@@ -17,11 +17,26 @@ func placeholderMeta(placeholder string) map[string]any {
 	return map[string]any{"cobol_placeholder": placeholder}
 }
 
-// cobolWriteCounter counts the edge writes the reconcile pass issues, so a test
-// can assert that an unchanged decision writes nothing.
+// cobolWriteCounter counts the writes the reconcile pass issues (edge moves,
+// Meta writes, batch adds, file evictions), so a test can assert that an
+// unchanged decision writes nothing.
 type cobolWriteCounter struct {
 	*store_sqlite.Store
-	reindexes, persists int
+	reindexes, persists, adds, evicts int
+}
+
+func (s *cobolWriteCounter) reset() { s.reindexes, s.persists, s.adds, s.evicts = 0, 0, 0, 0 }
+
+func (s *cobolWriteCounter) writes() int { return s.reindexes + s.persists + s.adds + s.evicts }
+
+func (s *cobolWriteCounter) AddBatch(nodes []*graph.Node, edges []*graph.Edge) {
+	s.adds++
+	s.Store.AddBatch(nodes, edges)
+}
+
+func (s *cobolWriteCounter) EvictFile(filePath string) (int, int) {
+	s.evicts++
+	return s.Store.EvictFile(filePath)
 }
 
 func (s *cobolWriteCounter) ReindexEdges(batch []graph.EdgeReindex) {
