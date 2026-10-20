@@ -51,12 +51,15 @@ var (
 	cobolLedgerRetoken = strings.Replace(cobolLedgerFixture, "ZQXCOL", "ZQXNEW", 1)
 )
 
+// cobolLedgerRepos returns a fresh copy of the one-repository corpus finda.
+func cobolLedgerRepos() map[string]map[string]string {
+	return map[string]map[string]string{"finda": {"cobol/main.cbl": cobolLedgerFixture}}
+}
+
 // newCobolLedgerEnv tracks a fresh copy of repository finda.
 func newCobolLedgerEnv(t *testing.T) *cobolLifecycleEnv {
 	t.Helper()
-	env := newCobolLifecycleEnv(t, map[string]map[string]string{
-		"finda": {"cobol/main.cbl": cobolLedgerFixture},
-	})
+	env := newCobolLifecycleEnv(t, cobolLedgerRepos())
 	env.track(t, "finda")
 	return env
 }
@@ -441,4 +444,84 @@ func TestCobolFindings_LedgerSerialized(t *testing.T) {
 	rows, err := store.FindingHistory("r1")
 	require.NoError(t, err)
 	assert.Len(t, rows, n, "each open is appended exactly once")
+}
+
+// TestCobolFindings_HistoryBatchDeferredTrack pins the cold-track tail's
+// batch gating: only BeginParallelBatch (the daemon warmup's entry) defers
+// resolution, so only it defers the tail to EndBatch.
+func TestCobolFindings_HistoryBatchDeferredTrack(t *testing.T) {
+	t.Run("parallel", func(t *testing.T) {
+		env := newCobolLifecycleEnv(t, cobolLedgerRepos())
+		env.mi.BeginParallelBatch()
+		env.track(t, "finda")
+		assert.Empty(t, cobolHistory(t, env, "finda"), "the deferred track's reconcile and ledger wait for EndBatch")
+		env.mi.EndBatch()
+		requireCobolOpenRows(t, env, "finda")
+	})
+
+	t.Run("plain", func(t *testing.T) {
+		env := newCobolLifecycleEnv(t, cobolLedgerRepos())
+		env.mi.BeginBatch() // defers global passes only, never resolution
+		env.track(t, "finda")
+		requireCobolOpenRows(t, env, "finda")
+		rows := len(cobolHistory(t, env, "finda"))
+		env.mi.EndBatch()
+		assert.Len(t, cobolHistory(t, env, "finda"), rows, "EndBatch appends no row")
+	})
+}
+
+// TestCobolFindings_HistoryShadowPath tracks finda through the in-memory
+// shadow: the history lands in SQLite anyway (Pitfall 3).
+func TestCobolFindings_HistoryShadowPath(t *testing.T) {
+	env := newCobolLifecycleEnv(t, cobolLedgerRepos())
+	t.Setenv("GORTEX_SHADOW_MAX_FILES", "1000000") // newCobolLifecycleEnv set 0
+	before := cobolShadowAdmissions(env)
+	env.track(t, "finda")
+	require.Greater(t, cobolShadowAdmissions(env), before, "the track took the shadow")
+	requireCobolOpenRows(t, env, "finda")
+}
+
+// TestCobolFindings_HistoryInterrupted interrupts the reindex that fixes the
+// ERROR before its resolver tail: nothing is recorded until the warm-restart
+// reconcile, which records exactly the transition to the final state.
+func TestCobolFindings_HistoryInterrupted(t *testing.T) {
+	env := newCobolLedgerEnv(t)
+	errID := cobolLedgerFindingOf(t, env, "finda", graph.FindingClassParse, "error")
+	idx := env.mi.GetIndexer("finda")
+	require.NotNil(t, idx)
+	idx.incrementalResolveFilesHook = func([]string) {}
+	before := len(cobolHistory(t, env, "finda"))
+
+	env.write(t, "finda", "cobol/main.cbl", cobolLedgerFixed)
+	env.reindex(t, "finda")
+	assert.Len(t, cobolHistory(t, env, "finda"), before, "an interrupted reconcile appends no row")
+
+	// Daemon restart: the warm reconcile reconciles COBOL unconditionally.
+	env.restart(t)
+	env.warmReconcile(t, "finda")
+	rows := cobolHistory(t, env, "finda")[before:]
+	require.Len(t, rows, 1, "only the fixed ERROR's row: %+v", rows)
+	assert.Equal(t, errID, rows[0].FindingID)
+	assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+}
+
+// TestCobolFindings_HistoryParserRestamp re-stamps a stored finding's parser
+// and extractor versions without changing its evidence: same ID, no row
+// (D-02).
+func TestCobolFindings_HistoryParserRestamp(t *testing.T) {
+	env := newCobolLedgerEnv(t)
+	tailID := cobolLedgerFindingOf(t, env, "finda", graph.FindingClassParse, "unparsed-tail")
+	n := env.store.GetNode(tailID)
+	require.NotNil(t, n)
+	n.Meta["prov_parser_tool_id"] = "restamped-parser/2"
+	n.Meta["prov_extractor_version"] = "restamped-extractor/2"
+	env.store.AddNode(n)
+	require.Equal(t, "restamped-parser/2", env.store.GetNode(tailID).Meta["prov_parser_tool_id"])
+	before := len(cobolHistory(t, env, "finda"))
+
+	env.mi.reconcileCobolRepos(map[string]struct{}{"finda": {}})
+
+	assert.Len(t, cobolHistory(t, env, "finda"), before, "a re-stamp appends no row")
+	assert.Contains(t, cobolLedgerFindings(env, "finda"), tailID, "and keeps the ID")
 }
