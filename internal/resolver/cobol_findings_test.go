@@ -921,3 +921,62 @@ func TestCobolReconcile_ExternalPerRepositoryPrefixDiagnostics(t *testing.T) {
 	assert.Zero(t, diag.UnownedCodeNodes, "unowned: %v", diag.UnownedSamples)
 	assert.Zero(t, diag.MisprefixedNodes, "misprefixed: %v", diag.MisprefixedSamples)
 }
+
+// TestCobolReconcile_FindingChangesDrain pins the change record the indexer
+// drains before its ledger pass: the reconciled repositories (widened by
+// resolve_from) and the finding and placeholder IDs added or evicted,
+// accumulated across passes and cleared by each drain.
+func TestCobolReconcile_FindingChangesDrain(t *testing.T) {
+	g := graph.New()
+	r := New(g)
+	r.SetCobolPolicyLookup(cobolPolicies(map[string]CobolPolicy{"r2": {ResolveFrom: []string{"r1"}}}))
+	for _, c := range []struct{ repo, program, para, target string }{
+		{"r2", "B2PGM", "B2-PARA", "NOPGM"},
+		{"r3", "B3PGM", "B3-PARA", "NOPGM3"},
+	} {
+		file := c.repo + "/b.cbl"
+		seedCobol(g, c.repo, file+"::"+c.program, graph.KindFunction, "program", c.program)
+		para := file + "::" + c.program + "/" + c.para
+		seedCobol(g, c.repo, para, graph.KindFunction, "paragraph", c.para)
+		callNo := "unresolved::cobol::program::" + c.target
+		cobolEdge(g, para, 1, graph.EdgeCalls, callNo, cobolAt(cobolCallMeta(callNo, "'"+c.target+"'"), 0, 100))
+	}
+	externalOf := func(repo string) string {
+		t.Helper()
+		var ids []string
+		for id, n := range cobolExternalNodes(g) {
+			if n.RepoPrefix == repo {
+				ids = append(ids, id)
+			}
+		}
+		require.Len(t, ids, 1, "one external finding in %s", repo)
+		return ids[0]
+	}
+
+	r.ReconcileCobol(nil)
+	repos, added, evicted := r.CobolFindingChanges()
+	f2, f3 := externalOf("r2"), externalOf("r3")
+	assert.Empty(t, repos, "a pass over every edge names no repository set")
+	want := []string{f2, f3, "r2/cobol-missing::program/NOPGM", "r3/cobol-missing::program/NOPGM3"}
+	sort.Strings(want)
+	assert.Equal(t, want, added)
+	assert.Empty(t, evicted)
+	repos, added, evicted = r.CobolFindingChanges()
+	assert.Empty(t, repos, "a drain clears the record")
+	assert.Empty(t, added)
+	assert.Empty(t, evicted)
+
+	// NOPGM is obtained in r1; r2 resolves from r1, r3 does not.
+	seedCobol(g, "r1", "r1/nopgm.cbl::NOPGM", graph.KindFunction, "program", "NOPGM")
+	changed := map[string]struct{}{"r1": {}}
+	r.ReconcileCobol(changed)
+	r.ReconcileCobol(changed) // a no-op pass must not hide the first one
+	repos, added, evicted = r.CobolFindingChanges()
+	assert.Equal(t, []string{"r1", "r2"}, repos, "the reconcile set widened by resolve_from")
+	want = []string{f2, "r2/cobol-missing::program/NOPGM"}
+	sort.Strings(want)
+	assert.Equal(t, want, evicted)
+	assert.Empty(t, added)
+	assert.Equal(t, []string{f3}, mapKeys(cobolExternalNodes(g)), "r3's finding is untouched")
+	assert.NotNil(t, g.GetNode("r3/cobol-missing::program/NOPGM3"), "r3's placeholder is untouched")
+}
