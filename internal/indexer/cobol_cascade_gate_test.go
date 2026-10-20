@@ -68,16 +68,20 @@ func cobolCascadeCounts(t *testing.T, env *cobolLifecycleEnv, path string) (data
 	return data, paras, cascades
 }
 
-// cobolCascadeTrack tracks src as cobol/t.cbl, the only file of repository
-// gate in a fresh store, and returns its counts. Tracking must succeed and
-// persist the file node whatever the producer grade (D-14: report, never
-// block).
-func cobolCascadeTrack(t *testing.T, src string) (data, paras int, cascades []*graph.Node) {
+// cobolCascadeProgram is the repository-relative path of every program case.
+const cobolCascadeProgram = "cobol/t.cbl"
+
+// cobolCascadeTrack tracks src as rel, the only file of repository gate in a
+// fresh store, and returns the store and the counts of rel. Tracking must
+// succeed and persist the file node whatever the producer grade (D-14:
+// report, never block).
+func cobolCascadeTrack(t *testing.T, rel, src string) (env *cobolLifecycleEnv, data, paras int, cascades []*graph.Node) {
 	t.Helper()
-	env := newCobolLifecycleEnv(t, map[string]map[string]string{"gate": {"cobol/t.cbl": src}})
+	env = newCobolLifecycleEnv(t, map[string]map[string]string{"gate": {rel: src}})
 	env.track(t, "gate")
-	require.NotNil(t, env.store.GetNode("gate/cobol/t.cbl"), "file node persisted")
-	return cobolCascadeCounts(t, env, "gate/cobol/t.cbl")
+	require.NotNil(t, env.store.GetNode("gate/"+rel), "file node persisted")
+	data, paras, cascades = cobolCascadeCounts(t, env, "gate/"+rel)
+	return env, data, paras, cascades
 }
 
 // requireCobolCascadeFinding checks that cascades holds exactly one
@@ -94,7 +98,7 @@ func requireCobolCascadeFinding(t *testing.T, cascades []*graph.Node) *graph.Nod
 }
 
 func TestCobolCascadeGate_CleanControl(t *testing.T) {
-	d, pa, cascades := cobolCascadeTrack(t, cobolCascadeInject("", "", ""))
+	_, d, pa, cascades := cobolCascadeTrack(t, cobolCascadeProgram, cobolCascadeInject("", "", ""))
 	if d != 20 || pa != 20 {
 		t.Fatalf("clean control moved: got %d data items and %d paragraphs, want 20 and 20", d, pa)
 	}
@@ -120,7 +124,7 @@ func TestCobolCascadeGate_Positive(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotEqual(t, clean, tc.src, "the shape must change the control")
-			_, _, cascades := cobolCascadeTrack(t, tc.src)
+			_, _, _, cascades := cobolCascadeTrack(t, cobolCascadeProgram, tc.src)
 			requireCobolCascadeFinding(t, cascades)
 		})
 	}
@@ -129,7 +133,7 @@ func TestCobolCascadeGate_Positive(t *testing.T) {
 func TestCobolCascadeGate_Negative(t *testing.T) {
 	// The clean control anchors every comparison below, so a regression
 	// that lowered the baseline cannot make a broken shape look contained.
-	d, pa, _ := cobolCascadeTrack(t, cobolCascadeInject("", "", ""))
+	_, d, pa, _ := cobolCascadeTrack(t, cobolCascadeProgram, cobolCascadeInject("", "", ""))
 	if d != 20 || pa != 20 {
 		t.Fatalf("clean control moved: got %d data items and %d paragraphs, want 20 and 20", d, pa)
 	}
@@ -152,7 +156,7 @@ func TestCobolCascadeGate_Negative(t *testing.T) {
 			"       EXEC SQL INCLUDE SQLCA END-EXEC.\n", "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d2, pa2, cascades := cobolCascadeTrack(t, tc.src)
+			_, d2, pa2, cascades := cobolCascadeTrack(t, cobolCascadeProgram, tc.src)
 			if d2 != d || pa2 != pa {
 				t.Fatalf("%s cascaded: got %d data items and %d paragraphs, want %d and %d (clean control)",
 					tc.name, d2, pa2, d, pa)
@@ -160,4 +164,35 @@ func TestCobolCascadeGate_Negative(t *testing.T) {
 			assert.Empty(t, cascades, "a contained shape has no uncontained-cascade finding")
 		})
 	}
+}
+
+// cobolCascadeCopybook is an invented data member: one group and its two
+// children, three data items in all.
+const cobolCascadeCopybook = "       01  CUST-REC.\n" +
+	"           05  CUST-NAME PIC X(30).\n" +
+	"           05  CUST-CITY PIC X(20).\n"
+
+// TestCobolCascadeGate_Copybook gates the copybook grade policy: an unknown
+// clause on the first child cascades and attaches its finding to the
+// copybook file node, and the same member without it keeps every data item.
+func TestCobolCascadeGate_Copybook(t *testing.T) {
+	const rel = "copy/cust.cpy"
+	_, d, _, cascades := cobolCascadeTrack(t, rel, cobolCascadeCopybook)
+	if d != 3 {
+		t.Fatalf("copybook control moved: got %d data items, want 3", d)
+	}
+	assert.Empty(t, cascades, "the copybook control has no uncontained-cascade finding")
+
+	group, children, _ := strings.Cut(cobolCascadeCopybook, "\n")
+	injected := group + "\n           05 CUST-ID PIC X(8) WHATEVER.\n" + children
+	env, _, _, cascades := cobolCascadeTrack(t, rel, injected)
+	n := requireCobolCascadeFinding(t, cascades)
+	assert.Equal(t, rel, n.Meta[graph.MetaFindingContainer], n.ID)
+	var member int
+	for _, e := range env.store.GetOutEdges(n.ID) {
+		if e.Kind == graph.EdgeMemberOf && e.To == "gate/"+rel {
+			member++
+		}
+	}
+	assert.Equal(t, 1, member, "one member_of edge from %s to the copybook file node", n.ID)
 }
