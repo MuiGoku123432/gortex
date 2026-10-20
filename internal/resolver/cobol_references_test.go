@@ -410,3 +410,137 @@ func TestCobolReferences_Copybook(t *testing.T) {
 		assert.Equal(t, map[string]any{"cobol_unresolved_reason": reasons[line]}, e.Meta, "line %d Meta unchanged", line)
 	}
 }
+
+// seedCobolNode adds a COBOL node of repository r1 with exactly meta. Unlike
+// seedCobol it never mutates a stored node, so it seeds every store.
+func seedCobolNode(g graph.Store, id string, kind graph.NodeKind, meta map[string]any) {
+	filePath, name := id, id
+	if i := strings.Index(id, "::"); i >= 0 {
+		filePath, name = id[:i], id[i+2:]
+	}
+	key, _ := meta["cobol_name_key"].(string)
+	g.AddNode(&graph.Node{
+		ID: id, Kind: kind, Name: key, QualName: name, FilePath: filePath,
+		Language: "cobol", RepoPrefix: "r1", Meta: meta,
+	})
+}
+
+// IN-08: a CALL whose only same-named program is nested under END PROGRAM
+// containment the extractor could not resolve is containment_unresolved, not
+// missing: that program exists, so no placeholder or finding claims it was
+// never obtained (D-09). Without the stamp the same CALL is missing.
+func TestCobolReconcile_ContainmentUnresolved(t *testing.T) {
+	const caller = "r1/a.cbl::CALLER"
+	const target = "unresolved::cobol::program::INNER"
+	const inner = "r1/b.cbl::OUTER/INNER"
+	seed := func(g graph.Store, stamped bool) {
+		seedCobol(g, "r1", caller, graph.KindFunction, "program", "CALLER")
+		seedCobol(g, "r1", "r1/b.cbl::OUTER", graph.KindFunction, "program", "OUTER")
+		meta := map[string]any{
+			"cobol_kind": "program", "cobol_name_key": "INNER",
+			"cobol_nested": true, "cobol_container": "r1/b.cbl::OUTER",
+		}
+		if stamped {
+			meta["cobol_nested_unresolved"] = true
+		}
+		seedCobolNode(g, inner, graph.KindFunction, meta)
+	}
+	call := func(g graph.Store) {
+		meta := cobolAt(cobolCallMeta(target, "'INNER'"), 4, 400)
+		meta["cobol_caller_program"] = caller
+		cobolEdge(g, caller, 5, graph.EdgeCalls, target, meta)
+	}
+	findings := func(g graph.Store) int {
+		count := 0
+		for n := range g.NodesByKind(graph.KindFinding) {
+			if n != nil {
+				count++
+			}
+		}
+		return count
+	}
+	assertContainmentUnresolved := func(t *testing.T, g graph.Store) {
+		t.Helper()
+		e := cobolEdgeAt(t, g, caller, 5)
+		assert.Equal(t, target, e.To, "the edge stays on its unresolved target")
+		assert.Equal(t, "containment_unresolved", e.Meta["cobol_unresolved_reason"])
+		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
+		assert.Empty(t, cobolMissingNodes(g), "no not-obtained placeholder")
+		assert.Zero(t, findings(g), "no finding of any class")
+	}
+
+	t.Run("stamped", func(t *testing.T) {
+		cobolOnStores(t, func(t *testing.T, g graph.Store) {
+			seed(g, true)
+			call(g)
+			New(g).ReconcileCobol(nil)
+			assertContainmentUnresolved(t, g)
+			New(g).ReconcileCobol(nil)
+			assertContainmentUnresolved(t, g)
+		})
+	})
+
+	t.Run("unstamped_missing", func(t *testing.T) {
+		cobolOnStores(t, func(t *testing.T, g graph.Store) {
+			seed(g, false)
+			call(g)
+			New(g).ReconcileCobol(nil)
+			e := cobolEdgeAt(t, g, caller, 5)
+			assert.Equal(t, "r1/cobol-missing::program/INNER", e.To)
+			assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
+			assert.Len(t, cobolMissingNodes(g), 1)
+			assert.Len(t, cobolExternalNodes(g), 1)
+		})
+	})
+
+	// A re-extraction that stamps the nested program moves a missing CALL
+	// off its placeholder, and its placeholder and finding go with it.
+	t.Run("missing_then_stamped", func(t *testing.T) {
+		cobolOnStores(t, func(t *testing.T, g graph.Store) {
+			seed(g, false)
+			call(g)
+			New(g).ReconcileCobol(nil)
+			require.Len(t, cobolExternalNodes(g), 1)
+			seed(g, true)
+			New(g).ReconcileCobol(nil)
+			assertContainmentUnresolved(t, g)
+		})
+	})
+}
+
+// WR-06: a copybook whose analysis failed is still present, so a COPY of it
+// binds to the extractor's identity-only file node and no
+// EXTERNAL_UNRESOLVED finding claims it was never obtained; its
+// analysis-failed parse finding stays.
+func TestCobolReconcile_AnalysisFailedCopybookBinds(t *testing.T) {
+	const caller = "r1/main.cbl::MAINPGM"
+	const target = "unresolved::cobol::copybook::BROKENC"
+	const copybook = "r1/copy/brokenc.cpy"
+	cobolOnStores(t, func(t *testing.T, g graph.Store) {
+		seedCobol(g, "r1", caller, graph.KindFunction, "program", "MAINPGM")
+		seedCobolNode(g, copybook, graph.KindFile, map[string]any{
+			"cobol_kind": "copybook", "cobol_name_key": "BROKENC",
+			"cobol_name_norm": "cobol-name-norm/1", "prov_analysis_absence": "copybook_analysis_failed",
+		})
+		parse := copybook + "::" + graph.FindingSymbol("copy/brokenc.cpy", graph.FindingClassParse,
+			"analysis-failed", "", graph.FindingEvidenceDigest("analysis-failed"))
+		g.AddNode(&graph.Node{
+			ID: parse, Kind: graph.KindFinding, Name: "analysis-failed", FilePath: copybook,
+			Language: "cobol", RepoPrefix: "r1", Meta: map[string]any{
+				graph.MetaEvidenceClass: graph.FindingClassParse, graph.MetaFindingKind: "analysis-failed",
+				graph.MetaFindingReason: "analysis-error",
+			},
+		})
+		g.AddEdge(&graph.Edge{From: parse, To: copybook, Kind: graph.EdgeMemberOf, FilePath: copybook})
+		cobolEdge(g, caller, 4, graph.EdgeImports, target, cobolAt(cobolCopyMeta("copy", target), 3, 300))
+
+		New(g).ReconcileCobol(nil)
+
+		e := cobolEdgeAt(t, g, caller, 4)
+		assert.Equal(t, copybook, e.To, "the COPY binds to the present copybook")
+		assert.NotContains(t, e.Meta, "cobol_unresolved_reason")
+		assert.Empty(t, cobolExternalNodes(g), "no EXTERNAL_UNRESOLVED finding")
+		assert.Empty(t, cobolMissingNodes(g), "no not-obtained placeholder")
+		require.NotNil(t, g.GetNode(parse), "the analysis-failed parse finding stays")
+	})
+}
