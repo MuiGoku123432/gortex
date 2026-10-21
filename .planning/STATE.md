@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
-status: executing
-stopped_at: Completed 05-11-PLAN.md
-last_updated: "2026-10-21T16:46:54.169Z"
+status: verifying
+stopped_at: Completed 05-12-PLAN.md
+last_updated: "2026-10-21T17:51:56.938Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 64
-  completed_plans: 63
-  percent: 40
+  completed_plans: 64
+  percent: 50
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
 
@@ -31,10 +31,10 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
 Plan: 12 of 12
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -124,6 +124,7 @@ Progress: [██████████] 98%
 | Phase 05 P09 | 28 min | 3 tasks | 7 files |
 | Phase 05 P10 | 15 min | 2 tasks | 7 files |
 | Phase 05 P11 | 38 min | 2 tasks | 4 files |
+| Phase 05 P12 | 61 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -267,6 +268,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-11: every place that drains a resolver's COBOL change record (both settle-point tails and runMasterResolveHookedContext) syncs symbol FTS from the drained IDs, routed by RepoPrefixOfID to the owning tracked Indexer; the ledger stays at the two 05-09 sites
 - [Phase 05]: 05-11: syncCobolFindingFTS writes only the store's symbol FTS (deleteSymbolFTS, then SymbolFTSBatchUpserter for added IDs whose node exists); idx.search is SymbolSearcherBackend or Null, so its Add/Remove are no-ops
 - [Phase 05]: 05-11: BenchmarkRecordFindingLedger_LargeRepo baseline (Apple M5, go1.27.1): FirstPass 1.59 s for 100000 rows, NoChangePass 0.73 s for 0 rows
+- [Phase 05]: 05-12: search_symbols relaxes a kind clause that filters out every candidate (filters_relaxed: true); a placeholder may appear under kind:function only through that declared fallback and only as kind resource, never as a function
+- [Phase 05]: 05-12: the D-16 finding writer inventory (internal/graph/finding_writers_test.go) fences KindFinding construction and finding_status writes to the extractor and resolver writers, AppendFindingTransitions to internal/indexer/finding_ledger.go, and EvictFindingNodesByIDs to the resolver and internal/graph; a new writer must be added there deliberately
+- [Phase 05]: 05-12: phase gate green: GOWORK=off go test -race -timeout 60m ./... passed (157 ok, 0 FAIL, 0 cached, 1737 s)
 
 ### Pending Todos
 
@@ -295,6 +299,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-21T16:46:44.592Z
-Stopped at: Completed 05-11-PLAN.md
+Last session: 2026-10-21T17:51:56.923Z
+Stopped at: Completed 05-12-PLAN.md
 Resume file: None
