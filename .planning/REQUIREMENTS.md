@@ -85,14 +85,14 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 
 ### Explicit Unresolved Evidence
 
-- [x] **GAP-01**: A named unparsed tail, localized Tree-sitter `ERROR`, or localized `MISSING` node with surviving context MUST produce a persisted `PARSE_UNRESOLVED` finding.
-- [x] **GAP-02**: A deterministic reference whose target artifact was not retrieved MUST produce an `EXTERNAL_UNRESOLVED` finding.
-- [x] **GAP-03**: `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` MUST remain distinct in storage and query results.
-- [x] **GAP-04**: Each finding MUST retain a stable ID, source scope, exact range, containing symbol, resolution class, normalized reason, severity, parser version, and lifecycle status.
-- [x] **GAP-05**: An external unresolved finding MUST preserve a placeholder for the observed target without fabricating target source, body, or attributes.
-- [x] **GAP-06**: Reprocessing unchanged evidence MUST reuse the active finding identity rather than create a duplicate.
-- [x] **GAP-07**: A finding MUST close or be superseded when its source, parser, or retrieved-artifact evidence resolves or replaces it.
-- [x] **GAP-08**: An uncontained parser recovery cascade that removes expected downstream structure MUST remain a deterministic regression failure even if AI proposes a recovery.
+- [ ] **GAP-01**: A named unparsed tail, localized Tree-sitter `ERROR`, or localized `MISSING` node with surviving context MUST produce a persisted `PARSE_UNRESOLVED` finding.
+- [ ] **GAP-02**: A deterministic reference whose target artifact was not retrieved MUST produce an `EXTERNAL_UNRESOLVED` finding.
+- [ ] **GAP-03**: `PARSE_UNRESOLVED` and `EXTERNAL_UNRESOLVED` MUST remain distinct in storage and query results.
+- [ ] **GAP-04**: Each finding MUST retain a stable ID, source scope, exact range, containing symbol, resolution class, normalized reason, severity, parser version, and lifecycle status.
+- [ ] **GAP-05**: An external unresolved finding MUST preserve a placeholder for the observed target without fabricating target source, body, or attributes.
+- [ ] **GAP-06**: Reprocessing unchanged evidence MUST reuse the active finding identity rather than create a duplicate.
+- [ ] **GAP-07**: A finding MUST close or be superseded when its source, parser, or retrieved-artifact evidence resolves or replaces it.
+- [ ] **GAP-08**: An uncontained parser recovery cascade that removes expected downstream structure MUST remain a deterministic regression failure even if AI proposes a recovery.
 
 ### Native Query Outcomes
 
@@ -257,14 +257,14 @@ Deterministic extraction establishes facts. Missing evidence remains explicit. A
 | ID-07 | Phase 4 | Gaps Found |
 | ID-08 | Phase 4 | Gaps Found |
 | ID-09 | Phase 4 | Gaps Found |
-| GAP-01 | Phase 5 | Complete |
-| GAP-02 | Phase 5 | Complete |
-| GAP-03 | Phase 5 | Complete |
-| GAP-04 | Phase 5 | Complete |
-| GAP-05 | Phase 5 | Complete |
-| GAP-06 | Phase 5 | Complete |
-| GAP-07 | Phase 5 | Complete |
-| GAP-08 | Phase 5 | Complete |
+| GAP-01 | Phase 5 | Gaps Found |
+| GAP-02 | Phase 5 | Gaps Found |
+| GAP-03 | Phase 5 | Gaps Found |
+| GAP-04 | Phase 5 | Gaps Found |
+| GAP-05 | Phase 5 | Gaps Found |
+| GAP-06 | Phase 5 | Gaps Found |
+| GAP-07 | Phase 5 | Gaps Found |
+| GAP-08 | Phase 5 | Gaps Found |
 | QUERY-01 | Phase 6 | Pending |
 | QUERY-02 | Phase 6 | Pending |
 | QUERY-03 | Phase 6 | Pending |
