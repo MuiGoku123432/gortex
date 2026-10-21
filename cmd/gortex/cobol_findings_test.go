@@ -333,3 +333,203 @@ func TestCobolFindings_ExternalPersisted(t *testing.T) {
 	assert.Regexp(t, `^`+regexp.QuoteMeta(repo.fileID)+`::@finding/parse/[0-9a-f]{32}$`, repo.tailID)
 	assert.NotNil(t, repo.store.GetNode(repo.tailID), "the unparsed-tail finding keeps its ID")
 }
+
+// cobolFindingsNOPGM locates, through the store and never by recomputing the
+// hash, the EXTERNAL_UNRESOLVED finding of CALL 'NOPGM', its placeholder, and
+// the From of the code edge that targets the placeholder (the caller node).
+func cobolFindingsNOPGM(t *testing.T, repo cobolFindingsRepo) (findingID, placeholderID, callerID string) {
+	t.Helper()
+	var ids []string
+	for n := range repo.store.NodesByKind(graph.KindFinding) {
+		if n.Meta[graph.MetaEvidenceClass] == graph.FindingClassExternal && n.Meta[graph.MetaFindingTargetKey] == "NOPGM" {
+			ids = append(ids, n.ID)
+		}
+	}
+	require.Len(t, ids, 1, "one EXTERNAL_UNRESOLVED finding for NOPGM")
+	placeholderID = repo.prefix + "/cobol-missing::program/NOPGM"
+	var callers []string
+	for _, e := range repo.store.GetInEdges(placeholderID) {
+		if e.Kind == graph.EdgeCalls {
+			callers = append(callers, e.From)
+		}
+	}
+	require.Len(t, callers, 1, "one calls edge into %s", placeholderID)
+	return ids[0], placeholderID, callers[0]
+}
+
+// assertCobolExternalFinding checks the decoded get_symbol detail=full payload
+// of the NOPGM external finding against the GAP-04 contract (RESEARCH
+// Pattern 3) and its two out-edges (D-08).
+func assertCobolExternalFinding(t *testing.T, repo cobolFindingsRepo, payload cobolFindingSymbol) {
+	t.Helper()
+	findingID, placeholderID, callerID := cobolFindingsNOPGM(t, repo)
+	node := payload.Node
+	require.Equal(t, findingID, node["id"])
+	assert.Equal(t, string(graph.KindFinding), node["kind"])
+	assert.Equal(t, repo.fileID, node["file_path"])
+
+	meta, ok := node["meta"].(map[string]any)
+	require.True(t, ok, "node has no meta: %v", node)
+	for key, want := range map[string]any{
+		graph.MetaEvidenceClass:         graph.FindingClassExternal,
+		graph.MetaFindingKind:           "external-reference",
+		graph.MetaFindingReason:         "missing",
+		graph.MetaFindingSeverity:       "medium",
+		graph.MetaFindingSeverityRule:   graph.FindingSeverityRule,
+		graph.MetaFindingScope:          "unavailable",
+		graph.MetaFindingStatus:         graph.FindingStatusActive,
+		graph.MetaFindingEvidenceRule:   graph.FindingEvidenceRule,
+		graph.MetaFindingIDRule:         graph.FindingIDRule,
+		graph.MetaFindingArtifactType:   "program",
+		graph.MetaFindingTargetKey:      "NOPGM",
+		graph.MetaFindingContainer:      strings.TrimPrefix(callerID, repo.prefix+"/"),
+		"prov_range_exact":              true,
+		"prov_extractor_version":        "gortex-cobol-grammar/6",
+		graph.MetaFindingExpectedFamily: "program",
+	} {
+		assert.Equal(t, want, meta[key], "meta %s", key)
+	}
+	assert.NotEmpty(t, meta[graph.MetaFindingEvidenceDigest])
+	assert.NotEmpty(t, meta["prov_parser_tool_id"])
+	for _, key := range []string{"prov_start_row", "prov_start_column", "prov_end_row", "prov_end_column"} {
+		_, isNum := meta[key].(float64)
+		assert.True(t, isNum, "meta lacks %s: %v", key, meta)
+	}
+	start, startOK := meta["prov_start_byte"].(float64)
+	end, endOK := meta["prov_end_byte"].(float64)
+	require.True(t, startOK && endOK, "meta lacks an exact byte range: %v", meta)
+	assert.Contains(t, cobolFindingsFixture[int(start):int(end)], "NOPGM", "the range covers the CALL")
+
+	targets := map[string]string{}
+	for _, e := range payload.OutEdges {
+		kind, _ := e["kind"].(string)
+		targets[kind], _ = e["to"].(string)
+	}
+	assert.Equal(t, callerID, targets[string(graph.EdgeMemberOf)], "member_of the caller: %v", payload.OutEdges)
+	assert.Equal(t, placeholderID, targets[string(graph.EdgeReferences)], "references the placeholder: %v", payload.OutEdges)
+}
+
+// TestCobolFindings_ExternalMCPGetSymbol retrieves the EXTERNAL_UNRESOLVED
+// finding of CALL 'NOPGM' by its exact prefixed ID through the real daemon
+// relay and MCP get_symbol (D-08, P2 D-11).
+func TestCobolFindings_ExternalMCPGetSymbol(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	findingID, _, _ := cobolFindingsNOPGM(t, repo)
+	socket, _ := serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	text := callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": findingID, "detail": "full", "format": "json"})
+	var payload cobolFindingSymbol
+	require.NoError(t, json.Unmarshal([]byte(text), &payload), "get_symbol output: %s", text)
+	assertCobolExternalFinding(t, repo, payload)
+}
+
+// TestCobolFindings_ExternalCLIGetSymbol retrieves the same external finding
+// through `gortex call get_symbol` over the real daemon relay.
+func TestCobolFindings_ExternalCLIGetSymbol(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	findingID, _, _ := cobolFindingsNOPGM(t, repo)
+	serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	cmd, buf := newCallTestCmd(t)
+	callIndex = repo.root
+	callArgs = []string{"id=" + findingID, "detail=full"}
+	require.NoError(t, runCall(cmd, []string{"get_symbol"}))
+
+	var payload cobolFindingSymbol
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &payload), "CLI output: %s", buf.String())
+	assertCobolExternalFinding(t, repo, payload)
+}
+
+// TestCobolFindings_PlaceholderMCPGetSymbol retrieves the not-obtained
+// placeholder of NOPGM through MCP get_symbol and proves it carries no
+// fabricated content (GAP-05, D-11): no line, no range, no parser stamp,
+// with the code calls edge and the finding's references edge as in-edges.
+func TestCobolFindings_PlaceholderMCPGetSymbol(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	findingID, placeholderID, callerID := cobolFindingsNOPGM(t, repo)
+	socket, _ := serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	text := callCobolTracerTool(t, socket, repo.root, "get_symbol",
+		map[string]any{"id": placeholderID, "detail": "full", "format": "json"})
+	var payload cobolTracerSymbol
+	require.NoError(t, json.Unmarshal([]byte(text), &payload), "get_symbol output: %s", text)
+	node := payload.Node
+	require.Equal(t, placeholderID, node["id"])
+	assert.Equal(t, string(graph.KindResource), node["kind"])
+	assert.Equal(t, "NOPGM", node["name"])
+	assert.Equal(t, repo.prefix, node["repo_prefix"])
+	if line, ok := node["start_line"]; ok {
+		assert.Zero(t, line, "a placeholder has no start_line")
+	}
+	assert.NotContains(t, node, "end_line")
+
+	meta, ok := node["meta"].(map[string]any)
+	require.True(t, ok, "node has no meta: %v", node)
+	assert.Equal(t, "not_obtained", meta["artifact_status"])
+	assert.Equal(t, true, meta["synthetic"])
+	assert.Equal(t, "program", meta["artifact_type"])
+	for _, key := range []string{"prov_start_row", "prov_end_row", "prov_start_byte", "prov_end_byte"} {
+		assert.NotContains(t, meta, key, "a placeholder has no range")
+	}
+	for key := range meta {
+		assert.False(t, strings.HasPrefix(key, "prov_parser_"), "a placeholder has no parser stamp, found %s", key)
+	}
+
+	var calledBy, referencedBy []string
+	for _, e := range payload.InEdges {
+		from, _ := e["from"].(string)
+		switch e["kind"] {
+		case string(graph.EdgeCalls):
+			calledBy = append(calledBy, from)
+		case string(graph.EdgeReferences):
+			referencedBy = append(referencedBy, from)
+		}
+	}
+	assert.Contains(t, calledBy, callerID, "in_edges lacks the code calls edge: %v", payload.InEdges)
+	assert.Contains(t, referencedBy, findingID, "in_edges lacks the finding's references edge: %v", payload.InEdges)
+}
+
+// TestCobolFindings_PlaceholderSearch finds the placeholder by its key through
+// MCP search_symbols, and proves a kind:function search for the same key
+// never presents it as an implementation (GRAPH-SCHEMA Required
+// Verification, T-05-36). When a kind clause filters every candidate out,
+// search_symbols retries on the free text alone and says so with
+// filters_relaxed; the placeholder may come back only through that
+// declared fallback, and then as a resource, never as a function.
+func TestCobolFindings_PlaceholderSearch(t *testing.T) {
+	repo := indexCobolFindingsRepo(t)
+	_, placeholderID, _ := cobolFindingsNOPGM(t, repo)
+	socket, _ := serveCobolTestDaemon(t, repo.dir, repo.store, repo.idx, repo.mi, repo.cm)
+
+	type hit struct {
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
+	}
+	search := func(query string) ([]hit, bool) {
+		text := callCobolTracerTool(t, socket, repo.root, "search_symbols",
+			map[string]any{"query": query, "format": "json"})
+		var found struct {
+			Results        []hit `json:"results"`
+			FiltersRelaxed bool  `json:"filters_relaxed"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(text), &found), "search_symbols %q output: %s", query, text)
+		return found.Results, found.FiltersRelaxed
+	}
+
+	hits, _ := search("NOPGM")
+	var ids []string
+	for _, h := range hits {
+		ids = append(ids, h.ID)
+	}
+	assert.Contains(t, ids, placeholderID)
+
+	hits, relaxed := search("kind:function NOPGM")
+	for _, h := range hits {
+		if h.ID != placeholderID {
+			continue
+		}
+		assert.True(t, relaxed, "kind:function returned the placeholder without relaxing the kind clause")
+		assert.Equal(t, string(graph.KindResource), h.Kind, "the placeholder is never a function")
+	}
+}
