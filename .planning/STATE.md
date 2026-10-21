@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-10-20T19:21:42.098Z"
+stopped_at: Completed 05-11-PLAN.md
+last_updated: "2026-10-21T16:46:54.169Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 64
-  completed_plans: 62
+  completed_plans: 63
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
 Last activity: 2026-10-20 — Phase 05 execution started
 
-Progress: [██████████] 97%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -123,6 +123,7 @@ Progress: [██████████] 97%
 | Phase 05 P08 | 20min | 2 tasks | 4 files |
 | Phase 05 P09 | 28 min | 3 tasks | 7 files |
 | Phase 05 P10 | 15 min | 2 tasks | 7 files |
+| Phase 05 P11 | 38 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -263,6 +264,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-10: a copybook whose analysis fails returns an identity-only file node (prov_analysis_absence=copybook_analysis_failed) plus one high analysis-failed PARSE_UNRESOLVED document finding with reason analysis-error; program analysis errors still fail (D-20)
 - [Phase 05]: 05-10: a cursor declared two or more times is ambiguous; cursor_not_in_copybook stays only for zero declarations in a copybook
 - [Phase 05]: 05-10: the extractor stamps cobol_nested_unresolved=true on nested programs under unresolved END PROGRAM containment; a CALL left with no candidate only because such programs were dropped is containment_unresolved, keeps its unresolved:: target, and gets no placeholder or finding
+- [Phase 05]: 05-11: every place that drains a resolver's COBOL change record (both settle-point tails and runMasterResolveHookedContext) syncs symbol FTS from the drained IDs, routed by RepoPrefixOfID to the owning tracked Indexer; the ledger stays at the two 05-09 sites
+- [Phase 05]: 05-11: syncCobolFindingFTS writes only the store's symbol FTS (deleteSymbolFTS, then SymbolFTSBatchUpserter for added IDs whose node exists); idx.search is SymbolSearcherBackend or Null, so its Add/Remove are no-ops
+- [Phase 05]: 05-11: BenchmarkRecordFindingLedger_LargeRepo baseline (Apple M5, go1.27.1): FirstPass 1.59 s for 100000 rows, NoChangePass 0.73 s for 0 rows
 
 ### Pending Todos
 
@@ -291,6 +295,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-20T19:21:42.089Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-10-21T16:46:44.592Z
+Stopped at: Completed 05-11-PLAN.md
 Resume file: None
