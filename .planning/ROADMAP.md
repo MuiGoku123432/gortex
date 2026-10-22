@@ -262,7 +262,7 @@ Plans:
   4. Unchanged evidence reuses finding identities; corrected source/parser evidence or retrieved artifacts close or supersede only the applicable finding class.
   5. Destructive parser-recovery cascades remain deterministic regression failures regardless of any later AI output.
 
-**Plans**: 12/12 plans executed
+**Plans**: 12/17 plans executed (5 gap-closure plans pending)
 
 Plans:
 **Wave 1**
@@ -297,6 +297,26 @@ Plans:
 **Wave 7** *(blocked on Wave 6 completion)*
 
 - [x] 05-12-PLAN.md -- External/placeholder MCP+CLI acceptance, canonical equivalence, cross-container ledger case, D-16 writer inventory, docs (incl. D-20 limitation), full race gate
+
+**Wave 8** *(gap closure, frontmatter wave 1; the five gap plans run one per wave on one checkout: they share internal/graph, internal/indexer, and internal/resolver, and worktrees are not used)*
+
+- [ ] 05-15-PLAN.md -- Kind-guarded EvictResourceNodesByIDs on both backends (shared SQLite helper), generation fence, storetest conformance (prerequisite for D-27)
+
+**Wave 9** *(gap closure, frontmatter wave 2; blocked on Wave 8 completion)*
+
+- [ ] 05-13-PLAN.md -- Gap SC4 (CR-01, WR-07): name-stable parse finding anchor (D-21), reference-form external evidence (D-25), one finding per occurrence (D-26), FindingIDRule /2 and FindingEvidenceRule /2 bumped once, D-22 doc comment; extractor and real-path regressions
+
+**Wave 10** *(gap closure, frontmatter wave 3; blocked on Wave 9 completion)*
+
+- [ ] 05-14-PLAN.md -- Gap WR-01/WR-02: ledger under the reach topology writer and the reconcile lock (D-23), batch-aware TrackRepoCtx tail, documented cold-track gap, deterministic interleaving test; master-resolve drain records the ledger at its own step (D-24)
+
+**Wave 11** *(gap closure, frontmatter wave 4; blocked on Wave 10 completion)*
+
+- [ ] 05-16-PLAN.md -- Gap WR-05: placeholders at `<repo>::cobol-missing::<type>/<key>` with no file path, swept by ID, refused over an existing node (D-27); RepoPrefixOfID caller audit
+
+**Wave 12** *(gap closure, frontmatter wave 5; blocked on Wave 11 completion)*
+
+- [ ] 05-17-PLAN.md -- Docs for D-21..D-27 (D-22 residual risk, D-26 mixed-form same-line limitation, D-23/D-24 history timing); free-space check and full race gate
 
 ### Phase 6: Native Deterministic Acceptance and Pre-AI Release Gate
 
