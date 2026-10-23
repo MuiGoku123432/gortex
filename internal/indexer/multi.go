@@ -2946,7 +2946,25 @@ func (mi *MultiIndexer) TrackRepoCtx(ctx context.Context, entry config.RepoEntry
 			// A shadow-path resolve saw only this repository, so a master
 			// pass on the durable store re-decides it and every repository
 			// resolving from it, then ledgers: the warm-restart tail's shape.
-			mi.reconcileCobolRepos(map[string]struct{}{result.RepoPrefix: {}})
+			// The ledger must hold the reach topology writer (D-23). Inside a
+			// repository topology batch, RunRepositoryTopologyBatch holds the
+			// non-reentrant writer for its whole callback, so the tail runs
+			// under it through the held variant; taking it again would
+			// self-deadlock (the reconcileEnclosingRepos batch check is the
+			// precedent). Outside a batch, the cold commit's writer was
+			// released when trackRepoSourceCtx's closure returned, and
+			// reconcileCobolRepos retakes it. That commit-to-tail gap is
+			// benign: the closure installs only an untracked repository, so
+			// its commit evicts no existing finding, and a settle point
+			// reads this repository only after a reconcile of it (its own
+			// base, or a drained record a later reconcile produced), see the
+			// 05-14 SUMMARY "Cold-track gap".
+			repos := map[string]struct{}{result.RepoPrefix: {}}
+			if activeRepositoryTopologyBatch(ctx, mi) != nil {
+				mi.reconcileCobolReposTopologyHeld(repos)
+			} else {
+				mi.reconcileCobolRepos(repos)
+			}
 		}
 	}
 	return result, err
@@ -3464,7 +3482,10 @@ func (mi *MultiIndexer) ReconcileRepoCtx(ctx context.Context, entry config.RepoE
 		// census can see no change. Reconcile unconditionally: it is a no-op
 		// without COBOL nodes and idempotent with them (ID-07). A parallel
 		// warmup defers it to the batch end, once every repository is
-		// registered, as it defers the other resolve tails.
+		// registered, as it defers the other resolve tails. The warm snapshot
+		// closure holds the reach topology writer (taken above through
+		// beginRepositoryTopologyMutation, or held by the repository topology
+		// batch), so the reconcile and ledger use the held variant (D-23).
 		if batchMode.deferResolve {
 			mi.mu.Lock()
 			if mi.batchCobolRepos == nil {
@@ -3473,7 +3494,7 @@ func (mi *MultiIndexer) ReconcileRepoCtx(ctx context.Context, entry config.RepoE
 			mi.batchCobolRepos[prefix] = struct{}{}
 			mi.mu.Unlock()
 		} else {
-			mi.reconcileCobolRepos(map[string]struct{}{prefix: {}})
+			mi.reconcileCobolReposTopologyHeld(map[string]struct{}{prefix: {}})
 		}
 
 		publishTiming.complete(nil)

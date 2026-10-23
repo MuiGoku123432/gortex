@@ -239,11 +239,13 @@ func (mi *MultiIndexer) purgeRepositoryPayload(
 	// other repositories' COBOL CALL/COPY edges bound into it (D-09). Return
 	// those to their placeholders first, as file eviction does, and
 	// re-decide the affected repositories once the payload is gone, so the
-	// result equals a clean build without repoPrefix.
+	// result equals a clean build without repoPrefix. The only caller
+	// (untrackRepoTeardown's refresh closure) holds the reach topology writer,
+	// so the reconcile and its ledger use the held variant (D-23).
 	if reconcile := mi.restubCobolEdgesInto(repoPrefix); reconcile != nil {
 		defer func() {
 			if err == nil {
-				mi.reconcileCobolRepos(reconcile)
+				mi.reconcileCobolReposTopologyHeld(reconcile)
 			}
 		}()
 	}

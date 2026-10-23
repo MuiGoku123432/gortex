@@ -135,15 +135,30 @@ func findingTransitionOf(n *graph.Node) graph.FindingTransition {
 // The ledger runs on store, the durable graph, only (Pitfall 3, D-06, D-07);
 // the returned IDs feed search sync.
 //
+// The ledger observes resolver reconciles and file commits, so it holds
+// their exclusions (D-23, WR-01): reconcileMu, when non-nil, is the reconcile
+// lock the given resolvers share (SetCobolReconcileLock) and is held from
+// before the drain until recordFindingLedger returns, so no reconcile's
+// evict, add, and sweep writes land between the drain and the read; the
+// caller holds the reach topology writer, which every repository lane holds
+// from its file commit through its reconcile. Lock order everywhere: reach
+// topology writer, then reconcileMu, then findingLedgerMu.
+//
 // KEYWORDS — cobol, finding, ledger, drain, change record, dependent
-// repository, resolve_from, settle point, D-03, D-06, D-07, Pitfall 3.
+// repository, resolve_from, settle point, exclusion, lock order, D-03, D-06,
+// D-07, D-23, WR-01, Pitfall 3.
 func recordCobolFindingLedger(
 	store graph.Store,
 	base []string,
 	tracked func(prefix string) bool,
+	reconcileMu *sync.Mutex,
 	logger *zap.Logger,
 	resolvers ...*resolver.Resolver,
 ) (added, evicted []string) {
+	if reconcileMu != nil {
+		reconcileMu.Lock()
+		defer reconcileMu.Unlock()
+	}
 	ledger := make(map[string]struct{}, len(base))
 	for _, repo := range base {
 		ledger[repo] = struct{}{}

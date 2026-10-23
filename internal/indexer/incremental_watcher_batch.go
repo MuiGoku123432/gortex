@@ -425,6 +425,9 @@ func (mi *MultiIndexer) resolveIncrementalRepoMutationMode(
 	// The COBOL reconcile runs outside the resolution branch: a receipt that
 	// is not ResolutionRelevant can still move or remove a COBOL target.
 	// It honours the same interruption seam as Indexer.reconcileCobolAfterMutation.
+	// Every caller (incrementalReindexRepoRawMode, incrementalEvictRepoRaw,
+	// the warm snapshot closure) holds the reach topology writer from its
+	// file commit through here, so the ledger runs under it (D-23).
 	if cobolMutationTouched(result, receipt) {
 		idx.observeIncrementalCatchup("cobol", cobolMutationPaths(result, receipt))
 		if idx == nil || idx.incrementalResolveFilesHook == nil {
@@ -434,7 +437,7 @@ func (mi *MultiIndexer) resolveIncrementalRepoMutationMode(
 			if repoPrefix != "" {
 				repos = map[string]struct{}{repoPrefix: {}}
 			}
-			mi.reconcileCobolRepos(repos)
+			mi.reconcileCobolReposTopologyHeld(repos)
 		}
 	}
 
