@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-10-22T15:16:27.618Z"
-last_activity: 2026-10-20
+stopped_at: Completed 05-15-PLAN.md
+last_updated: "2026-10-23T15:21:34.122Z"
+last_activity: 2026-10-23
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
-  completed_phases: 5
+  completed_phases: 4
   total_plans: 69
-  completed_plans: 64
+  completed_plans: 65
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 12 of 12
+Plan: 2 of 17
 Status: Ready to execute
-Last activity: 2026-10-20 — Phase 05 execution started
+Last activity: 2026-10-23 — Phase 05 execution started
 
-Progress: [██████████] 100%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -125,6 +125,7 @@ Progress: [██████████] 100%
 | Phase 05 P10 | 15 min | 2 tasks | 7 files |
 | Phase 05 P11 | 38 min | 2 tasks | 4 files |
 | Phase 05 P12 | 61 min | 3 tasks | 5 files |
+| Phase 05 P15 | 10min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -271,6 +272,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-12: search_symbols relaxes a kind clause that filters out every candidate (filters_relaxed: true); a placeholder may appear under kind:function only through that declared fallback and only as kind resource, never as a function
 - [Phase 05]: 05-12: the D-16 finding writer inventory (internal/graph/finding_writers_test.go) fences KindFinding construction and finding_status writes to the extractor and resolver writers, AppendFindingTransitions to internal/indexer/finding_ledger.go, and EvictFindingNodesByIDs to the resolver and internal/graph; a new writer must be added there deliberately
 - [Phase 05]: 05-12: phase gate green: GOWORK=off go test -race -timeout 60m ./... passed (157 ok, 0 FAIL, 0 cached, 1737 s)
+- [Phase 05]: 05-15: SQLite finding and resource evicters share private evictNodesOfKindByIDs(kind, ids) (rule of three); upstream config/contract evicters keep their copies for fork hygiene
+- [Phase 05]: 05-15: graph.EvictResourceNodesByIDs is language-neutral (kind + view_gen guard only); the COBOL missing_artifact and placeholder-namespace guard is the 05-16 resolver's job, and supported=false must be an error, never a fallback to point deletes or EvictFile
 
 ### Pending Todos
 
@@ -299,6 +302,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-21T17:51:56.923Z
-Stopped at: Completed 05-12-PLAN.md
+Last session: 2026-10-23T15:21:34.101Z
+Stopped at: Completed 05-15-PLAN.md
 Resume file: None
