@@ -14,9 +14,19 @@ import (
 // Scoped to the handle's payload view generation: the resolver computes the
 // undesired finding set from the corpus this handle indexed, so a finding
 // still produced in another generation must survive.
-//
-// note: third occurrence of this kind-guarded evicter (config_node_evict.go, contract_node_evict.go); kept as a copy for fork hygiene (05-02 flagged assumption).
 func (s *Store) EvictFindingNodesByIDs(ids []string) (nodesRemoved, edgesRemoved int) {
+	return s.evictNodesOfKindByIDs(graph.KindFinding, ids)
+}
+
+// evictNodesOfKindByIDs removes only nodes of kind from the supplied bounded
+// ID set and every incident edge in one transaction, in chunks of
+// contractNodeEvictChunkSize. The kind and view_gen predicates ride on every
+// statement, so a node of another kind or generation survives.
+//
+// note: the two Phase 5 evicters (finding, resource) share this helper;
+// config_node_evict.go and contract_node_evict.go keep their copies for fork
+// hygiene (05-02, 05-15 flagged assumptions).
+func (s *Store) evictNodesOfKindByIDs(kind graph.NodeKind, ids []string) (nodesRemoved, edgesRemoved int) {
 	if len(ids) == 0 {
 		return 0, 0
 	}
@@ -58,15 +68,15 @@ func (s *Store) EvictFindingNodesByIDs(ids []string) (nodesRemoved, edgesRemoved
 		chunk := unique[start:end]
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
 		args := make([]any, 0, len(chunk)+2)
-		args = append(args, string(graph.KindFinding))
+		args = append(args, string(kind))
 		for _, id := range chunk {
 			args = append(args, id)
 		}
 		args = append(args, s.viewGen)
-		findingIDs := `SELECT id FROM nodes WHERE kind = ? AND id IN (` + placeholders + `) AND view_gen = ?`
+		kindIDs := `SELECT id FROM nodes WHERE kind = ? AND id IN (` + placeholders + `) AND view_gen = ?`
 		edgeArgs := append(append([]any{}, args...), s.viewGen)
 		for _, column := range []string{"from_id", "to_id"} {
-			result, execErr := tx.Exec(`DELETE FROM edges WHERE `+column+` IN (`+findingIDs+`) AND view_gen = ?`, edgeArgs...)
+			result, execErr := tx.Exec(`DELETE FROM edges WHERE `+column+` IN (`+kindIDs+`) AND view_gen = ?`, edgeArgs...)
 			if execErr != nil {
 				panicOnFatal(execErr)
 				return 0, edgesRemoved
