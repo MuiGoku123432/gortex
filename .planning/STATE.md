@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-13-PLAN.md
-last_updated: "2026-10-23T15:57:21.945Z"
+stopped_at: Completed 05-14-PLAN.md
+last_updated: "2026-10-23T20:28:24.671Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 69
-  completed_plans: 66
+  completed_plans: 67
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 3 of 17
+Plan: 4 of 17
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 05 execution started
 
-Progress: [██████████] 96%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -127,6 +127,7 @@ Progress: [██████████] 96%
 | Phase 05 P12 | 61 min | 3 tasks | 5 files |
 | Phase 05 P15 | 10min | 2 tasks | 8 files |
 | Phase 05 P13 | 30min | 3 tasks | 6 files |
+| Phase 05 P14 | 62min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -278,6 +279,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-13: parse finding ID and finding_container hash cobolFindingAnchor (paragraph/section/procedure division/data or env section/program/file), never a statement ordinal; document scope always anchors to the file node; member_of keeps the innermost statement (D-21). FindingIDRule and FindingEvidenceRule bumped to /2 once each.
 - [Phase 05]: 05-13: D-01 adjacency trade shipped: inserting or deleting a statement that leaves an identical-evidence gap earlier in the same paragraph shifts a later identical finding's #k ordinal and ID (accepted; 05-17 documents it).
 - [Phase 05]: 05-13: external evidence is fixed six fields (edge kind, prov_observation_kind, cics_command, form, IDMS kind, raw target) (D-25); cobol_occurrence_count n yields n findings, later ones same_line_occurrence without coordinates (D-26). Mixed CALL/LINK/XCTL of one target on one line collapse to one calls edge with the first form's Meta (known window for 05-17).
+- [Phase 05]: D-23 shipped (05-14): every MultiIndexer COBOL ledger runs through recordCobolSettleLedger under the reach topology writer and cobolReconcileMu; lock order writer -> cobolReconcileMu -> findingLedgerMu; writer-held sites use TopologyHeld variants and the TrackRepoCtx tail branches on activeRepositoryTopologyBatch — Non-reentrant reach.BeginTopologyMutation forces explicit writer state; a held site on a taking variant self-deadlocks, a free site on a held variant loses the exclusion (TestCobolFindings_LedgerExcludesTornMutation proves it)
+- [Phase 05]: D-24 shipped (05-14): the master-resolve drain ledgers at its own step; resolveDeferredMutations keeps its 4-argument signature (resolveDeferredMutationsMode carries topologyHeld) — A discarded master drain let a later settle point pair a close with an unrelated open into a false supersede (WR-02)
+- [Phase 05]: Cold-track commit-to-tail gap kept and documented as benign in 05-14-SUMMARY; one residual stale-record corner accepted under T-05-73 — The commit installs only an untracked repository and every ledger read of it follows a reconcile of it; moving the tail into the closure would reorder reconcileEnclosingRepos and the deferResolve handoff
 
 ### Pending Todos
 
@@ -306,6 +310,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-23T15:57:21.930Z
-Stopped at: Completed 05-13-PLAN.md
+Last session: 2026-10-23T20:28:19.457Z
+Stopped at: Completed 05-14-PLAN.md
 Resume file: None
