@@ -130,21 +130,58 @@ func cobolProducerGaps(h handoff.Handoff, class handoff.ResolutionClass, kind ha
 	return count
 }
 
-// assertCobolFindingMember checks that finding has a member_of edge to the
-// node finding_container names, and that the node is in result.
+// cobolFindingRows returns nodes as active finding-ledger records, read the
+// way the indexer's ledger reads a stored finding (StartByte -1 when the
+// finding has no range).
+func cobolFindingRows(nodes []*graph.Node) []graph.FindingTransition {
+	rows := make([]graph.FindingTransition, 0, len(nodes))
+	for _, n := range nodes {
+		start := -1
+		if b, ok := n.Meta["prov_start_byte"].(int); ok {
+			start = b
+		}
+		class, _ := n.Meta[graph.MetaEvidenceClass].(string)
+		kind, _ := n.Meta[graph.MetaFindingKind].(string)
+		container, _ := n.Meta[graph.MetaFindingContainer].(string)
+		rows = append(rows, graph.FindingTransition{
+			FindingID: n.ID, Class: class, Kind: kind, Container: container,
+			StartByte: start, NewStatus: graph.FindingStatusActive,
+		})
+	}
+	return rows
+}
+
+// assertCobolFindingMember checks that the node finding_container names is
+// in result (the file node included) and that finding has exactly one
+// member_of edge, to that container or to a statement node whose own
+// member_of edge targets it (D-21: the anchor is name-stable, member_of
+// keeps the precise statement).
 func assertCobolFindingMember(t *testing.T, result *parser.ExtractionResult, finding *graph.Node) {
 	t.Helper()
 	container, _ := finding.Meta[graph.MetaFindingContainer].(string)
 	require.NotEmpty(t, container, "%s has no finding_container", finding.ID)
-	var present bool
+	nodes := map[string]*graph.Node{}
 	for _, n := range result.Nodes {
-		if n.ID == container {
-			present = true
+		nodes[n.ID] = n
+	}
+	assert.Contains(t, nodes, container, "%s: container %s is not a node", finding.ID, container)
+	var members []*graph.Edge
+	for _, e := range result.Edges {
+		if e.From == finding.ID && e.Kind == graph.EdgeMemberOf {
+			members = append(members, e)
 		}
 	}
-	assert.True(t, present, "%s: container %s is not a node", finding.ID, container)
-	assert.Len(t, cobolEdges(result, finding.ID, container, graph.EdgeMemberOf), 1,
-		"%s has no member_of edge to %s", finding.ID, container)
+	require.Len(t, members, 1, "%s has exactly one member_of edge", finding.ID)
+	target := members[0].To
+	if target == container {
+		return
+	}
+	stmt := nodes[target]
+	require.NotNil(t, stmt, "%s: member_of target %s is not a node", finding.ID, target)
+	assert.Equal(t, graph.KindLocal, stmt.Kind, "%s: member_of target %s", finding.ID, target)
+	assert.Equal(t, "statement", stmt.Meta["cobol_kind"], "%s: member_of target %s", finding.ID, target)
+	assert.Len(t, cobolEdges(result, target, container, graph.EdgeMemberOf), 1,
+		"%s: statement %s is not a member of %s", finding.ID, target, container)
 }
 
 func TestCobolGrammar_Findings_UnparsedTailPerToken(t *testing.T) {
@@ -256,8 +293,10 @@ func TestCobolGrammar_Findings_DocumentScopeSynthetic(t *testing.T) {
 		require.Len(t, found, 1, "kind %s", c.kind)
 		n := found[0]
 		ids[n.ID] = true
-		assert.Equal(t, programIDs[0], n.Meta[graph.MetaFindingContainer], n.ID)
-		assert.Len(t, cobolEdges(result, n.ID, programIDs[0], graph.EdgeMemberOf), 1, n.ID)
+		// D-21: document scope anchors to the file node even when the file
+		// holds exactly one program.
+		assert.Equal(t, path, n.Meta[graph.MetaFindingContainer], n.ID)
+		assert.Len(t, cobolEdges(result, n.ID, path, graph.EdgeMemberOf), 1, n.ID)
 		assert.Equal(t, false, n.Meta["prov_range_exact"], n.ID)
 		assert.Equal(t, c.absence, n.Meta["prov_range_absence"], n.ID)
 		assert.NotContains(t, n.Meta, "prov_start_row", n.ID)
@@ -315,6 +354,163 @@ func TestCobolGrammar_Findings_LineShiftKeepsIDs(t *testing.T) {
 	assert.Equal(t, 1, removed, "editing one gap's text changes only its finding ID")
 	assert.Equal(t, 1, added, "editing one gap's text changes only its finding ID")
 }
+
+// cobolFindingTail returns the findings among nodes whose evidence is the
+// single SQL tail token, located by digest so no source text is compared.
+func cobolFindingTail(nodes []*graph.Node, token string) []*graph.Node {
+	var out []*graph.Node
+	for _, n := range nodes {
+		if n.Meta[graph.MetaFindingKind] == string(handoff.KindUnparsedTail) &&
+			n.Meta[graph.MetaFindingEvidenceDigest] == graph.FindingEvidenceDigest(token) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// TestCobolGrammar_Findings_SameKindInsertKeepsIDs is VERIFICATION
+// regression 1 (D-21, CR-01): an unrelated EXEC SQL inserted above the
+// existing gaps of MAIN-PARA keeps every pre-existing finding ID, and the
+// ledger only opens the inserted statement's own findings.
+func TestCobolGrammar_Findings_SameKindInsertKeepsIDs(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/shift.cbl"
+	base := cobolFindingNodes(extractCobolGrammar(t, e, path, cobolFindingShiftFixture), "")
+	require.GreaterOrEqual(t, len(base), 3, "fixture must hold several findings")
+	col := cobolFindingTail(base, "ZQXCOL")
+	require.Len(t, col, 1, "the ZQXCOL tail")
+
+	inserted := strings.Replace(cobolFindingShiftFixture, "       MAIN-PARA.\n",
+		"       MAIN-PARA.\n           EXEC SQL SELECT AAA FROM APP.BBB END-EXEC.\n", 1)
+	require.NotEqual(t, cobolFindingShiftFixture, inserted)
+	after := cobolFindingNodes(extractCobolGrammar(t, e, path, inserted), "")
+
+	baseIDs, afterIDs := map[string]bool{}, map[string]bool{}
+	for _, n := range base {
+		baseIDs[n.ID] = true
+	}
+	for _, n := range after {
+		afterIDs[n.ID] = true
+	}
+	for id := range baseIDs {
+		assert.True(t, afterIDs[id], "pre-existing finding %s keeps its ID (D-21)", id)
+	}
+	var added int
+	for _, n := range after {
+		if baseIDs[n.ID] {
+			continue
+		}
+		added++
+		assert.Equal(t, col[0].Meta[graph.MetaFindingContainer], n.Meta[graph.MetaFindingContainer],
+			"%s: the inserted statement's finding shares MAIN-PARA's anchor", n.ID)
+	}
+	require.Positive(t, added, "the inserted statement adds its own findings")
+
+	rows := graph.FindingLedgerTransitions(cobolFindingRows(base), cobolFindingRows(after))
+	assert.Len(t, rows, added, "only the inserted statement's findings get rows: %+v", rows)
+	for _, row := range rows {
+		assert.Equal(t, "", row.PriorStatus, "%+v", row)
+		assert.Equal(t, graph.FindingStatusActive, row.NewStatus, "%+v", row)
+		assert.False(t, baseIDs[row.FindingID], "no row for pre-existing %s", row.FindingID)
+	}
+}
+
+// TestCobolGrammar_Findings_SameKindDeleteKeepsIDs is VERIFICATION
+// regression 2 (D-21, CR-01): deleting the ZQXCOL EXEC SQL closes only its
+// tail; the ZQXOTH tail and the ERROR keep their IDs and get no row, and no
+// row is a supersede.
+func TestCobolGrammar_Findings_SameKindDeleteKeepsIDs(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/shift.cbl"
+	base := cobolFindingNodes(extractCobolGrammar(t, e, path, cobolFindingShiftFixture), "")
+	col := cobolFindingTail(base, "ZQXCOL")
+	require.Len(t, col, 1, "the ZQXCOL tail")
+	require.Len(t, cobolFindingTail(base, "ZQXOTH"), 1, "the ZQXOTH tail")
+	require.Len(t, cobolFindingNodes(&parser.ExtractionResult{Nodes: base}, string(handoff.KindError)), 1, "the ERROR")
+
+	deleted := strings.Replace(cobolFindingShiftFixture,
+		"           EXEC SQL SELECT ZQXCOL FROM APP.ZQXTAB END-EXEC.\n", "", 1)
+	require.NotEqual(t, cobolFindingShiftFixture, deleted)
+	after := cobolFindingNodes(extractCobolGrammar(t, e, path, deleted), "")
+	afterIDs := map[string]bool{}
+	for _, n := range after {
+		afterIDs[n.ID] = true
+	}
+	for _, n := range base {
+		if n.ID != col[0].ID {
+			assert.True(t, afterIDs[n.ID], "unchanged finding %s keeps its ID (D-21)", n.ID)
+		}
+	}
+
+	rows := graph.FindingLedgerTransitions(cobolFindingRows(base), cobolFindingRows(after))
+	require.Len(t, rows, 1, "only the deleted statement's finding gets a row: %+v", rows)
+	assert.Equal(t, col[0].ID, rows[0].FindingID)
+	assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus, "closed, never superseded")
+	assert.Empty(t, rows[0].SuccessorID)
+}
+
+// TestCobolGrammar_Findings_DocumentScopeAnchorsToFile is VERIFICATION
+// regression 3 (D-21, WR-07): a document-scope finding anchors to the file
+// node whatever the program count, so adding or removing a program never
+// changes its ID.
+func TestCobolGrammar_Findings_DocumentScopeAnchorsToFile(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	t.Run("synthetic", func(t *testing.T) {
+		const path = "src/syn.cbl"
+		extracted := extractCobolGrammar(t, e, path, cobolFindingCleanFixture)
+		h := cobolTestHandoff(t, e, path, cobolFindingCleanFixture)
+		for _, kind := range []handoff.Kind{handoff.KindNoTree, handoff.KindBudgetExceeded, handoff.KindInvocationFailure} {
+			h.Gaps = append(h.Gaps, handoff.Gap{
+				ResolutionClass: handoff.ResolutionParseUnresolved, Kind: kind, Reason: string(kind),
+				Severity: handoff.SeverityHigh, Scope: handoff.ScopeDocument, Container: -1,
+				AbsenceReason: string(kind),
+			})
+		}
+		programs, _, _ := cobolProgramSymbols(h)
+		require.Len(t, programs, 1)
+		ids := func(programs []cobolProgramSymbol) map[string]string {
+			result := &parser.ExtractionResult{}
+			docMeta := maps.Clone(cobolFileNode(t, extracted, path).Meta)
+			cobolFindings(newCobolWalk(h, []byte(cobolFindingCleanFixture), path, docMeta, programs, result))
+			out := map[string]string{}
+			for _, n := range cobolFindingNodes(result, "") {
+				out[n.Name] = n.ID
+				assert.Equal(t, path, n.Meta[graph.MetaFindingContainer], n.ID)
+				assert.Len(t, cobolEdges(result, n.ID, path, graph.EdgeMemberOf), 1, n.ID)
+			}
+			return out
+		}
+		one, none := ids(programs), ids(nil)
+		assert.Len(t, one, 3)
+		assert.Equal(t, one, none, "one program and no program give the same IDs")
+	})
+	t.Run("second_program", func(t *testing.T) {
+		const path = "src/cascade.cbl"
+		src := cobolCascadeShapes[0].src
+		second := src + cobolFindingSecondProgram
+		cascade := func(src string, programs int) *graph.Node {
+			result := extractCobolGrammar(t, e, path, src)
+			require.Len(t, cobolProgramIDs(result), programs)
+			cascades := cobolFindingNodes(result, "uncontained-cascade")
+			require.Len(t, cascades, 1, "the cascade finding exists (positive control)")
+			assert.Equal(t, path, cascades[0].Meta[graph.MetaFindingContainer], cascades[0].ID)
+			assertCobolFindingMember(t, result, cascades[0])
+			return cascades[0]
+		}
+		original := cascade(src, 1)
+		assert.Equal(t, original.ID, cascade(second, 2).ID, "a second program keeps the ID")
+		assert.Equal(t, original.ID, cascade(src, 1).ID, "removing it again keeps the ID")
+	})
+}
+
+// cobolFindingSecondProgram is an invented clean program appended to a
+// document to change its program count.
+const cobolFindingSecondProgram = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ZQXSECND.
+       PROCEDURE DIVISION.
+           STOP RUN.
+`
 
 func TestCobolGrammar_FindingMetaContract(t *testing.T) {
 	e := NewCobolGrammarExtractor()
@@ -495,7 +691,7 @@ func TestCobolGrammar_Findings_CascadePositive(t *testing.T) {
 
 			cascades := cobolFindingNodes(result, "uncontained-cascade")
 			require.Len(t, cascades, 1, "one uncontained-cascade finding per cascaded document")
-			assertCobolCascadeFinding(t, result, cascades[0], h.Assessment.Reasons, programIDs[0])
+			assertCobolCascadeFinding(t, result, cascades[0], h.Assessment.Reasons, path)
 			assertCobolFindingsPerGap(t, result, h, 1)
 
 			// finding_producer_reasons is a fresh copy, not the file node's slice.
@@ -522,7 +718,7 @@ func TestCobolGrammar_Findings_CascadePositive(t *testing.T) {
 			cobolFindings(newCobolWalk(h, []byte(cobolFindingCleanFixture), "src/syn.cbl", docMeta, programs, result))
 			cascades := cobolFindingNodes(result, "uncontained-cascade")
 			require.Len(t, cascades, 1)
-			assertCobolCascadeFinding(t, result, cascades[0], []string{reason}, programIDs[0])
+			assertCobolCascadeFinding(t, result, cascades[0], []string{reason}, "src/syn.cbl")
 		})
 	}
 }

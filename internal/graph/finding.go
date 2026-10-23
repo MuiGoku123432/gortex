@@ -25,9 +25,10 @@ const (
 
 // Versioned finding rule IDs. Every finding writer records them in Meta so
 // a later change to the ID, evidence, or severity rule is visible; nothing
-// reads them for matching.
+// reads them for matching. The ID rule is /2 since the name-stable anchor
+// (D-21).
 const (
-	FindingIDRule       = "gortex-finding-id/1"
+	FindingIDRule       = "gortex-finding-id/2"
 	FindingEvidenceRule = "gortex-finding-evidence/1"
 	FindingSeverityRule = "gortex-finding-severity/1"
 )
@@ -58,15 +59,20 @@ const (
 // evidence text.
 //
 // PURPOSE — Finding IDs and Meta carry this digest instead of the evidence
-// itself, so protected estate source never leaks through a finding's ID,
-// search terms, or Neo4j projection.
+// itself, so evidence text is never stored on a finding. The digest is
+// unkeyed BLAKE3 on purpose: IDs must reproduce across machines and clean
+// rebuilds (D-22). It therefore hides only evidence that cannot be guessed:
+// short evidence such as one SQL tail token or a literal can be confirmed by
+// dictionary hashing through a finding's ID, search terms, or projection, a
+// residual risk documented in docs/languages.md.
 //
 // RATIONALE — The value is length-framed after FindingEvidenceRule, so the
 // empty string still has a distinct digest and a future normalization rule
 // cannot collide with this one. Callers normalize first; this function
 // hashes bytes as given.
 //
-// KEYWORDS — finding, evidence, digest, blake3, privacy, GAP-04.
+// KEYWORDS — finding, evidence, digest, blake3, unkeyed, dictionary,
+// GAP-04, D-22.
 func FindingEvidenceDigest(evidence string) string {
 	return findingDigest(FindingEvidenceRule, evidence)
 }
@@ -79,18 +85,22 @@ func FindingEvidenceDigest(evidence string) string {
 //
 // PURPOSE — One identity function shared byte for byte by the extractor
 // (parse findings) and the resolver (external findings), anchored to the
-// repository-relative containing symbol ID, the resolution class, the gap
-// kind, the node kind or expected family, and the evidence digest (D-01).
+// repository-relative ID of a name-stable anchor (paragraph, section,
+// procedure division, data or environment section, program, or file; never
+// a statement, whose ID carries a per-kind ordinal), the resolution class,
+// the gap kind, the node kind or expected family, and the evidence digest
+// (D-01, D-21).
 //
-// RATIONALE — No line, byte offset, producer gap ID, or parser or extractor
-// version is hashed (D-01, D-02), so line shifts and parser bumps keep the
-// ID and only an edit of the gap's own text changes it. Every value is
-// length-framed, so adjacent inputs cannot alias through concatenation, and
-// source text cannot forge an ID or a path segment. '@' cannot begin a
-// COBOL word, so no written name collides with the @finding root.
+// RATIONALE — No line, byte offset, producer gap ID, statement ordinal, or
+// parser or extractor version is hashed (D-01, D-02, D-21), so line shifts,
+// unrelated statement edits, and parser bumps keep the ID and only an edit
+// of the gap's own text changes it. Every value is length-framed, so
+// adjacent inputs cannot alias through concatenation, and source text
+// cannot forge an ID or a path segment. '@' cannot begin a COBOL word, so no
+// written name collides with the @finding root.
 //
 // KEYWORDS — finding, identity, ID, blake3, PARSE_UNRESOLVED,
-// EXTERNAL_UNRESOLVED, D-01, D-02, GAP-06.
+// EXTERNAL_UNRESOLVED, anchor, D-01, D-02, D-21, GAP-06.
 func FindingSymbol(container, class, kind, family, evidenceDigest string) string {
 	var segment string
 	switch class {

@@ -20,9 +20,9 @@ import (
 )
 
 // cobolFindings maps every producer PARSE_UNRESOLVED gap of the walked
-// document onto one KindFinding node with a member_of edge to its container,
-// then adds one uncontained-cascade finding when the producer graded the
-// document with a cascade-family reason.
+// document onto one KindFinding node with a member_of edge to its innermost
+// statement, else its anchor, then adds one uncontained-cascade finding when
+// the producer graded the document with a cascade-family reason.
 //
 // PURPOSE — GAP-01: each gap the producer reports (error, missing,
 // unparsed-tail, lost-capture, unmapped-capture, and the document-scope
@@ -34,9 +34,13 @@ import (
 //
 // RATIONALE — EXTERNAL_UNRESOLVED gaps are skipped: the analyzer runs with an
 // empty -INC catalog, so the producer reports every -INC member as not
-// obtained; -INC findings come only from the resolver (D-17). Gaps are
+// obtained; -INC findings come only from the resolver (D-17). The ID and
+// finding_container, the ledger pairing key, hash the name-stable anchor
+// (paragraph, section, procedure division, data or environment section,
+// program, or, for document scope, the file node), never a statement
+// ordinal, while member_of keeps the precise statement (D-21). Gaps are
 // visited by generated span (start, end, list index), so the #k ordinal of
-// identical evidence in one container is the same on every rerun. Severity,
+// identical evidence in one anchor is the same on every rerun. Severity,
 // scope, and absence reasons are the producer's verbatim (D-12); the ID
 // never hashes a line, offset, gap ID, version, or producer reason (D-01,
 // D-02). Name is the gap kind and Meta holds only the evidence digest and
@@ -160,18 +164,23 @@ var cobolCascadeFamily = []string{
 
 // cobolAddFinding appends the PARSE_UNRESOLVED finding for g, whose
 // normalized evidence text is evidence, with its member_of edge, and returns
-// it. The ID is graph.FindingSymbol over the container, kind, node kind or
-// expected family, and evidence digest, plus #k for the k-th (k >= 2)
-// identical symbol counted in occurrences. Severity, scope, and absence
-// reason come from g verbatim.
+// it. The ID is graph.FindingSymbol over the name-stable anchor, kind, node
+// kind or expected family, and evidence digest, plus #k for the k-th
+// (k >= 2) identical symbol counted in occurrences. Severity, scope, and
+// absence reason come from g verbatim.
+//
+// The ID and finding_container (the ledger pairing key) hash the anchor of
+// cobolFindingAnchor, never a statement node, whose ID carries a per-kind
+// ordinal; the member_of edge keeps the precise innermost statement when
+// one exists, else the anchor (D-21).
 func cobolAddFinding(w *cobolWalk, occurrences map[string]int, g handoff.Gap, evidence string) *graph.Node {
-	container := cobolFindingContainer(w, g.Container)
+	anchor := cobolFindingAnchor(w, g.Container)
 	family := g.NodeKind
 	if family == "" {
 		family = g.ExpectedFamily
 	}
 	digest := graph.FindingEvidenceDigest(evidence)
-	symbol := graph.FindingSymbol(container, graph.FindingClassParse, string(g.Kind), family, digest)
+	symbol := graph.FindingSymbol(anchor, graph.FindingClassParse, string(g.Kind), family, digest)
 	// note: the resolver assigns external finding ordinals the same way.
 	occurrences[symbol]++
 	if k := occurrences[symbol]; k >= 2 {
@@ -191,7 +200,7 @@ func cobolAddFinding(w *cobolWalk, occurrences map[string]int, g handoff.Gap, ev
 	if g.ExpectedFamily != "" {
 		meta[graph.MetaFindingExpectedFamily] = g.ExpectedFamily
 	}
-	meta[graph.MetaFindingContainer] = container
+	meta[graph.MetaFindingContainer] = anchor
 	meta[graph.MetaFindingStatus] = graph.FindingStatusActive
 	meta[graph.MetaFindingEvidenceDigest] = digest
 	meta[graph.MetaFindingEvidenceRule] = graph.FindingEvidenceRule
@@ -206,68 +215,66 @@ func cobolAddFinding(w *cobolWalk, occurrences map[string]int, g handoff.Gap, ev
 		meta["prov_range_absence"] = g.AbsenceReason
 	}
 	w.result.Nodes = append(w.result.Nodes, node)
-	w.memberOf(node.ID, container, node.StartLine)
+	member := anchor
+	if s := w.statementSymbol(g.Container); s != "" {
+		member = w.filePath + "::" + s
+	}
+	w.memberOf(node.ID, member, node.StartLine)
 	return node
 }
 
-// cobolFindingContainer returns the repository-relative node ID that
-// contains observation c: the innermost statement, else the procedure
-// membership container (paragraph, section, or procedure division), else a
-// data or environment section, each found by walking Parent links; else the
-// owning program, else the walk root. A document-scope gap (c < 0) or one
-// nothing contains attaches to the single named program when exactly one
-// exists, else to the file node.
-func cobolFindingContainer(w *cobolWalk, c int) string {
-	if c >= 0 && c < len(w.h.Facts.Observations) {
-		levels := []func(i int) string{
-			func(i int) string {
-				if n := w.statement[i]; n != nil {
-					return n.ID
-				}
-				return ""
-			},
-			func(i int) string {
-				if s := w.container[i]; s != "" {
-					return w.id(s)
-				}
-				return ""
-			},
-			func(i int) string {
-				if n := w.sections[i]; n != nil {
-					return n.ID
-				}
-				return ""
-			},
-		}
-		for _, level := range levels {
-			for i := c; ; {
-				if id := level(i); id != "" {
-					return id
-				}
-				p, ok := w.parent(i)
-				if !ok {
-					break
-				}
-				i = p
+// cobolFindingAnchor returns the repository-relative node ID of the
+// name-stable anchor of observation c: the procedure membership container
+// (paragraph, else section, else procedure division), else a data or
+// environment section, each found by walking Parent links; else the owning
+// named program, else the walk root. A document-scope gap (c < 0), an
+// out-of-range c, or one nothing contains anchors to the file node.
+//
+// RATIONALE — D-21: a statement node is never the anchor, because its ID
+// carries a per-kind ordinal that an unrelated same-kind statement inserted
+// or deleted above it shifts. Document scope never anchors to "the single
+// program", because a second program would then move it (WR-07).
+func cobolFindingAnchor(w *cobolWalk, c int) string {
+	if c < 0 || c >= len(w.h.Facts.Observations) {
+		return w.filePath
+	}
+	levels := []func(i int) string{
+		func(i int) string {
+			if s := w.container[i]; s != "" {
+				return w.id(s)
 			}
-		}
-		if s := w.programSymbol(c); s != "" {
-			return w.id(s)
-		}
-		if w.root != "" {
-			return w.id(w.root)
+			return ""
+		},
+		func(i int) string {
+			if n := w.sections[i]; n != nil {
+				return n.ID
+			}
+			return ""
+		},
+	}
+	for _, level := range levels {
+		for i := c; ; {
+			if id := level(i); id != "" {
+				return id
+			}
+			p, ok := w.parent(i)
+			if !ok {
+				break
+			}
+			i = p
 		}
 	}
-	if len(w.programs) == 1 {
-		for _, s := range w.programs {
-			return w.id(s)
-		}
+	if s := w.programSymbol(c); s != "" {
+		return w.id(s)
+	}
+	if w.root != "" {
+		return w.id(w.root)
 	}
 	return w.filePath
 }
 
-// cobolFindingEvidence returns the normalized evidence text of g
-// (gortex-finding-evidence/1): the imaged original bytes with the
+// cobolFindingEvidence returns the normalized evidence text of g under
+// graph.FindingEvidenceRule: the imaged original bytes with the
 // fixed-format sequence and identification areas dropped, else the
 // generated bytes, whitespace-collapsed, else the gap kind and its absence
 // reason. A zero-width span yields the empty string; the ID still differs by
