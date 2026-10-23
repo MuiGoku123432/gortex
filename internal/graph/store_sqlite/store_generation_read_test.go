@@ -1813,6 +1813,7 @@ func generationCapabilityChecklist() []capabilityCase {
 		{iface: (*graph.RepoNodeIdentitySequencer)(nil), probe: "NodesInScopeSeq"},
 		{iface: (*graph.RepoNodeKindIDReader)(nil), probe: "RepoProjections"},
 		{iface: (*graph.ResolverNameScopeFinder)(nil), probe: "FindNodesByResolverNameScopes"},
+		{iface: (*graph.ResourceNodeBatchEvicter)(nil), skip: skipWrite, writeFence: writerFamilyFence("resource_node_evict")},
 		{iface: (*graph.ScopeBindingNodeSequencer)(nil), probe: "NodesInScopeSeq"},
 		{iface: (*graph.ScopedCrossRepoCandidates)(nil), probe: "CrossRepoCandidatesForRepos"},
 		{iface: (*graph.ScopedEdgeKindEvicter)(nil), skip: skipWrite, writeFence: writerFamilyFence("scoped_edge_kind_evict")},
