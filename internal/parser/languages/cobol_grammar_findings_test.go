@@ -450,6 +450,39 @@ func TestCobolGrammar_Findings_SameKindDeleteKeepsIDs(t *testing.T) {
 	assert.Empty(t, rows[0].SuccessorID)
 }
 
+// TestCobolGrammar_Findings_SameEvidenceAnchors pins the D-01 ordinal under
+// the D-21 anchor: identical tail text in two paragraphs keeps two
+// unsuffixed IDs, and in two statements of one paragraph separates into
+// base and base#2 in source order, never merging (the accepted adjacency
+// trade: an earlier identical gap in the same paragraph shifts the ordinal).
+func TestCobolGrammar_Findings_SameEvidenceAnchors(t *testing.T) {
+	e := NewCobolGrammarExtractor()
+	const path = "src/twice.cbl"
+	const head = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. TWICEPGM.\n       PROCEDURE DIVISION.\n"
+	const stmt = "           EXEC SQL SELECT ZQXCOL FROM APP.ZQXTAB END-EXEC.\n"
+	tails := func(src string) []*graph.Node {
+		found := cobolFindingTail(cobolFindingNodes(extractCobolGrammar(t, e, path, src), ""), "ZQXCOL")
+		require.Len(t, found, 2, "one finding per tail, never merged")
+		return found
+	}
+	t.Run("two_paragraphs", func(t *testing.T) {
+		found := tails(head + "       A-PARA.\n" + stmt + "       B-PARA.\n" + stmt + "           STOP RUN.\n")
+		assert.NotEqual(t, found[0].Meta[graph.MetaFindingContainer], found[1].Meta[graph.MetaFindingContainer])
+		for _, n := range found {
+			assert.NotContains(t, n.ID, "#", "different anchors never share an ordinal")
+		}
+	})
+	t.Run("one_paragraph", func(t *testing.T) {
+		found := tails(head + "       A-PARA.\n" + stmt + stmt + "           STOP RUN.\n")
+		slices.SortFunc(found, func(a, b *graph.Node) int {
+			return a.Meta["prov_start_byte"].(int) - b.Meta["prov_start_byte"].(int)
+		})
+		assert.Equal(t, found[0].Meta[graph.MetaFindingContainer], found[1].Meta[graph.MetaFindingContainer])
+		assert.NotContains(t, found[0].ID, "#")
+		assert.Equal(t, found[0].ID+"#2", found[1].ID, "the later identical tail takes #2")
+	})
+}
+
 // TestCobolGrammar_Findings_DocumentScopeAnchorsToFile is VERIFICATION
 // regression 3 (D-21, WR-07): a document-scope finding anchors to the file
 // node whatever the program count, so adding or removing a program never
