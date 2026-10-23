@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-15-PLAN.md
-last_updated: "2026-10-23T15:21:34.122Z"
+stopped_at: Completed 05-13-PLAN.md
+last_updated: "2026-10-23T15:57:21.945Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 69
-  completed_plans: 65
+  completed_plans: 66
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 2 of 17
+Plan: 3 of 17
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 05 execution started
 
-Progress: [█████████░] 94%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -126,6 +126,7 @@ Progress: [█████████░] 94%
 | Phase 05 P11 | 38 min | 2 tasks | 4 files |
 | Phase 05 P12 | 61 min | 3 tasks | 5 files |
 | Phase 05 P15 | 10min | 2 tasks | 8 files |
+| Phase 05 P13 | 30min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -274,6 +275,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-12: phase gate green: GOWORK=off go test -race -timeout 60m ./... passed (157 ok, 0 FAIL, 0 cached, 1737 s)
 - [Phase 05]: 05-15: SQLite finding and resource evicters share private evictNodesOfKindByIDs(kind, ids) (rule of three); upstream config/contract evicters keep their copies for fork hygiene
 - [Phase 05]: 05-15: graph.EvictResourceNodesByIDs is language-neutral (kind + view_gen guard only); the COBOL missing_artifact and placeholder-namespace guard is the 05-16 resolver's job, and supported=false must be an error, never a fallback to point deletes or EvictFile
+- [Phase 05]: 05-13: parse finding ID and finding_container hash cobolFindingAnchor (paragraph/section/procedure division/data or env section/program/file), never a statement ordinal; document scope always anchors to the file node; member_of keeps the innermost statement (D-21). FindingIDRule and FindingEvidenceRule bumped to /2 once each.
+- [Phase 05]: 05-13: D-01 adjacency trade shipped: inserting or deleting a statement that leaves an identical-evidence gap earlier in the same paragraph shifts a later identical finding's #k ordinal and ID (accepted; 05-17 documents it).
+- [Phase 05]: 05-13: external evidence is fixed six fields (edge kind, prov_observation_kind, cics_command, form, IDMS kind, raw target) (D-25); cobol_occurrence_count n yields n findings, later ones same_line_occurrence without coordinates (D-26). Mixed CALL/LINK/XCTL of one target on one line collapse to one calls edge with the first form's Meta (known window for 05-17).
 
 ### Pending Todos
 
@@ -302,6 +306,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-23T15:21:34.101Z
-Stopped at: Completed 05-15-PLAN.md
+Last session: 2026-10-23T15:57:21.930Z
+Stopped at: Completed 05-13-PLAN.md
 Resume file: None

@@ -262,7 +262,7 @@ Plans:
   4. Unchanged evidence reuses finding identities; corrected source/parser evidence or retrieved artifacts close or supersede only the applicable finding class.
   5. Destructive parser-recovery cascades remain deterministic regression failures regardless of any later AI output.
 
-**Plans**: 13/17 plans executed (5 gap-closure plans pending)
+**Plans**: 14/17 plans executed (5 gap-closure plans pending)
 
 Plans:
 **Wave 1**
@@ -304,7 +304,7 @@ Plans:
 
 **Wave 9** *(gap closure, frontmatter wave 2; blocked on Wave 8 completion)*
 
-- [ ] 05-13-PLAN.md -- Gap SC4 (CR-01, WR-07): name-stable parse finding anchor (D-21), reference-form external evidence (D-25), one finding per occurrence (D-26), FindingIDRule /2 and FindingEvidenceRule /2 bumped once, D-22 doc comment; extractor and real-path regressions
+- [x] 05-13-PLAN.md -- Gap SC4 (CR-01, WR-07): name-stable parse finding anchor (D-21), reference-form external evidence (D-25), one finding per occurrence (D-26), FindingIDRule /2 and FindingEvidenceRule /2 bumped once, D-22 doc comment; extractor and real-path regressions
 
 **Wave 10** *(gap closure, frontmatter wave 3; blocked on Wave 9 completion)*
 
@@ -410,7 +410,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
 | 3. Deterministic COBOL and Mainframe Breadth | 17/17 | In Progress|  |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 22/22 | In Progress|  |
-| 5. Explicit Unresolved Evidence | 13/17 | In Progress|  |
+| 5. Explicit Unresolved Evidence | 14/17 | In Progress|  |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |
 | 7. AI Contract, Policy, and Evaluation Foundation | 0/TBD | Deferred: Phase 6 | - |
 | 8. Evidence-Linked Claims and Human Review | 0/TBD | Deferred: Phase 7 | - |
