@@ -614,7 +614,10 @@ func (mi *MultiIndexer) RunDeferredPassesAllResult(ctx context.Context) Deferred
 // already performs either exact cross-repository catch-up or a fail-closed full
 // pass; only contract-bridge reconciliation remains afterward.
 func (mi *MultiIndexer) finishColdDeferredPasses(ctx context.Context, completedIndexers []*Indexer) DeferredPassesResult {
-	result := mi.beginDeferredPasses(ctx, nil, completedIndexers, true).FinishTailResult()
+	run := mi.beginDeferredPasses(ctx, nil, completedIndexers, true)
+	// IndexAll holds the reach topology writer across this whole tail.
+	run.topologyHeld = true
+	result := run.FinishTailResult()
 	mi.ReconcileContractEdges()
 	return result
 }
@@ -647,10 +650,14 @@ func (mi *MultiIndexer) withDeferredRepositoryMutation(idx *Indexer, lanesHeld b
 // mutation-revision interleave handling. The tail (contracts + catch-up
 // resolve) stays strictly after both the pool and the caller's resolve phase.
 type DeferredPassesRun struct {
-	mi              *MultiIndexer
-	workIndexers    []*Indexer
-	attempts        []*deferredPassAttempt
-	lanesHeld       bool
+	mi           *MultiIndexer
+	workIndexers []*Indexer
+	attempts     []*deferredPassAttempt
+	lanesHeld    bool
+	// topologyHeld reports that the caller holds the reach topology writer
+	// across FinishTailResult (only finishColdDeferredPasses, inside
+	// IndexAll); the public BeginDeferredPasses route leaves it false.
+	topologyHeld    bool
 	attemptAborted  bool
 	enrichScheduled int
 	catchupNeeded   bool
@@ -824,7 +831,7 @@ func (r *DeferredPassesRun) FinishTailResult() DeferredPassesResult {
 	scope := normalizeDeferredCatchupScope(r.catchupScope, r.catchupKnown, r.indexerCount)
 	noNewUnresolved := r.unresolvedCounter != nil &&
 		r.unresolvedCounter.UnresolvedEdgeInsertions() == r.unresolvedBase
-	mode, crossRepoComplete := r.mi.resolveDeferredMutations(mutationReceipt, r.catchupNeeded, scope, noNewUnresolved)
+	mode, crossRepoComplete := r.mi.resolveDeferredMutationsMode(mutationReceipt, r.catchupNeeded, scope, noNewUnresolved, r.topologyHeld)
 	crossRepoComplete = crossRepoComplete && !r.attemptAborted
 	var mutationRevision uint64
 	var mutationRevisionKnown bool
@@ -895,8 +902,16 @@ const (
 // exact receipt frontier or a full fallback. A complete receipt is
 // authoritative even when the old scheduled-work heuristic predicted
 // mutations; an incomplete receipt always fails closed to a whole-graph pass.
-// nil means the store does not support receipts yet.
+// nil means the store does not support receipts yet. Its callers hold no reach
+// topology writer; see resolveDeferredMutationsMode.
 func (mi *MultiIndexer) resolveDeferredMutations(receipt *graph.MutationReceipt, fallbackNeeded bool, fallbackScope map[string]struct{}, noNewUnresolved bool) (deferredResolveMode, bool) {
+	return mi.resolveDeferredMutationsMode(receipt, fallbackNeeded, fallbackScope, noNewUnresolved, false)
+}
+
+// resolveDeferredMutationsMode is resolveDeferredMutations with the caller's
+// reach topology writer state, which the full fallback's master passes to
+// its settle ledger (D-23, D-24).
+func (mi *MultiIndexer) resolveDeferredMutationsMode(receipt *graph.MutationReceipt, fallbackNeeded bool, fallbackScope map[string]struct{}, noNewUnresolved bool, topologyHeld bool) (deferredResolveMode, bool) {
 	fullFallback := func(masterScope map[string]struct{}, reason string) (deferredResolveMode, bool) {
 		// A flat unresolved-insertion counter cannot prove that cross-repository
 		// catch-up is empty: enrichment may add a definition that binds an old
@@ -907,7 +922,7 @@ func (mi *MultiIndexer) resolveDeferredMutations(receipt *graph.MutationReceipt,
 			mi.logger.Info("DEFERRED-TIMING unresolved-target counter unchanged; retaining fallback for definitions and resolved cross-repo edges",
 				zap.String("reason", reason))
 		}
-		if err := mi.runMasterResolveHookedContext(context.Background(), masterScope, false, nil); err != nil {
+		if err := mi.runMasterResolveHookedContext(context.Background(), masterScope, false, nil, topologyHeld); err != nil {
 			mi.logger.Error("DEFERRED-TIMING fallback master resolve failed", zap.Error(err))
 			return deferredResolveFailed, false
 		}
@@ -996,18 +1011,29 @@ func (mi *MultiIndexer) newMasterResolver(useLSP bool) *resolver.Resolver {
 }
 
 func (mi *MultiIndexer) runMasterResolve(scope map[string]struct{}, useLSP bool) {
-	mi.runMasterResolveHooked(scope, useLSP, nil)
+	mi.runMasterResolveHooked(scope, useLSP, nil, false)
+}
+
+// runMasterResolveTopologyHeld is runMasterResolve for a caller that holds
+// the reach topology writer (the incremental no-frontier fallback), so the
+// master's settle ledger does not take it again (D-23, D-24).
+func (mi *MultiIndexer) runMasterResolveTopologyHeld(scope map[string]struct{}, useLSP bool) {
+	mi.runMasterResolveHooked(scope, useLSP, nil, true)
 }
 
 // runMasterResolveHooked is runMasterResolve with an optional compute-done
-// hook threaded into the resolver (see Resolver.OnComputeDone).
-func (mi *MultiIndexer) runMasterResolveHooked(scope map[string]struct{}, useLSP bool, onComputeDone func()) {
-	if err := mi.runMasterResolveHookedContext(context.Background(), scope, useLSP, onComputeDone); err != nil {
+// hook threaded into the resolver (see Resolver.OnComputeDone) and the
+// caller's reach topology writer state.
+func (mi *MultiIndexer) runMasterResolveHooked(scope map[string]struct{}, useLSP bool, onComputeDone func(), topologyHeld bool) {
+	if err := mi.runMasterResolveHookedContext(context.Background(), scope, useLSP, onComputeDone, topologyHeld); err != nil {
 		mi.logger.Error("DEFERRED-TIMING master.ResolveAll", zap.Error(err))
 	}
 }
 
-func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope map[string]struct{}, useLSP bool, onComputeDone func()) error {
+// runMasterResolveHookedContext runs one master ResolveAll and then the COBOL
+// settle ledger for what its reconcile changed. topologyHeld reports whether
+// the caller holds the reach topology writer (TopologyHeld convention).
+func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope map[string]struct{}, useLSP bool, onComputeDone func(), topologyHeld bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1031,12 +1057,17 @@ func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope
 	}
 	mt := time.Now()
 	stats, err := master.ResolveAllContext(ctx)
-	// A master's COBOL reconcile can add or evict findings and placeholders
-	// that no following settle point would sync (Pitfall 4): the incremental
-	// no-frontier fallback, resolveDeferredMutations' full fallback, and
-	// RunPreEnrichResolve all run this function.
-	_, added, evicted := master.CobolFindingChanges()
-	mi.syncCobolFindingFTSByRepo(added, evicted)
+	// The master is ephemeral, so this drain is the only record of the
+	// repositories its COBOL reconcile changed (the incremental no-frontier
+	// fallback, resolveDeferredMutations' full fallback, and
+	// RunPreEnrichResolve all run this function). The ledger therefore runs
+	// at this step, over the repositories the master reconciled plus the
+	// tracked repositories its added and evicted IDs name, then search syncs
+	// (Pitfall 4): a later settle point would record only the net diff, so a
+	// close here could merge with an unrelated later open into a false
+	// supersede (D-24, WR-02). It drains whatever ResolveAllContext returns:
+	// a reconcile that ran before a cancellation still changed the store.
+	mi.recordCobolSettleLedger(nil, topologyHeld, master)
 	mi.logger.Info("DEFERRED-TIMING master.ResolveAll",
 		zap.Duration("elapsed", time.Since(mt)),
 		zap.Bool("scoped", scoped),
@@ -1149,8 +1180,16 @@ func (mi *MultiIndexer) runMasterResolveNames(names []string) {
 // cross-repo passes starved cross-repo to a standstill (measured: 1,049s for
 // a pass that runs in ~38s uncontended on the same workspace).
 func (mi *MultiIndexer) RunPreEnrichResolve(ctx context.Context, scope map[string]struct{}, onComputeDone func()) error {
+	return mi.runPreEnrichResolve(ctx, scope, onComputeDone, false)
+}
+
+// runPreEnrichResolve is RunPreEnrichResolve with the caller's reach topology
+// writer state: IndexAll runs it inside its writer section (true); the
+// daemon warmup and the public entry run it without (false), so the master's
+// settle ledger takes the writer itself (D-23, D-24).
+func (mi *MultiIndexer) runPreEnrichResolve(ctx context.Context, scope map[string]struct{}, onComputeDone func(), topologyHeld bool) error {
 	mi.runDeferredGoModAll()
-	if err := mi.runMasterResolveHookedContext(ctx, scope, true, onComputeDone); err != nil {
+	if err := mi.runMasterResolveHookedContext(ctx, scope, true, onComputeDone, topologyHeld); err != nil {
 		return err
 	}
 	// Stamp legacy nodes after master resolution so synthetic nodes created by
@@ -2417,7 +2456,7 @@ func (mi *MultiIndexer) indexMultiRepo(repos []config.RepoEntry) (map[string]*In
 			// was the dominant cold-index regression. runDeferredGoMod is generation-
 			// idempotent, so RunDeferredPassesAll does not repeat the pre-resolve work.
 			deferCtx := context.Background()
-			if err := mi.RunPreEnrichResolve(deferCtx, nil, nil); err != nil {
+			if err := mi.runPreEnrichResolve(deferCtx, nil, nil, true); err != nil {
 				return results, fmt.Errorf("multi-repo pre-enrichment resolve: %w", err)
 			}
 			completedIndexers := make([]*Indexer, 0, len(completed))

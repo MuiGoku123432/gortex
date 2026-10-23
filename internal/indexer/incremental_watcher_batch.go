@@ -410,7 +410,7 @@ func (mi *MultiIndexer) resolveIncrementalRepoMutationMode(
 		if repoPrefix == "" {
 			scope = nil
 		}
-		mi.runMasterResolve(scope, false)
+		mi.runMasterResolveTopologyHeld(scope, false)
 		// No scoped frontier survived. Refresh any known files without adding a
 		// second graph-wide dataflow or durable-fact scan.
 		if idx != nil && result != nil {
