@@ -33,8 +33,9 @@ const (
 
 // EXTERNAL_UNRESOLVED findings (GAP-02, D-04). Each reference occurrence on
 // a placeholder gets one finding of kind external-reference, whose evidence
-// is the edge's call or copy form, IDMS kind, and as-written target, read
-// from the edge Meta the extractor stamps (never from source, D-18).
+// is the reference form (edge kind, statement kind, CICS command), the call
+// or copy form, IDMS kind, and as-written target, read from the edge Meta
+// the extractor stamps (never from source, D-18, D-25).
 const (
 	cobolExternalKind = "external-reference"
 
@@ -42,6 +43,9 @@ const (
 	metaCobolTargetRaw      = "cobol_target_raw"
 	metaCobolCopyMemberRaw  = "cobol_copy_member_raw"
 	metaCobolCopyIDMSKind   = "cobol_copy_idms_kind"
+	metaCICSCommand         = "cics_command"
+	metaObservationKind     = "prov_observation_kind"
+	metaCobolOccurrences    = "cobol_occurrence_count"
 	cobolExternalFindingSeg = "::@finding/external/"
 )
 
@@ -103,31 +107,38 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // artifact_status not_obtained, synthetic, prov_evidence_class
 // EXTERNAL_UNRESOLVED, prov_range_exact false, prov_range_absence
 // not_obtained, and cobol_name_norm. Each such reference occurrence also
-// gets one EXTERNAL_UNRESOLVED finding (GAP-02, D-04), owned by the edge's
-// file, with a member_of edge to the edge's From node and a references edge
-// to the placeholder. Its Meta is the full RESEARCH Pattern 3 contract
-// (GAP-04): every prov_* key of the edge verbatim, then prov_evidence_class
-// EXTERNAL_UNRESOLVED, finding_kind external-reference, finding_reason the
-// edge reason, finding_severity medium (D-12), finding_scope unavailable,
-// the artifact type as finding_expected_family and finding_artifact_type,
-// finding_container, finding_status active, the evidence digest, the rule
-// IDs, and finding_target_key. When a reference leaves the desired set
-// (bound to a retrieved target, deleted, or edited away) its finding is
-// evicted, and the placeholder goes with its last code reference through
-// EvictFile on its own path, as reconcileCobolResources collects orphaned
-// shared resources (GAP-07).
+// gets one EXTERNAL_UNRESOLVED finding (GAP-02, D-04), including every
+// same-line duplicate the extractor collapsed into one edge: an edge with
+// cobol_occurrence_count n yields n findings (D-26). Each finding is owned
+// by the edge's file, with a member_of edge to the edge's From node and a
+// references edge to the placeholder. Its Meta is the full RESEARCH Pattern
+// 3 contract (GAP-04): every prov_* key of the edge verbatim, then
+// prov_evidence_class EXTERNAL_UNRESOLVED, finding_kind external-reference,
+// finding_reason the edge reason, finding_severity medium (D-12),
+// finding_scope unavailable, the artifact type as finding_expected_family
+// and finding_artifact_type, finding_container, finding_status active, the
+// evidence digest, the rule IDs, and finding_target_key. When a reference
+// leaves the desired set (bound to a retrieved target, deleted, or edited
+// away) its finding is evicted, and the placeholder goes with its last code
+// reference through EvictFile on its own path, as reconcileCobolResources
+// collects orphaned shared resources (GAP-07).
 //
 // RATIONALE — the placeholder carries no source, body, range, parser stamp,
 // or as-written spelling (GAP-05, P4 D-18), and it is never a binding
 // candidate: candidates are KindFunction programs and KindFile copybooks
 // only. A finding ID is graph.FindingSymbol over the From node without its
 // repository prefix, the class, the kind, the artifact type, and the digest
-// of the call or copy form, IDMS kind, and as-written target (D-01), so a
-// line shift keeps it; identical references in one container take #k in
-// prov_start_byte, Line, then edge Kind order. Because the container is part
-// of the ID and of finding_container, references in two containers never
-// share a ledger pairing group and never supersede each other (D-03). The
-// as-written target is hashed, never stored, and no cobol_* key is copied.
+// of the reference form (edge kind, statement kind, CICS command), the call
+// or copy form, IDMS kind, and as-written target (D-01, D-25), so a line
+// shift keeps it and a CALL edited into an XCTL changes it; identical
+// references in one container take #k in prov_start_byte, Line, edge Kind,
+// then occurrence order. The second and later occurrences of a collapsed
+// edge have no range of their own, so they carry prov_range_absence
+// same_line_occurrence and no coordinates, never a copied range (D-26).
+// Because the container is part of the ID and of finding_container,
+// references in two containers never share a ledger pairing group and never
+// supersede each other (D-03). The as-written target is hashed, never
+// stored, and no cobol_* key is copied.
 // Owning both nodes by the referencing repository keeps them scope-safe and
 // audited (SEC-01, SEC-08). The existing findings are read from the
 // references in-edges of the reconcile set's placeholders, never by
@@ -151,7 +162,7 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 //
 // KEYWORDS — cobol, missing artifact, placeholder, not obtained,
 // external unresolved, finding, external-reference, sweep, orphan, evict,
-// retrieval, GAP-02, GAP-04, GAP-05, GAP-07, D-03, D-04, D-11.
+// retrieval, GAP-02, GAP-04, GAP-05, GAP-07, D-03, D-04, D-11, D-25, D-26.
 func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []cobolExternalRef) {
 	existing := make(map[string]struct{})
 	var owned []*graph.Node // sweep candidates: placeholders of the reconcile set
@@ -192,9 +203,10 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 	}
 
 	type finding struct {
-		d     cobolExternalRef
-		node  *graph.Node
-		start int
+		d          cobolExternalRef
+		node       *graph.Node
+		start      int
+		occurrence int
 	}
 	findings := make([]finding, 0, len(desired))
 	for _, d := range desired {
@@ -202,7 +214,26 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 		if !ok {
 			start = -1
 		}
-		findings = append(findings, finding{d: d, node: r.newCobolExternalFinding(d), start: start})
+		// D-26: an edge the extractor collapsed from n same-line duplicates
+		// stands for n occurrences. Only the first has a range on the edge;
+		// the others keep the shared line and never invent coordinates.
+		n, ok := metaIntValue(d.e.Meta[metaCobolOccurrences])
+		if !ok || n < 1 {
+			n = 1
+		}
+		for i := range n {
+			node := r.newCobolExternalFinding(d)
+			if i > 0 {
+				for _, k := range []string{"prov_start_row", "prov_start_column", "prov_end_row",
+					"prov_end_column", "prov_start_byte", "prov_end_byte"} {
+					delete(node.Meta, k)
+				}
+				node.Meta["prov_range_exact"] = false
+				node.Meta["prov_range_absence"] = "same_line_occurrence"
+				node.EndLine = node.StartLine
+			}
+			findings = append(findings, finding{d: d, node: node, start: start, occurrence: i})
+		}
 	}
 	sort.Slice(findings, func(a, b int) bool {
 		fa, fb := findings[a], findings[b]
@@ -213,8 +244,10 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 			return fa.start < fb.start
 		case fa.d.e.Line != fb.d.e.Line:
 			return fa.d.e.Line < fb.d.e.Line
+		case fa.d.e.Kind != fb.d.e.Kind:
+			return fa.d.e.Kind < fb.d.e.Kind
 		}
-		return fa.d.e.Kind < fb.d.e.Kind
+		return fa.occurrence < fb.occurrence
 	})
 	// note: the extractor assigns parse finding ordinals the same way
 	// (cobolAddFinding, internal/parser/languages/cobol_grammar_findings.go).
@@ -370,6 +403,14 @@ func (r *Resolver) CobolFindingChanges() (repos, added, evicted []string) {
 // Name the normalized key, QualName the symbol, owned by the caller's
 // repository, workspace, and project, with StartLine the edge Line, EndLine
 // prov_end_row + 1 when the edge has a range, and the Pattern 3 Meta.
+//
+// Its evidence is the fixed six-field list edge kind, prov_observation_kind,
+// cics_command, call or copy form, COPY IDMS kind, and as-written target,
+// each whitespace-collapsed (the edge kind is a constant), an absent field
+// as the empty string, joined with NUL (graph.FindingEvidenceRule). The fixed arity keeps one field from
+// shifting into another, and the reference form (edge kind, statement kind,
+// CICS command) makes CALL, LINK, XCTL, and LOAD of one target distinct
+// findings, so editing one form into another changes its ID (D-25).
 func (r *Resolver) newCobolExternalFinding(d cobolExternalRef) *graph.Node {
 	e := d.e
 	collapse := func(key string) string {
@@ -383,11 +424,11 @@ func (r *Resolver) newCobolExternalFinding(d cobolExternalRef) *graph.Node {
 	if raw == "" {
 		raw = collapse(metaCobolCopyMemberRaw)
 	}
-	evidence := []string{form}
-	if kind := collapse(metaCobolCopyIDMSKind); kind != "" {
-		evidence = append(evidence, kind)
+	evidence := []string{
+		string(e.Kind), collapse(metaObservationKind), collapse(metaCICSCommand),
+		form, collapse(metaCobolCopyIDMSKind), raw,
 	}
-	digest := graph.FindingEvidenceDigest(strings.Join(append(evidence, raw), "\x00"))
+	digest := graph.FindingEvidenceDigest(strings.Join(evidence, "\x00"))
 	container := strings.TrimPrefix(e.From, d.callerRepo+"/")
 	symbol := graph.FindingSymbol(container, graph.FindingClassExternal, cobolExternalKind, d.artifactType, digest)
 

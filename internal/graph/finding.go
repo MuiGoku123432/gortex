@@ -26,10 +26,11 @@ const (
 // Versioned finding rule IDs. Every finding writer records them in Meta so
 // a later change to the ID, evidence, or severity rule is visible; nothing
 // reads them for matching. The ID rule is /2 since the name-stable anchor
-// (D-21).
+// (D-21); the evidence rule is /2 since external evidence carries the
+// reference form, edge kind, statement kind, and CICS command (D-25).
 const (
 	FindingIDRule       = "gortex-finding-id/2"
-	FindingEvidenceRule = "gortex-finding-evidence/1"
+	FindingEvidenceRule = "gortex-finding-evidence/2"
 	FindingSeverityRule = "gortex-finding-severity/1"
 )
 

@@ -3,6 +3,7 @@ package resolver
 import (
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -495,10 +496,18 @@ func cobolExternalNodes(g graph.Store) map[string]*graph.Node {
 
 // cobolExternalID is the unsuffixed external finding ID of a reference in
 // filePath from container (repository-relative) to an artifact of
-// artifactType, whose evidence parts are joined with NUL.
-func cobolExternalID(filePath, container, artifactType string, evidence ...string) string {
-	digest := graph.FindingEvidenceDigest(strings.Join(evidence, "\x00"))
+// artifactType, whose D-25 evidence is the six fields edge kind,
+// prov_observation_kind, cics_command, call or copy form, COPY IDMS kind,
+// and as-written target, joined with NUL.
+func cobolExternalID(filePath, container, artifactType string, evidence [6]string) string {
+	digest := graph.FindingEvidenceDigest(strings.Join(evidence[:], "\x00"))
 	return filePath + "::" + graph.FindingSymbol(container, graph.FindingClassExternal, "external-reference", artifactType, digest)
+}
+
+// cobolCallEvidence is the D-25 evidence of a seeded literal CALL edge
+// (cobolCallMeta: no observation kind, no CICS command) written as raw.
+func cobolCallEvidence(raw string) [6]string {
+	return [6]string{string(graph.EdgeCalls), "", "", "literal", "", raw}
 }
 
 // cobolFindingTargets returns a finding's out-edge targets by edge kind and
@@ -521,7 +530,7 @@ func TestCobolReconcile_ExternalMissingCall(t *testing.T) {
 	const placeholder = "r1/cobol-missing::program/NOPGM"
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {
 		seedCobol(g, "r1", caller, graph.KindFunction, "program", "MAINPGM")
-		// CALL, LINK, and XCTL, seeded out of source order.
+		// Three identical CALLs, seeded out of source order.
 		for _, line := range []int{3, 1, 2} {
 			cobolEdge(g, caller, line, graph.EdgeCalls, callNo, cobolAt(cobolCallMeta(callNo, "'NOPGM'"), line-1, line*100))
 		}
@@ -530,7 +539,7 @@ func TestCobolReconcile_ExternalMissingCall(t *testing.T) {
 
 		found := cobolExternalNodes(g)
 		require.Len(t, found, 3, "one finding per reference occurrence")
-		base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program", "literal", "'NOPGM'")
+		base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program", cobolCallEvidence("'NOPGM'"))
 		for k, id := range []string{base, base + "#2", base + "#3"} {
 			n := found[id]
 			require.NotNil(t, n, "finding %s", id)
@@ -566,10 +575,10 @@ func TestCobolReconcile_ExternalMissingCopyAndInc(t *testing.T) {
 		found := cobolExternalNodes(g)
 		require.Len(t, found, 2, "a bound -INC member has no finding (D-17)")
 		want := map[string][3]string{
-			cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "copybook", "copy", "NOCPY"): {
+			cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "copybook", [6]string{string(graph.EdgeImports), "", "", "copy", "", "NOCPY"}): {
 				"copybook", "NOCPY", "r1/cobol-missing::copybook/NOCPY",
 			},
-			cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "inc_member", "inc", "INCMEM"): {
+			cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "inc_member", [6]string{string(graph.EdgeImports), "", "", "inc", "", "INCMEM"}): {
 				"inc_member", "INCMEM", "r1/cobol-missing::inc_member/INCMEM",
 			},
 		}
@@ -597,7 +606,8 @@ func TestCobolReconcile_ExternalIDMS(t *testing.T) {
 	cobolEdge(store, caller, 7, graph.EdgeImports, idms, meta)
 
 	New(store).ReconcileCobol(nil)
-	id := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "idms_dictionary_member", "idms", "RECORD", "EMP-REC")
+	id := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "idms_dictionary_member",
+		[6]string{string(graph.EdgeImports), "", "", "idms", "RECORD", "EMP-REC"})
 	found := cobolExternalNodes(store)
 	require.Len(t, found, 1)
 	n := found[id]
@@ -681,12 +691,12 @@ func TestCobolReconcile_ExternalOrdinalAndLineShift(t *testing.T) {
 		return out
 	}
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {
-		base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM.PARA-A", "program", "literal", "'NOPGM'")
+		base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM.PARA-A", "program", cobolCallEvidence("'NOPGM'"))
 		assert.Equal(t, map[int]string{5: base, 9: base + "#2"}, run(t, g, 0, 0),
 			"identical references in one container are ordered by start byte")
 	})
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {
-		base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM.PARA-A", "program", "literal", "'NOPGM'")
+		base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM.PARA-A", "program", cobolCallEvidence("'NOPGM'"))
 		assert.Equal(t, map[int]string{8: base, 12: base + "#2"}, run(t, g, 3, 57),
 			"a line shift elsewhere in the file keeps both IDs")
 	})
@@ -714,10 +724,169 @@ func TestCobolReconcile_ExternalContainerSeparation(t *testing.T) {
 		require.Len(t, containers, 2, "two containers, never one pairing group (D-03)")
 		for _, p := range []string{"PARA-A", "PARA-B"} {
 			id := containers["main.cbl::MAINPGM."+p]
-			assert.Equal(t, cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM."+p, "program", "literal", "'NOPGM'"), id)
+			assert.Equal(t, cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM."+p, "program", cobolCallEvidence("'NOPGM'")), id)
 			assert.Equal(t, "r1/main.cbl::MAINPGM."+p, cobolFindingTargets(t, g, id)[graph.EdgeMemberOf])
 		}
 	})
+}
+
+// TestCobolReconcile_ExternalReferenceFormEvidence pins D-25 (WR-03): the
+// reference form is evidence, so CALL, EXEC CICS LINK, LOAD, and XCTL of one
+// missing program from one paragraph are four unsuffixed findings, COPY and
+// -INC of one member differ, and editing one form re-IDs only its finding.
+func TestCobolReconcile_ExternalReferenceFormEvidence(t *testing.T) {
+	const program = "r1/main.cbl::MAINPGM"
+	const para = "r1/main.cbl::MAINPGM.PARA-A"
+	const container = "main.cbl::MAINPGM.PARA-A"
+	const callNo = "unresolved::cobol::program::NOPGM"
+	const copyNo = "unresolved::cobol::copybook::NOCPY"
+	// ref returns the Meta of a literal reference to NOPGM on 1-based line,
+	// written by a statement of kind observation with CICS command cics.
+	ref := func(line int, observation, cics string) map[string]any {
+		meta := cobolAt(cobolCallMeta(callNo, "'NOPGM'"), line-1, line*100)
+		meta["cobol_caller_program"], meta["prov_observation_kind"] = program, observation
+		if cics != "" {
+			meta["cics_command"] = cics
+		}
+		return meta
+	}
+	id := func(kind graph.EdgeKind, observation, cics string) string {
+		return cobolExternalID("r1/main.cbl", container, "program",
+			[6]string{string(kind), observation, cics, "literal", "", "'NOPGM'"})
+	}
+	call := id(graph.EdgeCalls, "call_statement", "")
+	link := id(graph.EdgeCalls, "exec_cics_statement", "LINK")
+	load := id(graph.EdgeReferences, "exec_cics_statement", "LOAD")
+	xctl := id(graph.EdgeCalls, "exec_cics_statement", "XCTL")
+	copyID := cobolExternalID("r1/main.cbl", container, "copybook",
+		[6]string{string(graph.EdgeImports), "copy_statement", "", "copy", "", "NOCPY"})
+	incID := cobolExternalID("r1/main.cbl", container, "inc_member",
+		[6]string{string(graph.EdgeImports), "copy_statement", "", "inc", "", "NOCPY"})
+	cobolOnStores(t, func(t *testing.T, g graph.Store) {
+		seedCobol(g, "r1", program, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "r1", para, graph.KindFunction, "paragraph", "PARA-A")
+		// One line each, in byte order: no two seeds share a line.
+		cobolEdge(g, para, 1, graph.EdgeCalls, callNo, ref(1, "call_statement", ""))
+		cobolEdge(g, para, 2, graph.EdgeCalls, callNo, ref(2, "exec_cics_statement", "LINK"))
+		cobolEdge(g, para, 3, graph.EdgeReferences, callNo, ref(3, "exec_cics_statement", "LOAD"))
+		cobolEdge(g, para, 4, graph.EdgeCalls, callNo, ref(4, "exec_cics_statement", "XCTL"))
+		for line, form := range map[int]string{5: "copy", 6: "inc"} {
+			meta := cobolAt(cobolCopyMeta(form, copyNo), line-1, line*100)
+			meta["cobol_copy_member_raw"], meta["prov_observation_kind"] = "NOCPY", "copy_statement"
+			cobolEdge(g, para, line, graph.EdgeImports, copyNo, meta)
+		}
+
+		New(g).ReconcileCobol(nil)
+
+		found := cobolExternalNodes(g)
+		assert.ElementsMatch(t, []string{call, link, load, xctl, copyID, incID}, mapKeys(found),
+			"each reference form is its own finding (D-25)")
+		for id, n := range found {
+			assert.NotContains(t, id, "#", "distinct forms never share an ordinal")
+			assert.Equal(t, graph.FindingEvidenceRule, n.Meta[graph.MetaFindingEvidenceRule], id)
+		}
+
+		// The XCTL on line 4 is edited into a LOAD of the same program. Edge
+		// removal is by (From, To, Kind), so every calls edge of PARA-A goes
+		// and the CALL and LINK edges are seeded again unchanged.
+		to := cobolEdgeAt(t, g, para, 4).To
+		for g.RemoveEdge(para, to, graph.EdgeCalls) {
+		}
+		cobolEdge(g, para, 1, graph.EdgeCalls, callNo, ref(1, "call_statement", ""))
+		cobolEdge(g, para, 2, graph.EdgeCalls, callNo, ref(2, "exec_cics_statement", "LINK"))
+		cobolEdge(g, para, 4, graph.EdgeReferences, callNo, ref(4, "exec_cics_statement", "LOAD"))
+
+		r := New(g)
+		r.ReconcileCobol(nil)
+		_, added, evicted := r.CobolFindingChanges()
+		assert.Equal(t, []string{xctl}, evicted, "only the edited reference's finding goes")
+		assert.Equal(t, []string{load + "#2"}, added, "the new LOAD follows the original in byte order")
+		assert.ElementsMatch(t, []string{call, link, load, load + "#2", copyID, incID}, mapKeys(cobolExternalNodes(g)))
+	})
+}
+
+// TestCobolReconcile_ExternalSameLineOccurrences pins D-26 (WR-06): an edge
+// standing for n same-line duplicates the extractor collapsed
+// (cobol_occurrence_count) yields findings base, base#2 .. base#n; only the
+// first keeps the edge's exact range, and the others never invent one.
+func TestCobolReconcile_ExternalSameLineOccurrences(t *testing.T) {
+	const program = "r1/main.cbl::MAINPGM"
+	const para = "r1/main.cbl::MAINPGM.PARA-A"
+	const callNo = "unresolved::cobol::program::NOPGM"
+	base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM.PARA-A", "program",
+		[6]string{string(graph.EdgeCalls), "call_statement", "", "literal", "", "'NOPGM'"})
+	coordinates := []string{"prov_start_row", "prov_start_column", "prov_end_row",
+		"prov_end_column", "prov_start_byte", "prov_end_byte"}
+	// seed adds PARA-A's one collapsed CALL edge on line 7, standing for
+	// count occurrences, after the program and paragraph nodes.
+	seed := func(g graph.Store, count int) {
+		meta := cobolAt(cobolCallMeta(callNo, "'NOPGM'"), 6, 700)
+		meta["cobol_caller_program"], meta["prov_observation_kind"] = program, "call_statement"
+		meta["cobol_occurrence_count"] = count
+		symbols := []string{"main.cbl::MAINPGM/@proc/PARA-A/@call_statement"}
+		for k := 2; k <= count; k++ {
+			symbols = append(symbols, symbols[0]+"#"+strconv.Itoa(k))
+		}
+		meta["cobol_statement_symbols"] = symbols
+		cobolEdge(g, para, 7, graph.EdgeCalls, callNo, meta)
+	}
+	seedNodes := func(g graph.Store) {
+		seedCobol(g, "r1", program, graph.KindFunction, "program", "MAINPGM")
+		seedCobol(g, "r1", para, graph.KindFunction, "paragraph", "PARA-A")
+	}
+	cobolOnStores(t, func(t *testing.T, g graph.Store) {
+		seedNodes(g)
+		seed(g, 3)
+		New(g).ReconcileCobol(nil)
+
+		found := cobolExternalNodes(g)
+		require.ElementsMatch(t, []string{base, base + "#2", base + "#3"}, mapKeys(found),
+			"one finding per occurrence (D-26)")
+		for _, k := range coordinates {
+			assert.Contains(t, found[base].Meta, k, "the first occurrence keeps the edge's range")
+		}
+		assert.Equal(t, true, found[base].Meta["prov_range_exact"])
+		for _, id := range []string{base + "#2", base + "#3"} {
+			n := found[id]
+			for _, k := range coordinates {
+				assert.NotContains(t, n.Meta, k, "%s invents no coordinate", id)
+			}
+			assert.Equal(t, false, n.Meta["prov_range_exact"], id)
+			assert.Equal(t, "same_line_occurrence", n.Meta["prov_range_absence"], id)
+			assert.Equal(t, [2]int{7, 7}, [2]int{n.StartLine, n.EndLine}, "%s spans the shared line", id)
+			assert.Equal(t, para, cobolFindingTargets(t, g, id)[graph.EdgeMemberOf], id)
+		}
+
+		r := New(g)
+		r.ReconcileCobol(nil)
+		_, added, evicted := r.CobolFindingChanges()
+		assert.Empty(t, added, "an unchanged rerun adds nothing")
+		assert.Empty(t, evicted, "an unchanged rerun evicts nothing")
+
+		// One duplicate is deleted: the edge now stands for two occurrences.
+		require.True(t, g.RemoveEdge(para, cobolEdgeAt(t, g, para, 7).To, graph.EdgeCalls))
+		seed(g, 2)
+		r = New(g)
+		r.ReconcileCobol(nil)
+		_, added, evicted = r.CobolFindingChanges()
+		assert.Empty(t, added)
+		assert.Equal(t, []string{base + "#3"}, evicted, "only the last occurrence closes")
+	})
+
+	// An unchanged rerun writes nothing on SQLite, where the count reads
+	// back as a JSON number.
+	opened, err := store_sqlite.Open(filepath.Join(t.TempDir(), "cobol.sqlite"))
+	require.NoError(t, err)
+	store := &cobolWriteCounter{Store: opened}
+	t.Cleanup(func() { require.NoError(t, opened.Close()) })
+	seedNodes(store)
+	seed(store, 3)
+	New(store).ReconcileCobol(nil)
+	require.Len(t, cobolExternalNodes(store), 3)
+	store.reset()
+	New(store).ReconcileCobol(nil)
+	assert.Zero(t, store.adds, "no second AddBatch")
+	assert.Zero(t, store.findingEvicts, "no EvictFindingNodesByIDs")
 }
 
 func TestCobolReconcile_ExternalMetaContract(t *testing.T) {
@@ -751,7 +920,9 @@ func TestCobolReconcile_ExternalMetaContract(t *testing.T) {
 
 		found := cobolExternalNodes(g)
 		require.Len(t, found, 2)
-		exactID := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program", "literal", raw)
+		// D-25: the exact edge's six evidence fields.
+		evidence := [6]string{string(graph.EdgeCalls), "call_statement", "", "literal", "", raw}
+		exactID := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program", evidence)
 		n := found[exactID]
 		require.NotNil(t, n, "finding %s", exactID)
 		symbol := exactID[len("r1/main.cbl::"):]
@@ -777,7 +948,7 @@ func TestCobolReconcile_ExternalMetaContract(t *testing.T) {
 			graph.MetaFindingExpectedFamily: "program",
 			graph.MetaFindingContainer:      "main.cbl::MAINPGM",
 			graph.MetaFindingStatus:         graph.FindingStatusActive,
-			graph.MetaFindingEvidenceDigest: graph.FindingEvidenceDigest("literal\x00" + raw),
+			graph.MetaFindingEvidenceDigest: graph.FindingEvidenceDigest(strings.Join(evidence[:], "\x00")),
 			graph.MetaFindingEvidenceRule:   graph.FindingEvidenceRule,
 			graph.MetaFindingIDRule:         graph.FindingIDRule,
 			graph.MetaFindingArtifactType:   "program",
@@ -828,9 +999,9 @@ func TestCobolReconcile_ExternalEvictedWhenUndesired(t *testing.T) {
 		parse := seedCobolFinding(g, "r1", "r1/main.cbl", "main.cbl::MAINPGM", graph.FindingClassParse)
 		New(g).ReconcileCobol(nil)
 
-		callID := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program", "literal", "'NOPGM'")
-		copyID := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "copybook", "copy", "NOCPY")
-		otherID := cobolExternalID("r2/main.cbl", "main.cbl::MAINPGM", "program", "literal", "'NOPGM'")
+		callID := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program", cobolCallEvidence("'NOPGM'"))
+		copyID := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "copybook", [6]string{string(graph.EdgeImports), "", "", "copy", "", "NOCPY"})
+		otherID := cobolExternalID("r2/main.cbl", "main.cbl::MAINPGM", "program", cobolCallEvidence("'NOPGM'"))
 		require.ElementsMatch(t, []string{callID, copyID, otherID}, mapKeys(cobolExternalNodes(g)))
 
 		// The missing program is retrieved into r1: the CALL binds.
@@ -901,7 +1072,7 @@ func TestCobolReconcile_ExternalPerRepositoryPrefixDiagnostics(t *testing.T) {
 		found := cobolExternalNodes(g)
 		require.Len(t, found, 2, "one finding per referencing repository")
 		for _, repo := range []string{"r1", "r2"} {
-			id := cobolExternalID(repo+"/main.cbl", "main.cbl::MAINPGM", "program", "literal", "'NOPGM'")
+			id := cobolExternalID(repo+"/main.cbl", "main.cbl::MAINPGM", "program", cobolCallEvidence("'NOPGM'"))
 			n := found[id]
 			require.NotNil(t, n, "finding %s", id)
 			assert.Equal(t, repo, n.RepoPrefix, "owned by its own repository")
