@@ -156,6 +156,13 @@ type MultiIndexer struct {
 	// inside the pass, as reconcileMu does for contract edges.
 	cobolReconcileMu sync.Mutex
 
+	// cobolSettleHook is a focused test seam for the D-23 ledger exclusion.
+	// nil in production. It is called with stage "committed" and the
+	// repository when an incremental lane's file commit has landed (writer
+	// held, before its reconcile), and with stage "ledger" and the base
+	// repositories when a settle point holds the writer, before its ledger.
+	cobolSettleHook func(stage string, repos []string)
+
 	// stitchProber / proxyBudget wire the cross-daemon proxy-edge feature:
 	// when set by the daemon entry point (flag on), every CrossRepoResolver
 	// this MultiIndexer builds mints proxy edges to remote-owned symbols
@@ -2776,6 +2783,9 @@ func (mi *MultiIndexer) incrementalReindexRepoRawMode(repoPrefix string, paths [
 	result, receipt, batch, err := idx.incrementalReindexPathsWithReceiptMode(meta.RootPath, paths, mode)
 	if err != nil {
 		return nil, fmt.Errorf("reindexing %s: %w", meta.RootPath, err)
+	}
+	if mi.cobolSettleHook != nil {
+		mi.cobolSettleHook("committed", []string{repoPrefix})
 	}
 
 	// Run the same-repo and cross-repo resolver tails exactly once after the

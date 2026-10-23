@@ -4,6 +4,8 @@ import (
 	"maps"
 	"slices"
 
+	"go.uber.org/zap"
+
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/reach"
 	"github.com/zzet/gortex/internal/resolver"
@@ -78,7 +80,11 @@ func (idx *Indexer) reconcileCobolAfterMutation(result *IndexResult, receipt *gr
 		repos = map[string]struct{}{idx.repoPrefix: {}}
 	}
 	idx.resolver.ReconcileCobol(repos)
-	added, evicted := recordCobolFindingLedger(idx.graph, []string{idx.repoPrefix}, nil, nil, idx.logger, idx.resolver)
+	// The tail runs inside incrementalWatcherPaths' (or the evict path's)
+	// reach topology writer; the resolver's installed reconcile lock, nil
+	// when none is, completes the D-23 exclusion.
+	added, evicted := recordCobolFindingLedger(idx.graph, []string{idx.repoPrefix}, nil,
+		idx.resolver.CobolReconcileLock(), idx.logger, idx.resolver)
 	idx.syncCobolFindingFTS(added, evicted)
 }
 
@@ -149,16 +155,25 @@ func (mi *MultiIndexer) reconcileCobolReposTopologyHeld(repos map[string]struct{
 // topologyHeld true means the caller holds the writer, or a repository
 // topology batch holds it for the caller; false takes it here for the
 // ledger's duration and releases it with finish(false), which leaves the
-// reach index valid. Lock order everywhere: reach topology writer, then
-// cobolReconcileMu, then findingLedgerMu.
+// reach index valid. A caller that claims a held writer on a base-topology
+// store while none is active is logged, with the base repositories only (no
+// Meta, no IDs), and the ledger still runs (D-07 best effort). Lock order
+// everywhere: reach topology writer, then cobolReconcileMu, then
+// findingLedgerMu.
 //
 // KEYWORDS — cobol, finding, ledger, settle point, exclusion, reach topology
-// writer, cobolReconcileMu, lock order, TopologyHeld convention, D-23, D-24,
-// WR-01, WR-02.
+// writer, cobolReconcileMu, lock order, TopologyHeld convention, D-07, D-23,
+// D-24, WR-01, WR-02.
 func (mi *MultiIndexer) recordCobolSettleLedger(base []string, topologyHeld bool, resolvers ...*resolver.Resolver) {
 	if !topologyHeld {
 		finish := reach.BeginTopologyMutation(mi.graph)
 		defer finish(false)
+	} else if reach.WritesBaseTopology(mi.graph) && !reach.TopologyWriterActive() {
+		mi.logger.Warn("indexer: finding ledger ran outside the reach topology writer",
+			zap.Strings("repos", base))
+	}
+	if mi.cobolSettleHook != nil {
+		mi.cobolSettleHook("ledger", base)
 	}
 	tracked := func(prefix string) bool { return mi.GetIndexer(prefix) != nil }
 	added, evicted := recordCobolFindingLedger(mi.graph, base, tracked, &mi.cobolReconcileMu, mi.logger, resolvers...)

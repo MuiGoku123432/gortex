@@ -55,6 +55,14 @@ func (r *Resolver) SetCobolReconcileLock(mu *sync.Mutex) {
 	r.cobolReconcileMu = mu
 }
 
+// CobolReconcileLock returns the mutex SetCobolReconcileLock installed, or
+// nil when none is. A settle point's finding ledger holds it across its
+// drain, read, diff, and append, so no reconcile of a resolver sharing it
+// writes between them (D-23).
+func (r *Resolver) CobolReconcileLock() *sync.Mutex {
+	return r.cobolReconcileMu
+}
+
 // ReconcileCobol re-decides every literal COBOL CALL and COPY edge whose
 // caller repository is in changed, or resolves from a repository in changed
 // (every edge when changed is empty), under the resolve mutex. It is the
