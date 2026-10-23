@@ -111,6 +111,7 @@ func RunConformance(t *testing.T, factory Factory, semantics Semantics) {
 	t.Run("EvictRepo", func(t *testing.T) { testEvictRepo(t, factory) })
 	t.Run("EvictRepo_NoNodes", func(t *testing.T) { testEvictRepoNoNodes(t, factory) })
 	t.Run("FindingNodeEvict", func(t *testing.T) { testFindingNodeEvict(t, factory) })
+	t.Run("ResourceNodeEvict", func(t *testing.T) { testResourceNodeEvict(t, factory) })
 	t.Run("NodeAndEdgeCount", func(t *testing.T) { testNodeAndEdgeCount(t, factory) })
 	t.Run("AllNodesAndEdges", func(t *testing.T) { testAllNodesAndEdges(t, factory) })
 	t.Run("FindNodesByName", func(t *testing.T) { testFindNodesByName(t, factory) })
@@ -5185,5 +5186,46 @@ func testFindingNodeEvict(t *testing.T, factory Factory) {
 	}
 	if got := s.EdgeCount(); got != 1 {
 		t.Fatalf("EdgeCount after eviction = %d, want 1 (the program's reference survives)", got)
+	}
+}
+
+// testResourceNodeEvict pins the resource eviction capability (D-27) on every
+// backend: the dispatcher must reach the backend's set-oriented evicter, which
+// removes only the placeholder-shaped resource among the IDs, once, with its
+// incident edges, and leaves the finding named in the same list untouched.
+func testResourceNodeEvict(t *testing.T, factory Factory) {
+	t.Helper()
+	s := factory(t)
+	const (
+		file     = "r1/app.cbl"
+		resource = "r1::cobol-missing::program/NOPGM"
+		finding  = "r1/app.cbl::@finding/external/0123456789abcdef0123456789abcdef"
+		program  = "r1/app.cbl::APP"
+	)
+	s.AddNode(mkRepoNode(resource, "NOPGM", "", "r1", graph.KindResource))
+	s.AddNode(mkRepoNode(finding, "external-unresolved", file, "r1", graph.KindFinding))
+	s.AddNode(mkRepoNode(program, "APP", file, "r1", graph.KindFunction))
+	s.AddEdge(mkEdge(program, resource, graph.EdgeCalls))
+	s.AddEdge(mkEdge(finding, resource, graph.EdgeReferences))
+	s.AddEdge(mkEdge(finding, program, graph.EdgeMemberOf))
+
+	if nodes, edges, supported := graph.EvictResourceNodesByIDs(s, nil); nodes != 0 || edges != 0 || !supported {
+		t.Fatalf("EvictResourceNodesByIDs(empty) = (%d, %d, %v), want (0, 0, true)", nodes, edges, supported)
+	}
+	nodes, edges, supported := graph.EvictResourceNodesByIDs(s, []string{resource, resource, finding})
+	if !supported {
+		t.Fatal("EvictResourceNodesByIDs reported the capability unsupported")
+	}
+	if nodes != 1 || edges != 2 {
+		t.Fatalf("EvictResourceNodesByIDs = (%d, %d), want (1, 2)", nodes, edges)
+	}
+	if s.GetNode(resource) != nil {
+		t.Fatalf("resource %q survived eviction", resource)
+	}
+	if s.GetNode(finding) == nil || s.GetNode(program) == nil {
+		t.Fatalf("kind guard failed: finding=%v program=%v", s.GetNode(finding), s.GetNode(program))
+	}
+	if got := s.EdgeCount(); got != 1 {
+		t.Fatalf("EdgeCount after eviction = %d, want 1 (the finding's member_of survives)", got)
 	}
 }

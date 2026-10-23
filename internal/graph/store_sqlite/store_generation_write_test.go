@@ -41,6 +41,7 @@ const (
 	genWriteContract  = "repo::pkg/contract.go::Contract"
 	genWriteConfigKey = "repo::pkg/app.yaml::server.port"
 	genWriteFinding   = genWriteRepo + "/pkg/app.cbl::@finding/parse/0123456789abcdef0123456789abcdef"
+	genWriteResource  = genWriteRepo + "::cobol-missing::program/NOPGM"
 	genWriteBridge    = "repo::pkg/bridge.go::Bridge"
 	genWriteTopic     = "repo::pkg/topic.go::Topic"
 	genWriteDoc       = "repo::pkg/caller.go::Doc"
@@ -707,6 +708,26 @@ func generationWriteCases() []generationWriteCase {
 				nodes, edges := s.EvictFindingNodesByIDs([]string{genWriteFinding})
 				if nodes != 1 || edges != 1 {
 					t.Fatalf("EvictFindingNodesByIDs removed (%d nodes, %d edges), want (1, 1)", nodes, edges)
+				}
+			},
+		},
+		{
+			name: "resource_node_evict",
+			seed: func(t *testing.T, base, derived *Store) {
+				addToBothGenerations(base, derived, func() ([]*graph.Node, []*graph.Edge) {
+					return []*graph.Node{{
+						ID: genWriteResource, Kind: graph.KindResource, Name: "NOPGM",
+						RepoPrefix: genWriteRepo,
+					}}, []*graph.Edge{{
+						From: genWriteCaller, To: genWriteResource, Kind: graph.EdgeCalls,
+						FilePath: genWriteCallerFile, Line: 10,
+					}}
+				})
+			},
+			disturb: func(t *testing.T, s *Store) {
+				nodes, edges := s.EvictResourceNodesByIDs([]string{genWriteResource})
+				if nodes != 1 || edges != 1 {
+					t.Fatalf("EvictResourceNodesByIDs removed (%d nodes, %d edges), want (1, 1)", nodes, edges)
 				}
 			},
 		},
