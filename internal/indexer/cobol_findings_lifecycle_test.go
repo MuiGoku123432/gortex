@@ -601,8 +601,10 @@ func TestCobolFindings_SearchAfterIncremental(t *testing.T) {
 
 // TestCobolFindings_SearchAfterFallbackMasterResolve proves a master
 // ResolveAll (the incremental "needed, no frontier files" fallback's exact
-// call) syncs search from its own reconcile: with no other settle point in
-// between, the placeholder and finding it removes leave search.
+// call) syncs search from its own reconcile and records the ledger at its
+// own drain step: with no other settle point in between, the placeholder
+// and finding it removes leave search, the close is in history, and the
+// next settle point appends nothing (D-24, WR-02, GAP-06).
 func TestCobolFindings_SearchAfterFallbackMasterResolve(t *testing.T) {
 	const placeholder = "finda/cobol-missing::program/NOPGM"
 	env := newCobolLedgerEnv(t)
@@ -624,16 +626,64 @@ func TestCobolFindings_SearchAfterFallbackMasterResolve(t *testing.T) {
 	assert.Nil(t, env.store.GetNode(placeholder), "the master swept the placeholder")
 	assert.Nil(t, env.store.GetNode(id), "the master closed the finding")
 	assertCobolSearch(t, env, "NOPGM", false, placeholder, id)
-	assert.Len(t, cobolHistory(t, env, "finda"), before, "no ledger at the master drain")
-
-	// The next settle point records the transition (state-based ledger).
-	env.mi.reconcileCobolRepos(map[string]struct{}{"finda": {}})
 	rows := cobolHistory(t, env, "finda")[before:]
-	require.Len(t, rows, 1, "%+v", rows)
+	require.Len(t, rows, 1, "the close lands at the master step: %+v", rows)
 	assert.Equal(t, id, rows[0].FindingID)
 	assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
 	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+
+	// The next settle point finds nothing left to record.
+	env.mi.reconcileCobolRepos(map[string]struct{}{"finda": {}})
+	assert.Len(t, cobolHistory(t, env, "finda"), before+1, "no row at the next settle point")
 	assertCobolSearch(t, env, "NOPGM", false, placeholder, id)
+
+	// And a second pass with no change appends nothing either (GAP-06).
+	env.mi.reconcileCobolRepos(map[string]struct{}{"finda": {}})
+	assert.Len(t, cobolHistory(t, env, "finda"), before+1, "an unchanged pass appends no row")
+}
+
+// TestCobolFindings_MasterDrainClosesBeforeLaterEdit is the WR-02 timing
+// case: a fallback master closes the NOPGM finding because its target was
+// retrieved, then an edit adds a different missing CALL to the same
+// paragraph. The close is recorded at the master step, so the later edit
+// only opens the new finding; before D-24 the next settle point paired the
+// two into a false supersede.
+func TestCobolFindings_MasterDrainClosesBeforeLaterEdit(t *testing.T) {
+	env := newCobolLedgerEnv(t)
+	nopgm := cobolExternalFindingFor(t, env, "finda", "NOPGM")
+	idx := env.mi.GetIndexer("finda")
+	require.NotNil(t, idx)
+
+	// Retrieve NOPGM through an interrupted reindex: no reconcile, no row.
+	idx.incrementalResolveFilesHook = func([]string) {}
+	env.write(t, "finda", "cobol/nopgm.cbl", cobolDepNopgm)
+	env.reindex(t, "finda")
+	require.NotNil(t, env.store.GetNode(nopgm), "precondition: the interruption kept the finding")
+	idx.incrementalResolveFilesHook = nil
+	before := len(cobolHistory(t, env, "finda"))
+
+	env.mi.runMasterResolve(map[string]struct{}{"finda": {}}, false)
+	rows := cobolHistory(t, env, "finda")[before:]
+	if assert.Len(t, rows, 1, "the master step records the close: %+v", rows) {
+		assert.Equal(t, nopgm, rows[0].FindingID)
+		assert.Equal(t, graph.FindingStatusActive, rows[0].PriorStatus)
+		assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
+	}
+	afterMaster := len(cobolHistory(t, env, "finda"))
+
+	withNew := strings.Replace(cobolLedgerFixture, "           CALL 'NOPGM'.\n",
+		"           CALL 'NOPGM'.\n           CALL 'NEWPGM'.\n", 1)
+	require.NotEqual(t, cobolLedgerFixture, withNew)
+	env.write(t, "finda", "cobol/main.cbl", withNew)
+	env.reindex(t, "finda")
+	newpgm := cobolExternalFindingFor(t, env, "finda", "NEWPGM")
+	rows = cobolHistory(t, env, "finda")[afterMaster:]
+	if assert.Len(t, rows, 1, "the edit only opens NEWPGM: %+v", rows) {
+		assert.Equal(t, newpgm, rows[0].FindingID)
+		assert.Equal(t, "", rows[0].PriorStatus)
+		assert.Equal(t, graph.FindingStatusActive, rows[0].NewStatus)
+	}
+	requireNoSuperseded(t, env, "finda")
 }
 
 // TestCobolFindings_CrossRepoDependentLedgerAndSearch proves the nodes a

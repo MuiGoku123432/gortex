@@ -26,6 +26,15 @@ func TestCobolFindings_LedgerExcludesTornMutation(t *testing.T) {
 			env.mi.reconcileCobolRepos(map[string]struct{}{"fdepa": {}})
 		})
 	})
+	t.Run("master_drain", func(t *testing.T) {
+		// A writer-free master ResolveAll (daemon warmup, deferred catch-up):
+		// its settle ledger takes the writer itself. With scoped global
+		// passes (the default) the master reconciles fdepa widened to fdepb
+		// through resolve_from, so its drained record names fdepb (D-24).
+		requireCobolLedgerExcludesTornMutation(t, func(env *cobolLifecycleEnv) {
+			env.mi.runMasterResolve(map[string]struct{}{"fdepa": {}}, false)
+		})
+	})
 }
 
 // requireCobolLedgerExcludesTornMutation interleaves settle, a settle point
