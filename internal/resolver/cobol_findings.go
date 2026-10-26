@@ -140,8 +140,10 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // shift keeps it and a CALL edited into an XCTL changes it; identical
 // references in one container take #k in prov_start_byte, Line, edge Kind,
 // then occurrence order. The second and later occurrences of a collapsed
-// edge have no range of their own, so they carry prov_range_absence
-// same_line_occurrence and no coordinates, never a copied range (D-26).
+// edge on a source line have no range of their own, so they carry
+// prov_range_absence same_line_occurrence and no coordinates, never a copied
+// range (D-26); those of an edge with no source position keep the edge's own
+// absence reason (review WR-02).
 // Because the container is part of the ID and of finding_container,
 // references in two containers never share a ledger pairing group and never
 // supersede each other (D-03). The as-written target is hashed, never
@@ -235,14 +237,17 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 		}
 		// D-26: an edge the extractor collapsed from n same-line duplicates
 		// stands for n occurrences. Only the first has a range on the edge;
-		// the others keep the shared line and never invent coordinates.
+		// the others keep the shared line and never invent coordinates. An
+		// edge with no source position (Line 0) collapses duplicates whatever
+		// their real lines are, so every occurrence keeps the edge's own
+		// absence reason and no line (review WR-02).
 		n, ok := metaIntValue(d.e.Meta[metaCobolOccurrences])
 		if !ok || n < 1 {
 			n = 1
 		}
 		for i := range n {
 			node := r.newCobolExternalFinding(d)
-			if i > 0 {
+			if i > 0 && d.e.Line > 0 {
 				for _, k := range []string{"prov_start_row", "prov_start_column", "prov_end_row",
 					"prov_end_column", "prov_start_byte", "prov_end_byte"} {
 					delete(node.Meta, k)

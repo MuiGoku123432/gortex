@@ -1017,6 +1017,49 @@ func TestCobolReconcile_ExternalSameLineOccurrences(t *testing.T) {
 	assert.Zero(t, store.findingEvicts, "no EvictFindingNodesByIDs")
 }
 
+// TestCobolReconcile_ExternalImagelessOccurrences pins review WR-02: an edge
+// with no source position (Line 0, from a projection with no image or a
+// synthetic one) that collapsed two references yields two findings, and both
+// keep the edge's own absence reason. Neither claims same_line_occurrence,
+// because such duplicates collapse whatever their real lines are, and
+// neither gets a line, an end line, or a coordinate.
+func TestCobolReconcile_ExternalImagelessOccurrences(t *testing.T) {
+	const caller = "r1/main.cbl::MAINPGM"
+	const callNo = "unresolved::cobol::program::NOPGM"
+	base := cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "program",
+		[6]string{string(graph.EdgeCalls), "call_statement", "", "literal", "", "'NOPGM'"})
+	// note: the same six keys as TestCobolReconcile_ExternalSameLineOccurrences.
+	coordinates := []string{"prov_start_row", "prov_start_column", "prov_end_row",
+		"prov_end_column", "prov_start_byte", "prov_end_byte"}
+	for _, absence := range []string{"no_original_projection", "synthetic_projection"} {
+		t.Run(absence, func(t *testing.T) {
+			cobolOnStores(t, func(t *testing.T, g graph.Store) {
+				seedCobol(g, "r1", caller, graph.KindFunction, "program", "MAINPGM")
+				meta := cobolCallMeta(callNo, "'NOPGM'")
+				meta["prov_observation_kind"] = "call_statement"
+				meta["prov_range_exact"], meta["prov_range_absence"] = false, absence
+				meta["cobol_occurrence_count"] = 2
+				cobolEdge(g, caller, 0, graph.EdgeCalls, callNo, meta)
+
+				New(g).ReconcileCobol(nil)
+
+				found := cobolExternalNodes(g)
+				require.ElementsMatch(t, []string{base, base + "#2"}, mapKeys(found),
+					"one finding per occurrence (D-26)")
+				for _, id := range []string{base, base + "#2"} {
+					n := found[id]
+					assert.Equal(t, absence, n.Meta["prov_range_absence"], "%s keeps the edge's absence reason", id)
+					assert.Equal(t, false, n.Meta["prov_range_exact"], id)
+					for _, k := range coordinates {
+						assert.NotContains(t, n.Meta, k, "%s invents no coordinate", id)
+					}
+					assert.Equal(t, [2]int{0, 0}, [2]int{n.StartLine, n.EndLine}, "%s invents no line", id)
+				}
+			})
+		})
+	}
+}
+
 func TestCobolReconcile_ExternalMetaContract(t *testing.T) {
 	const caller = "r1/main.cbl::MAINPGM"
 	const callNo = "unresolved::cobol::program::NOPGM"
