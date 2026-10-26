@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/graph/store_sqlite"
@@ -362,6 +364,74 @@ func TestCobolReconcile_PlaceholderSweep(t *testing.T) {
 		assert.NotNil(t, g.GetNode(placeholder), "a placeholder outside the reconcile set is not swept")
 		New(g).ReconcileCobol(map[string]struct{}{"r1": {}})
 		assert.Nil(t, g.GetNode(placeholder))
+	})
+}
+
+// TestCobolReconcile_PlaceholderRefusedOverRealNode is the D-27 refusal: a
+// node that is not a placeholder already holds the ID a missing CALL's
+// placeholder would take (only a repository prefix spelled with the
+// placeholder namespace can mint one). The reconcile leaves that node as it
+// is, keeps the CALL on its unresolved target with reason missing, creates
+// no placeholder and no EXTERNAL_UNRESOLVED finding, and logs one warning
+// per pass naming only the repository and the artifact type; a second pass
+// writes nothing.
+func TestCobolReconcile_PlaceholderRefusedOverRealNode(t *testing.T) {
+	const caller = "r1/main.cbl::MAINPGM"
+	const callNo = "unresolved::cobol::program::NOPGM"
+	occupied, _, _ := cobolPlaceholderTarget("r1", cobolRef{key: "NOPGM", isProgram: true})
+	// A file NOPGM at the root of a repository whose prefix spells r1's
+	// program placeholder namespace.
+	crafted := strings.TrimSuffix(occupied, "/NOPGM")
+	run := func(t *testing.T, g graph.Store, counter *cobolWriteCounter) {
+		seedCobol(g, "r1", caller, graph.KindFunction, "program", "MAINPGM")
+		cobolEdge(g, caller, 1, graph.EdgeCalls, callNo, cobolAt(cobolCallMeta(callNo, "'NOPGM'"), 0, 100))
+		g.AddNode(&graph.Node{
+			ID: occupied, Kind: graph.KindFunction, Name: "OCCUPANT", FilePath: occupied,
+			Language: "go", RepoPrefix: crafted, Meta: map[string]any{"occupant": "real source"},
+		})
+		pass := func() *observer.ObservedLogs {
+			core, logs := observer.New(zap.WarnLevel)
+			r := New(g)
+			r.SetLogger(zap.New(core))
+			r.ReconcileCobol(nil)
+			return logs
+		}
+		check := func(t *testing.T, logs *observer.ObservedLogs) {
+			t.Helper()
+			n := g.GetNode(occupied)
+			require.NotNil(t, n, "the occupying node stays")
+			assert.Equal(t, graph.KindFunction, n.Kind, "never overwritten by a placeholder")
+			assert.Equal(t, occupied, n.FilePath)
+			assert.Equal(t, crafted, n.RepoPrefix)
+			assert.Equal(t, map[string]any{"occupant": "real source"}, n.Meta)
+			e := cobolEdgeAt(t, g, caller, 1)
+			assert.Equal(t, callNo, e.To, "the CALL stays on its unresolved target")
+			assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
+			assert.Empty(t, cobolMissingNodes(g), "no placeholder")
+			assert.Empty(t, cobolExternalNodes(g), "no EXTERNAL_UNRESOLVED finding")
+			warned := logs.All()
+			require.Len(t, warned, 1, "one warning per pass: %v", warned)
+			assert.NotContains(t, warned[0].Message, "NOPGM", "the key is never logged")
+			assert.Equal(t, map[string]any{"repo": "r1", "artifact_type": "program", "refused": int64(1)},
+				warned[0].ContextMap(), "only the repository, the artifact type, and the count")
+		}
+
+		check(t, pass())
+		if counter != nil {
+			counter.reset()
+		}
+		check(t, pass())
+		if counter != nil {
+			assert.Zero(t, counter.writes(), "a second pass writes nothing")
+		}
+	}
+	t.Run("memory", func(t *testing.T) { run(t, graph.New(), nil) })
+	t.Run("sqlite", func(t *testing.T) {
+		opened, err := store_sqlite.Open(filepath.Join(t.TempDir(), "cobol.sqlite"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, opened.Close()) })
+		counter := &cobolWriteCounter{Store: opened}
+		run(t, counter, counter)
 	})
 }
 
