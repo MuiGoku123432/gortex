@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
-status: executing
-stopped_at: Completed 05-16-PLAN.md
-last_updated: "2026-10-26T14:56:46.154Z"
+status: verifying
+stopped_at: Completed 05-17-PLAN.md
+last_updated: "2026-10-26T19:01:05.431Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 69
-  completed_plans: 68
-  percent: 40
+  completed_plans: 69
+  percent: 50
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 5 of 17
-Status: Ready to execute
+Plan: 17 of 17
+Status: Phase complete — ready for verification
 Last activity: 2026-10-23 — Phase 05 execution started
 
-Progress: [██████████] 99%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -129,6 +129,7 @@ Progress: [██████████] 99%
 | Phase 05 P13 | 30min | 3 tasks | 6 files |
 | Phase 05 P14 | 62min | 3 tasks | 9 files |
 | Phase 05 P16 | 50min | 2 tasks | 14 files |
+| Phase 05 P17 | ~4h | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -286,6 +287,9 @@ Recent decisions affecting current work:
 - [Phase 05]: D-27 shipped (05-16): placeholder ID is <callerRepo>::cobol-missing::<type>/<key> with an empty FilePath, built only by cobolPlaceholderTarget; the sweep removes unreferenced placeholders in one sorted graph.EvictResourceNodesByIDs call (no EvictFile; an unsupported store warns, no fallback); cobolOwnerPrefix routes <repo>:: IDs in the ledger and search sync; graph.RepoPrefixOfID unchanged, its 24 callers audited in 05-16-SUMMARY — No repository path can mint a <repo>:: ID and an empty FilePath is out of reach of file eviction, so a real file at the former slash-form path is never overwritten or evicted (WR-05, TestCobolFindings_PlaceholderNamespaceNoFileCollision)
 - [Phase 05]: 05-16: reconcileCobol refuses a computed placeholder ID held by a node that is not a placeholder: the edge stays on its unresolved target, no placeholder, no finding, one warning per pass naming repo, artifact_type, and count only — Only a repository prefix spelled with another repository placeholder namespace can occupy one; a finding and code edge made before the ID became occupied stay until the referencing file is re-extracted or a clean re-index (WINDOW, review WR-05)
 - [Phase 05]: 05-16: no legacy migration; pre-05-16 stores keep old-grammar placeholders until a clean re-index. Shared DB2/IDMS resources (reconcileCobolResources) keep the old ID = FilePath + EvictFile shape, logged in deferred-items.md — D-27 and WR-05 scope only missing-artifact placeholders; the shared-resource fix would mirror 05-16 (namespace, empty FilePath, evict by ID)
+- [Phase 05]: 05-17: Task 2 phase gate accepted on split evidence by user decision 2026-10-26. Run 1 executed every package and failed only the cmd/gortex query-log guard; cmd/gortex passed alone twice with the guard intact. The gate verify (exit=0, no FAIL line) is not met literally; recorded as a deviation and WINDOWS.md entry 8, not a pass.
+- [Phase 05]: 05-17: cmd/gortex TestMain (cmd/gortex/main_test.go) fails the package whenever anything on the machine writes the real ~/.gortex/cache/query-log.jsonl during go test ./...; pre-existing since 34e1f482, logged in deferred-items.md, not fixed in Phase 5. Run the full suite with no Gortex activity on the machine.
+- [Phase 05]: 05-17: the COBOL row documents the old-store rebuild note (gortex-cobol-grammar/6 kept, so pre-gap-closure stores keep old placeholders and the old parse-finding IDs of unchanged files until a clean re-index) and the reserved repository names.
 
 ### Pending Todos
 
@@ -299,6 +303,7 @@ None yet.
 - [Phase 4]: Copybook/library search order and canonical cross-repository resolution domains need corpus evidence.
 - [Phases 7-9]: Provider authorization, retention, claim-ledger, reviewer authority, and evaluation thresholds remain policy/design decisions.
 - [Phase 2]: windows-latest CI test shard fails (runs 36877578916, 36889132850); cause unknown pending job-log access — see 02 deferred-items From Plan 02-06
+- [Phase 5]: a full-suite run fails cmd/gortex whenever Gortex is used anywhere on the machine during it (TestMain query-log guard); see deferred-items From Plan 05-17 and WINDOWS.md entry 8
 
 ### Roadmap Evolution
 
@@ -314,6 +319,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-26T14:56:46.143Z
-Stopped at: Completed 05-16-PLAN.md
+Last session: 2026-10-26T19:00:14.005Z
+Stopped at: Completed 05-17-PLAN.md
 Resume file: None
