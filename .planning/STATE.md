@@ -5,15 +5,15 @@ milestone_name: Neo4j Projection and Mainframe Graph Foundation
 current_phase: 05
 current_phase_name: explicit-unresolved-evidence
 status: executing
-stopped_at: Completed 05-14-PLAN.md
-last_updated: "2026-10-23T20:28:24.671Z"
+stopped_at: Completed 05-16-PLAN.md
+last_updated: "2026-10-26T14:56:46.154Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 69
-  completed_plans: 67
+  completed_plans: 68
   percent: 40
 state_head: b23a688f39d205a044579929357e2d8b206c71d9
 ---
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 4 of 17
+Plan: 5 of 17
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 05 execution started
 
-Progress: [██████████] 97%
+Progress: [██████████] 99%
 
 ## Performance Metrics
 
@@ -128,6 +128,7 @@ Progress: [██████████] 97%
 | Phase 05 P15 | 10min | 2 tasks | 8 files |
 | Phase 05 P13 | 30min | 3 tasks | 6 files |
 | Phase 05 P14 | 62min | 3 tasks | 9 files |
+| Phase 05 P16 | 50min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -282,6 +283,9 @@ Recent decisions affecting current work:
 - [Phase 05]: D-23 shipped (05-14): every MultiIndexer COBOL ledger runs through recordCobolSettleLedger under the reach topology writer and cobolReconcileMu; lock order writer -> cobolReconcileMu -> findingLedgerMu; writer-held sites use TopologyHeld variants and the TrackRepoCtx tail branches on activeRepositoryTopologyBatch — Non-reentrant reach.BeginTopologyMutation forces explicit writer state; a held site on a taking variant self-deadlocks, a free site on a held variant loses the exclusion (TestCobolFindings_LedgerExcludesTornMutation proves it)
 - [Phase 05]: D-24 shipped (05-14): the master-resolve drain ledgers at its own step; resolveDeferredMutations keeps its 4-argument signature (resolveDeferredMutationsMode carries topologyHeld) — A discarded master drain let a later settle point pair a close with an unrelated open into a false supersede (WR-02)
 - [Phase 05]: Cold-track commit-to-tail gap kept and documented as benign in 05-14-SUMMARY; one residual stale-record corner accepted under T-05-73 — The commit installs only an untracked repository and every ledger read of it follows a reconcile of it; moving the tail into the closure would reorder reconcileEnclosingRepos and the deferResolve handoff
+- [Phase 05]: D-27 shipped (05-16): placeholder ID is <callerRepo>::cobol-missing::<type>/<key> with an empty FilePath, built only by cobolPlaceholderTarget; the sweep removes unreferenced placeholders in one sorted graph.EvictResourceNodesByIDs call (no EvictFile; an unsupported store warns, no fallback); cobolOwnerPrefix routes <repo>:: IDs in the ledger and search sync; graph.RepoPrefixOfID unchanged, its 24 callers audited in 05-16-SUMMARY — No repository path can mint a <repo>:: ID and an empty FilePath is out of reach of file eviction, so a real file at the former slash-form path is never overwritten or evicted (WR-05, TestCobolFindings_PlaceholderNamespaceNoFileCollision)
+- [Phase 05]: 05-16: reconcileCobol refuses a computed placeholder ID held by a node that is not a placeholder: the edge stays on its unresolved target, no placeholder, no finding, one warning per pass naming repo, artifact_type, and count only — Only a repository prefix spelled with another repository placeholder namespace can occupy one; a finding and code edge made before the ID became occupied stay until the referencing file is re-extracted or a clean re-index (WINDOW, review WR-05)
+- [Phase 05]: 05-16: no legacy migration; pre-05-16 stores keep old-grammar placeholders until a clean re-index. Shared DB2/IDMS resources (reconcileCobolResources) keep the old ID = FilePath + EvictFile shape, logged in deferred-items.md — D-27 and WR-05 scope only missing-artifact placeholders; the shared-resource fix would mirror 05-16 (namespace, empty FilePath, evict by ID)
 
 ### Pending Todos
 
@@ -310,6 +314,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-23T20:28:19.457Z
-Stopped at: Completed 05-14-PLAN.md
+Last session: 2026-10-26T14:56:46.143Z
+Stopped at: Completed 05-16-PLAN.md
 Resume file: None
