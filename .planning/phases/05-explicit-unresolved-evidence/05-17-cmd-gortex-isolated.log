@@ -1,0 +1,4 @@
+Filesystem   1G-blocks Used Available Capacity iused      ifree %iused  Mounted on
+/dev/disk3s5       460  255       173    60% 4164105 1815078920    0%   /System/Volumes/Data
+ok  	github.com/zzet/gortex/cmd/gortex	123.082s
+exit=0
