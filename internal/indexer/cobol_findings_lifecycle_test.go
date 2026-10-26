@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/zzet/gortex/internal/config"
 	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/graph/store_sqlite"
 )
@@ -919,6 +920,62 @@ func TestCobolFindings_PlaceholderNamespaceNoFileCollision(t *testing.T) {
 	assert.Nil(t, placeholderOf(t), "the unreferenced placeholder is swept")
 	requireHost(t)
 	env.requireCleanEquivalent(t)
+}
+
+// cobolColonIDMSFixture references a COPY IDMS member that is never
+// obtained, plus a missing CALL whose edge keeps its own cobol_placeholder.
+const cobolColonIDMSFixture = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IDMSPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY IDMS RECORD EMP-REC.
+       01 WS-B PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'NOPGM'.
+           STOP RUN.
+`
+
+// TestCobolFindings_IDMSColonRepoPrefix is review CR-01 on the real path: a
+// repository whose prefix contains "::" keeps its COPY IDMS
+// EXTERNAL_UNRESOLVED finding after a cold track and after an identical
+// re-index. The finding's history is recorded under that prefix, never
+// under the text before its first "::", and the settle point's search sync
+// keeps the finding in symbol FTS.
+func TestCobolFindings_IDMSColonRepoPrefix(t *testing.T) {
+	const repo = "a::b"
+	env := newCobolLifecycleEnv(t, map[string]map[string]string{"colon": {"cobol/main.cbl": cobolColonIDMSFixture}})
+	res, err := env.mi.TrackRepoCtx(context.Background(), config.RepoEntry{
+		Path: env.roots["colon"], Name: repo, Workspace: "phase4", Project: "phase4",
+	})
+	require.NoError(t, err)
+	require.Equal(t, repo, res.RepoPrefix)
+
+	var id string
+	check := func(step string) {
+		t.Helper()
+		got := cobolExternalFindingFor(t, env, repo, "RECORD/EMP-REC")
+		if id == "" {
+			id = got
+		}
+		require.Equal(t, id, got, "%s: the IDMS finding keeps its ID", step)
+		var rows []graph.FindingTransition
+		for _, row := range cobolHistory(t, env, repo) {
+			if row.FindingID == id {
+				rows = append(rows, row)
+			}
+		}
+		if assert.Len(t, rows, 1, "%s: one history row for the IDMS finding: %+v", step, rows) {
+			assert.Equal(t, "", rows[0].PriorStatus, step)
+			assert.Equal(t, graph.FindingStatusActive, rows[0].NewStatus, step)
+		}
+		assert.Empty(t, cobolHistory(t, env, "a"), "%s: no history under the text before the first ::", step)
+		assert.True(t, cobolSearchHits(t, env, "RECORD/EMP-REC")["fts"][id], "%s: %s is in symbol FTS", step, id)
+	}
+	check("track")
+	env.write(t, "colon", "cobol/main.cbl", cobolColonIDMSFixture)
+	env.reindex(t, repo)
+	check("identical re-index")
 }
 
 // TestCobolFindings_HistorySurvivesRestart reopens the same SQLite file and

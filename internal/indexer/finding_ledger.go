@@ -3,7 +3,6 @@ package indexer
 import (
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -289,16 +288,14 @@ func (mi *MultiIndexer) syncCobolFindingFTSByRepo(added, evicted []string) {
 }
 
 // cobolOwnerPrefix returns the repository prefix a finding or placeholder
-// ID of a COBOL reconcile names: the text before the first "::" when that
-// separator comes before the first slash (a missing-artifact placeholder,
-// `<repo>::cobol-missing::<type>/<key>`), else graph.RepoPrefixOfID (a
-// file-owned finding, `<repo>/<path>::...`). Placeholder IDs are owned under
-// `<repo>::`, which graph.RepoPrefixOfID does not split (D-27).
+// ID of a COBOL reconcile names: the owner resolver.ParseCobolPlaceholderID
+// parses from a missing-artifact placeholder ID
+// (`<repo>::cobol-missing::<type>/<key>`, D-27), else graph.RepoPrefixOfID
+// (a file-owned finding, `<repo>/<path>::...`). A repository prefix may
+// contain "::", so neither form is cut at its first "::" (review CR-01).
 func cobolOwnerPrefix(id string) string {
-	if i := strings.Index(id, "::"); i > 0 {
-		if j := strings.IndexByte(id, '/'); j < 0 || i < j {
-			return id[:i]
-		}
+	if repo, _, _, ok := resolver.ParseCobolPlaceholderID(id); ok {
+		return repo
 	}
 	return graph.RepoPrefixOfID(id)
 }

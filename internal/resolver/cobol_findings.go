@@ -17,8 +17,9 @@ import (
 // repository, artifact type, normalized key), with ID
 // `<callerRepo>::cobol-missing::<type>/<key>` and an empty FilePath. Every
 // node ID minted from a repository file path starts with the repository
-// prefix and a slash, so no repository file, program, or paragraph can
-// produce a placeholder ID (review WR-05).
+// prefix and a slash, so a repository file, program, or paragraph can hold a
+// placeholder ID only when its repository prefix spells another repository's
+// placeholder namespace (the WINDOW in reconcileCobol's doc; review WR-05).
 const (
 	cobolMissingNamespace    = "cobol-missing::"
 	cobolMissingArtifactKind = "missing_artifact"
@@ -84,18 +85,41 @@ func cobolPlaceholderTarget(callerRepo string, ref cobolRef) (id, artifactType, 
 	return callerRepo + "::" + cobolMissingNamespace + artifactType + "/" + key, artifactType, key
 }
 
+// ParseCobolPlaceholderID splits a missing-artifact placeholder ID
+// `<repo>::cobol-missing::<type>/<key>` into its owning repository prefix,
+// artifact type, and key; ok is false for any other ID. It is the one parser
+// of the grammar cobolPlaceholderTarget builds. The namespace marker is found
+// by its last occurrence: a repository prefix may contain "::", and may even
+// spell the marker, but a key never contains ":" (the extractor escapes it),
+// so the last marker is the real one (review CR-01). A repository prefix
+// never contains "/", so an ID minted from a repository file path
+// (`<repo>/<path>...`, a file-owned finding included) never parses.
+func ParseCobolPlaceholderID(id string) (repo, artifactType, key string, ok bool) {
+	i := strings.LastIndex(id, "::"+cobolMissingNamespace)
+	if i <= 0 || strings.Contains(id[:i], "/") {
+		return "", "", "", false
+	}
+	artifactType, key, ok = strings.Cut(id[i+2+len(cobolMissingNamespace):], "/")
+	if !ok || key == "" || strings.Contains(key, ":") {
+		return "", "", "", false
+	}
+	switch artifactType {
+	case cobolArtifactProgram, cobolArtifactCopybook, cobolArtifactIncMember, cobolArtifactIDMSMember:
+		return id[:i], artifactType, key, true
+	}
+	return "", "", "", false
+}
+
 // cobolUnresolvedFromPlaceholder returns the unresolved COPY IDMS target an
 // idms_dictionary_member placeholder ID stands for, or "" for any other ID.
-// It cuts the ID at its first "::", the separator after the repository
-// prefix. Only IDMS edges need it: every other placeholder-targeted edge
-// keeps its unresolved target in cobol_placeholder.
+// Only IDMS edges need it: every other placeholder-targeted edge keeps its
+// unresolved target in cobol_placeholder.
 func cobolUnresolvedFromPlaceholder(id string) string {
-	_, rel, _ := strings.Cut(id, "::")
-	rest, ok := strings.CutPrefix(rel, cobolMissingNamespace+cobolArtifactIDMSMember+"/")
-	if !ok || rest == "" {
+	_, artifactType, key, ok := ParseCobolPlaceholderID(id)
+	if !ok || artifactType != cobolArtifactIDMSMember {
 		return ""
 	}
-	return graph.UnresolvedMarker + cobolIDMSCopyTargetPrefix + rest
+	return graph.UnresolvedMarker + cobolIDMSCopyTargetPrefix + key
 }
 
 // reconcileCobolFindings owns the missing-artifact placeholders and the

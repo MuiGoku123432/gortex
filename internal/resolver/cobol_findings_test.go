@@ -180,6 +180,89 @@ func TestCobolReconcile_PlaceholderIDMSSecondPass(t *testing.T) {
 	})
 }
 
+// TestParseCobolPlaceholderID pins review CR-01: the placeholder grammar is
+// parsed from its last namespace marker, so the ID of every artifact type
+// round-trips for a repository prefix that contains "::" or spells the
+// marker, and an ID minted from a repository file path never parses.
+func TestParseCobolPlaceholderID(t *testing.T) {
+	refs := map[string]cobolRef{
+		"program":                {isProgram: true, key: "NOPGM"},
+		"copybook":               {key: "NOCPY", e: &graph.Edge{Meta: cobolCopyMeta("copy", "")}},
+		"inc_member":             {key: "INCMEM", e: &graph.Edge{Meta: cobolCopyMeta("inc", "")}},
+		"idms_dictionary_member": {idms: true, key: "idms/RECORD/EMP-REC"},
+	}
+	for _, repo := range []string{"repo", "a::b", "x::y::z", "x::cobol-missing::program"} {
+		for wantType, ref := range refs {
+			id, artifactType, key := cobolPlaceholderTarget(repo, ref)
+			require.Equal(t, wantType, artifactType)
+			gotRepo, gotType, gotKey, ok := ParseCobolPlaceholderID(id)
+			assert.True(t, ok, id)
+			assert.Equal(t, [3]string{repo, artifactType, key}, [3]string{gotRepo, gotType, gotKey}, id)
+		}
+		idmsID, _, _ := cobolPlaceholderTarget(repo, refs["idms_dictionary_member"])
+		assert.Equal(t, "unresolved::cobol::copybook::idms/RECORD/EMP-REC", cobolUnresolvedFromPlaceholder(idmsID), idmsID)
+		programID, _, _ := cobolPlaceholderTarget(repo, refs["program"])
+		assert.Empty(t, cobolUnresolvedFromPlaceholder(programID), programID)
+
+		// File-owned findings, and files whose path spells the namespace.
+		for _, id := range []string{
+			repo + "/main.cbl::@finding/external/dbc4ebf1eb9a926824c24c2dc400f97e",
+			repo + "/main.cbl::@finding/external/dbc4ebf1eb9a926824c24c2dc400f97e#2",
+			repo + "/cobol-missing::program/ZQXHOST.CBL",
+			repo + "/x::cobol-missing::program/ZQXHOST",
+			repo + "/x::cobol-missing::program/main.cbl::@finding/parse/0123",
+		} {
+			_, _, _, ok := ParseCobolPlaceholderID(id)
+			assert.False(t, ok, id)
+		}
+	}
+	// Outside the grammar: an unknown type, an empty key, no repository.
+	for _, id := range []string{
+		"r1::cobol-missing::widget/K", "r1::cobol-missing::program/",
+		"::cobol-missing::program/K", "cobol-missing::program/K",
+	} {
+		_, _, _, ok := ParseCobolPlaceholderID(id)
+		assert.False(t, ok, id)
+	}
+}
+
+// TestCobolReconcile_IDMSColonRepoPrefix is review CR-01: in a repository
+// whose prefix contains "::", a COPY IDMS reference to a member that is
+// never obtained keeps exactly one EXTERNAL_UNRESOLVED finding and its
+// placeholder across unchanged reconcile passes. The edge carries no
+// cobol_placeholder, so each pass recovers its target from the placeholder
+// ID, which must be parsed at its namespace marker, not at the first "::".
+func TestCobolReconcile_IDMSColonRepoPrefix(t *testing.T) {
+	const repo = "a::b"
+	const file = repo + "/main.cbl"
+	const caller = file + "::MAINPGM"
+	cobolOnStores(t, func(t *testing.T, g graph.Store) {
+		// seedCobol and cobolEdge take the file path from the text before
+		// the first "::", so the caller and its edge are spelled out here.
+		g.AddNode(&graph.Node{
+			ID: caller, Kind: graph.KindFunction, Name: "MAINPGM", QualName: "MAINPGM", FilePath: file,
+			Language: "cobol", RepoPrefix: repo,
+			Meta: map[string]any{"cobol_kind": "program", "cobol_name_key": "MAINPGM", "cobol_nested": false},
+		})
+		meta := cobolIDMSMeta()
+		meta["cobol_copy_member_raw"], meta["cobol_copy_idms_kind"] = "EMP-REC", "RECORD"
+		g.AddEdge(&graph.Edge{
+			From: caller, To: "unresolved::cobol::copybook::idms/RECORD/EMP-REC", Kind: graph.EdgeImports,
+			FilePath: file, Line: 7, Origin: graph.OriginASTResolved, Meta: meta,
+		})
+		placeholder, _, _ := cobolPlaceholderTarget(repo, cobolRef{idms: true, key: "idms/RECORD/EMP-REC"})
+		finding := cobolExternalID(file, "main.cbl::MAINPGM", "idms_dictionary_member",
+			[6]string{string(graph.EdgeImports), "", "", "idms", "RECORD", "EMP-REC"})
+
+		for pass := 1; pass <= 3; pass++ { // one creating pass, then two unchanged ones
+			New(g).ReconcileCobol(nil)
+			require.Equal(t, []string{finding}, mapKeys(cobolExternalNodes(g)), "pass %d: the one IDMS finding", pass)
+			require.Equal(t, []string{placeholder}, mapKeys(cobolMissingNodes(g)), "pass %d: its placeholder", pass)
+			assert.Equal(t, placeholder, cobolFindingTargets(t, g, finding)[graph.EdgeReferences], "pass %d", pass)
+		}
+	})
+}
+
 func TestCobolReconcile_PlaceholderShape(t *testing.T) {
 	const caller = "r1/main.cbl::MAINPGM"
 	const callNo = "unresolved::cobol::program::NOPGM"
