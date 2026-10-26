@@ -114,7 +114,7 @@ status: complete
   - D-22: unkeyed digest, guess confirmation by hashing;
   - D-23/D-24: history timing.
   The D-20 sentence is kept.
-- **Gate (Task 2):** three full-suite runs on `3abe472d`. In each, 155 of 156 tested packages passed, and `cmd/gortex`'s tests printed `PASS` but its guard failed the package. Run 1 executed every package. `cmd/gortex` passed alone twice. Accepted on split evidence by the user. Not a pass.
+- **Gate (Task 2):** three full-suite runs on `3abe472d`. In each, 156 of 157 tested packages passed (40 more have no test files), and `cmd/gortex`'s tests printed `PASS` but its guard failed the package. Run 1 executed every package. `cmd/gortex` passed alone twice. Accepted on split evidence by the user. Not a pass.
 - **Evidence kept:** the run 3 log at the plan path, run 1's full log, and the `cmd/gortex`-alone log are committed in the phase directory.
 - **Guard flaw recorded:** `deferred-items.md` (From Plan 05-17) and open ledger entry #8 (`unmet-truth`) in `.planning/WINDOWS.md`.
 
