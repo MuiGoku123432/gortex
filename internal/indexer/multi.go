@@ -156,11 +156,14 @@ type MultiIndexer struct {
 	// inside the pass, as reconcileMu does for contract edges.
 	cobolReconcileMu sync.Mutex
 
-	// cobolSettleHook is a focused test seam for the D-23 ledger exclusion.
-	// nil in production. It is called with stage "committed" and the
-	// repository when an incremental lane's file commit has landed (writer
-	// held, before its reconcile), and with stage "ledger" and the base
-	// repositories when a settle point holds the writer, before its ledger.
+	// cobolSettleHook is a focused test seam for the D-23 and D-24 ledger
+	// exclusion. nil in production. It is called with stage "committed" and
+	// the repository when an incremental lane's file commit has landed
+	// (writer held, before its reconcile), with stage "master_reconciled"
+	// and no repository when a writer-free master resolve has run its
+	// deferred COBOL reconcile (writer held, before its ledger), and with
+	// stage "ledger" and the base repositories when a settle point holds the
+	// writer, before its ledger.
 	cobolSettleHook func(stage string, repos []string)
 
 	// stitchProber / proxyBudget wire the cross-daemon proxy-edge feature:
@@ -1052,9 +1055,12 @@ func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope
 	}
 	master.OnComputeDone = onComputeDone
 	scoped := len(scope) > 0 && mi.scopedGlobalPassesEnabled()
+	var cobolScope map[string]struct{}
 	if scoped {
 		master.SetScope(scope)
+		cobolScope = scope
 	}
+	master.DeferCobolReconcile = !topologyHeld
 	mt := time.Now()
 	stats, err := master.ResolveAllContext(ctx)
 	// The master is ephemeral, so this drain is the only record of the
@@ -1065,9 +1071,30 @@ func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope
 	// tracked repositories its added and evicted IDs name, then search syncs
 	// (Pitfall 4): a later settle point would record only the net diff, so a
 	// close here could merge with an unrelated later open into a false
-	// supersede (D-24, WR-02). It drains whatever ResolveAllContext returns:
-	// a reconcile that ran before a cancellation still changed the store.
-	mi.recordCobolSettleLedger(nil, topologyHeld, master)
+	// supersede (D-24, WR-02).
+	//
+	// A caller holding the writer kept every lane out of the whole pass, so
+	// the ledger drains whatever ResolveAllContext returns: a reconcile that
+	// ran before a cancellation still changed the store. Without the writer,
+	// a lane could commit, reconcile, and ledger between the pass's
+	// reconcile and this ledger, recording the master's close as a supersede
+	// (review WR-01). The pass therefore skipped its reconcile
+	// (DeferCobolReconcile), and it runs here over the same scope, in one
+	// writer section with the ledger, like every other settle point. A
+	// failed or cancelled pass reconciled nothing, so it records nothing.
+	if topologyHeld {
+		mi.recordCobolSettleLedger(nil, true, master)
+	} else if err == nil && ctx.Err() == nil {
+		func() {
+			finish := reach.BeginTopologyMutation(mi.graph)
+			defer finish(false)
+			master.ReconcileCobol(cobolScope)
+			if mi.cobolSettleHook != nil {
+				mi.cobolSettleHook("master_reconciled", nil)
+			}
+			mi.recordCobolSettleLedger(nil, true, master)
+		}()
+	}
 	mi.logger.Info("DEFERRED-TIMING master.ResolveAll",
 		zap.Duration("elapsed", time.Since(mt)),
 		zap.Bool("scoped", scoped),

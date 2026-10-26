@@ -174,6 +174,14 @@ type Resolver struct {
 	// wall, and the daemon uses this hook to mark the graph queryable minutes
 	// before that verification work completes.
 	OnComputeDone func()
+	// DeferCobolReconcile, when set, makes ResolveAll skip its COBOL
+	// reconcile, so a caller that holds no reach topology writer can run
+	// ReconcileCobol over the same scope afterwards, in one writer section
+	// with its finding ledger (D-24, review WR-01). Nothing later in the
+	// pass reads a COBOL binding: terminal stamping never classifies a
+	// cobol:: target, and the other tail passes are gated on their own
+	// languages.
+	DeferCobolReconcile bool
 	// receiverTypeIdxByDir memoizes, per package directory, the Go type index
 	// the per-file method-receiver rebind builds. On a scoped tail that visits
 	// every file of a D-file package, building it once per package (O(D)) rather
@@ -743,7 +751,9 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 		// A COBOL edge on a missing-artifact placeholder node is not pending,
 		// yet a candidate tracked since may now bind it (Pitfall 10), so the
 		// COBOL reconcile still runs; it is a no-op on a graph without COBOL.
-		r.reconcileCobol(r.scope)
+		if !r.DeferCobolReconcile {
+			r.reconcileCobol(r.scope)
+		}
 		return &ResolveStats{PendingBefore: pendingBefore, PendingAfter: pendingAfter}, nil
 	}
 
@@ -1687,8 +1697,11 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 	r.resolveLuaRequires()
 	// COBOL literal CALL / COPY reconcile: re-decides placeholders and bound
 	// edges from the scope's repositories, exactly as the incremental tails do
-	// through ReconcileCobol (D-09, D-11, D-16).
-	r.reconcileCobol(r.scope)
+	// through ReconcileCobol (D-09, D-11, D-16), unless the caller deferred
+	// it (DeferCobolReconcile).
+	if !r.DeferCobolReconcile {
+		r.reconcileCobol(r.scope)
+	}
 	// Godot `res://` binding — scene `[ext_resource]` references and
 	// GDScript `preload(...)`. Same settle window and the same path-suffix
 	// net as the Lua requires above.

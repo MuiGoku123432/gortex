@@ -618,6 +618,38 @@ func TestCobolReconcile_PlaceholderResolveAllNoPending(t *testing.T) {
 	})
 }
 
+// TestCobolReconcile_ResolveAllDefersReconcile pins D-24 (review WR-01): a
+// ResolveAll with DeferCobolReconcile set leaves every COBOL decision to the
+// caller's later ReconcileCobol, on a pass with pending edges and on one
+// with nothing pending.
+func TestCobolReconcile_ResolveAllDefersReconcile(t *testing.T) {
+	const callNo = "unresolved::cobol::program::NOPGM"
+	const caller = "r1/main.cbl::MAINPGM"
+	placeholder, _, _ := cobolPlaceholderTarget("r1", cobolRef{isProgram: true, key: "NOPGM"})
+	cobolOnStores(t, func(t *testing.T, g graph.Store) {
+		seedCobol(g, "r1", caller, graph.KindFunction, "program", "MAINPGM")
+		cobolEdge(g, caller, 1, graph.EdgeCalls, callNo, placeholderMeta(callNo))
+		deferred := func() {
+			r := New(g)
+			r.DeferCobolReconcile = true
+			r.ResolveAll()
+		}
+
+		deferred() // the unresolved edge is pending
+		require.Equal(t, callNo, cobolEdgeAt(t, g, caller, 1).To, "a pass with pending edges defers the decision")
+		require.Empty(t, cobolMissingNodes(g))
+		New(g).ReconcileCobol(nil)
+		require.Equal(t, placeholder, cobolEdgeAt(t, g, caller, 1).To)
+
+		seedCobol(g, "r1", "r1/nopgm.cbl::NOPGM", graph.KindFunction, "program", "NOPGM")
+		deferred() // a placeholder-targeted edge is not pending
+		require.Equal(t, placeholder, cobolEdgeAt(t, g, caller, 1).To, "a pass with nothing pending defers the binding")
+		New(g).ReconcileCobol(nil)
+		assert.Equal(t, "r1/nopgm.cbl::NOPGM", cobolEdgeAt(t, g, caller, 1).To)
+		assert.Empty(t, cobolMissingNodes(g))
+	})
+}
+
 func TestCobolReconcile_PlaceholderPerRepository(t *testing.T) {
 	const callNo = "unresolved::cobol::program::NOPGM"
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {

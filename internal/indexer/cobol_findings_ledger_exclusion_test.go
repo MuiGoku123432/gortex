@@ -3,10 +3,14 @@
 package indexer
 
 import (
+	"context"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -113,4 +117,122 @@ func requireCobolLedgerExcludesTornMutation(t *testing.T, settle func(env *cobol
 		}
 	}
 	require.Empty(t, torn, "no history row for unchanged evidence (writer held at the settle point: %v)", held)
+}
+
+// TestCobolFindings_MasterReconcileExcludesLane proves a writer-free master
+// resolve reconciles COBOL and records the result in one reach topology
+// writer section, so an edit that lands after the master's reconcile
+// cannot record the master's close as a supersede (D-24, review WR-01).
+// Each subtest is one writer-free entry: the daemon warmup resolve and the
+// deferred catch-up's full fallback.
+func TestCobolFindings_MasterReconcileExcludesLane(t *testing.T) {
+	scope := map[string]struct{}{"finda": {}}
+	t.Run("pre_enrich_resolve", func(t *testing.T) {
+		requireCobolMasterCloseBeforeLane(t, func(env *cobolLifecycleEnv) error {
+			return env.mi.RunPreEnrichResolve(context.Background(), scope, nil)
+		})
+	})
+	t.Run("deferred_fallback", func(t *testing.T) {
+		requireCobolMasterCloseBeforeLane(t, func(env *cobolLifecycleEnv) error {
+			if mode, ok := env.mi.resolveDeferredMutations(nil, true, scope, false); !ok || mode != deferredResolveFallback {
+				return fmt.Errorf("deferred catch-up: mode %s, complete %v", mode, ok)
+			}
+			return nil
+		})
+	})
+}
+
+// requireCobolMasterCloseBeforeLane interleaves master, a writer-free master
+// resolve whose reconcile closes finda's NOPGM finding (NOPGM was retrieved
+// through an interrupted reindex), with an incremental lane that adds CALL
+// 'NEWPGM' to the same paragraph, using the cobolSettleHook seam and
+// channels only.
+//
+// master runs first and parks right after its COBOL reconcile. The one
+// TopologyWriterActive read happens then, while master is the only running
+// goroutine, so it says exactly whether master holds the writer between its
+// reconcile and its ledger. If it does, the lane cannot commit before
+// master's ledger finishes, so master is released first. If it does not
+// (the mutation run), the lane commits, reconciles, and ledgers first, and
+// its ledger sees NOPGM's close and NEWPGM's open in one container: a
+// supersede. NOPGM's row must be active -> closed, then NEWPGM's "" ->
+// active. Every wait is bounded, so a regression fails instead of hanging.
+func requireCobolMasterCloseBeforeLane(t *testing.T, master func(env *cobolLifecycleEnv) error) {
+	t.Helper()
+	env := newCobolLedgerEnv(t)
+	nopgm := cobolExternalFindingFor(t, env, "finda", "NOPGM")
+	idx := env.mi.GetIndexer("finda")
+	require.NotNil(t, idx)
+	// note: the same retrieval as TestCobolFindings_MasterDrainClosesBeforeLaterEdit.
+	idx.incrementalResolveFilesHook = func([]string) {}
+	env.write(t, "finda", "cobol/nopgm.cbl", cobolDepNopgm)
+	env.reindex(t, "finda")
+	idx.incrementalResolveFilesHook = nil
+	require.NotNil(t, env.store.GetNode(nopgm), "precondition: the interruption kept the finding")
+	before := len(cobolHistory(t, env, "finda"))
+	withNew := strings.Replace(cobolLedgerFixture, "           CALL 'NOPGM'.\n",
+		"           CALL 'NOPGM'.\n           CALL 'NEWPGM'.\n", 1)
+	require.NotEqual(t, cobolLedgerFixture, withNew)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	finished := func(errs <-chan error, what string) {
+		t.Helper()
+		select {
+		case err := <-errs:
+			require.NoError(t, err, what)
+		case <-ctx.Done():
+			t.Fatalf("%s did not finish (writer held between the master's reconcile and its ledger: %v)", what,
+				reach.TopologyWriterActive())
+		}
+	}
+
+	aParked := make(chan struct{}, 1)
+	releaseA := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseA) }) }
+	t.Cleanup(release) // a failed wait must not leave master parked
+	var parked atomic.Bool
+	env.mi.cobolSettleHook = func(stage string, _ []string) {
+		if stage == "master_reconciled" && parked.CompareAndSwap(false, true) {
+			aParked <- struct{}{}
+			<-releaseA
+		}
+	}
+	t.Cleanup(func() { env.mi.cobolSettleHook = nil })
+
+	aErr := make(chan error, 1)
+	go func() { aErr <- master(env) }()
+	select {
+	case <-aParked:
+	case <-ctx.Done():
+		t.Fatal("the master never reached its post-reconcile stage")
+	}
+	held := reach.TopologyWriterActive()
+
+	env.write(t, "finda", "cobol/main.cbl", withNew)
+	bErr := make(chan error, 1)
+	go func() {
+		_, err := env.mi.IncrementalReindexRepo("finda", nil)
+		bErr <- err
+	}()
+	if !held {
+		finished(bErr, "the lane")
+	}
+	release()
+	finished(aErr, "the master")
+	if held {
+		finished(bErr, "the lane")
+	}
+
+	require.Nil(t, env.store.GetNode(nopgm), "the master's reconcile closed NOPGM")
+	newpgm := cobolExternalFindingFor(t, env, "finda", "NEWPGM")
+	var got [][3]string
+	for _, row := range cobolHistory(t, env, "finda")[before:] {
+		got = append(got, [3]string{row.FindingID, row.PriorStatus, row.NewStatus})
+	}
+	require.Equal(t, [][3]string{
+		{nopgm, graph.FindingStatusActive, graph.FindingStatusClosed},
+		{newpgm, "", graph.FindingStatusActive},
+	}, got, "the master records its close at its own step; the lane only opens NEWPGM (writer held: %v)", held)
 }
