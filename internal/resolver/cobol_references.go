@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/zzet/gortex/internal/graph"
 )
 
@@ -110,9 +112,9 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // it; unranked candidates drop out and the lowest rank wins (D-10), recorded
 // in cobol_copy_search_rank and cobol_copy_search_rule. One candidate binds.
 // Zero stamps cobol_unresolved_reason=missing and sets To to the caller
-// repository's placeholder node `<repo>::cobol-missing::<type>/<key>` (D-11),
-// except an EXEC SQL INCLUDE of SQLCA or SQLDA (sql_include_builtin), which
-// keeps its unresolved target (D-19). Two or more set To back to the
+// repository's placeholder node `<repo>::cobol-missing::<type>/<key>` (D-11,
+// D-27), except an EXEC SQL INCLUDE of SQLCA or SQLDA (sql_include_builtin),
+// which keeps its unresolved target (D-19). Two or more set To back to the
 // unresolved placeholder with ambiguous plus the sorted candidate IDs in
 // cobol_candidate_ids. A COPY IDMS member is never bound (P3 D-19): it keeps
 // idms_dictionary_member and targets its idms_dictionary_member placeholder
@@ -122,7 +124,11 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // PROGRAM containment the extractor could not resolve (cobol_nested_unresolved)
 // were dropped is never reported missing (IN-08): it keeps the unresolved
 // placeholder with containment_unresolved and gets no placeholder node or
-// finding, since nothing is unobtained.
+// finding, since nothing is unobtained. A missing or IDMS reference whose
+// placeholder ID a node that is not a placeholder already holds is refused
+// (D-27): its edge keeps its unresolved target and reason, it gets no
+// placeholder node or finding, and the pass logs one warning with the first
+// refusal's repository and artifact type and the count, never the key.
 //
 // RATIONALE — a placeholder-only pass can never re-check a bound edge, so a
 // second same-named program or a deleted target left a stale binding (WR-01).
@@ -139,6 +145,18 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // QualName (a literal PROGRAM-ID may itself contain '/'). Dynamic, label,
 // data, and idms_scope targets are never touched (D-19, DET-04).
 //
+// WINDOW (review WR-05): only this pass writes the placeholder namespace,
+// and the indexer mints every ID from a repository path as `<prefix>/...`,
+// so only a repository prefix spelled with another repository's placeholder
+// namespace (such as `<repo>::cobol-missing::program`) can put a node at a
+// placeholder ID. The refusal then under-reports that reference, leaving
+// only its edge reason, instead of overwriting the node. An
+// EXTERNAL_UNRESOLVED finding created before the ID became occupied is not
+// evicted by this pass, because the present set is built from placeholder
+// in-edges and the occupying node is not a placeholder; that finding, and
+// the code edge already on the ID, stay until the referencing file is
+// re-extracted or a clean re-index.
+//
 // Runs serially in ResolveAll's relative-import settle window, after
 // resolveLuaRequires, with changed = the resolve scope. It writes only the
 // edges whose decision differs from their current state, so a second run
@@ -150,7 +168,7 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 //
 // KEYWORDS — cobol, call, copybook, reconcile, rebind, exactly-one,
 // allowlist, resolve_from, union, library, search-order, ambiguous, missing,
-// caller_unowned, placeholder, missing artifact, idms.
+// caller_unowned, placeholder, missing artifact, idms, refusal, D-27, WR-05.
 func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	if !r.graphHasLanguage("cobol") {
 		return
@@ -251,9 +269,11 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	// recovered from the placeholder ID. Edges from findings carry neither and
 	// are skipped.
 	var placeholderIDs []string
+	placeholders := make(map[string]struct{})
 	for n := range r.nodesByKindLang(graph.KindResource, "cobol") {
 		if n != nil && n.Meta["cobol_kind"] == cobolMissingArtifactKind {
 			placeholderIDs = append(placeholderIDs, n.ID)
+			placeholders[n.ID] = struct{}{}
 		}
 	}
 	if len(placeholderIDs) > 0 {
@@ -277,6 +297,9 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 	var rebound []graph.EdgeReindex
 	var stamped []*graph.Edge
 	var desired []cobolExternalRef
+	// refused counts the references whose placeholder ID a node that is not
+	// a placeholder holds; the first one's repository and type are logged.
+	refused, refusedRepo, refusedType := 0, "", ""
 	for _, ref := range refs {
 		e := ref.e
 		var d cobolDecision
@@ -301,11 +324,24 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 			// unresolved target (D-19). Unchanged edges are collected too.
 			if callerRepo := r.callerRepoPrefix(e); callerRepo != "" {
 				id, artifactType, key := cobolPlaceholderTarget(callerRepo, ref)
-				to = id
-				desired = append(desired, cobolExternalRef{
-					e: e, callerRepo: callerRepo, placeholderID: id,
-					artifactType: artifactType, key: key, reason: d.reason,
-				})
+				if _, ok := placeholders[id]; !ok && r.cachedGetNode(id) != nil {
+					// A node that is not a placeholder holds the ID (only this
+					// pass writes the namespace): refuse rather than overwrite
+					// it, and keep the edge on its unresolved target (D-27).
+					if refused == 0 {
+						refusedRepo, refusedType = callerRepo, artifactType
+					}
+					refused++
+				} else {
+					// Created or kept by this pass, so its other references
+					// skip the lookup.
+					placeholders[id] = struct{}{}
+					to = id
+					desired = append(desired, cobolExternalRef{
+						e: e, callerRepo: callerRepo, placeholderID: id,
+						artifactType: artifactType, key: key, reason: d.reason,
+					})
+				}
 			}
 		}
 		reason, _ := e.Meta[metaCobolUnresolvedReason].(string)
@@ -346,6 +382,11 @@ func (r *Resolver) reconcileCobol(changed map[string]struct{}) {
 		} else {
 			stamped = append(stamped, e)
 		}
+	}
+
+	if refused > 0 {
+		r.logger.Warn("cobol: placeholder ID held by a node that is not a placeholder; references left unresolved",
+			zap.String("repo", refusedRepo), zap.String("artifact_type", refusedType), zap.Int("refused", refused))
 	}
 
 	// ReindexEdges persists the moved edges' full payload, Meta included.

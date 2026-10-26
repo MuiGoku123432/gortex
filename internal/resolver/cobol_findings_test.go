@@ -435,6 +435,59 @@ func TestCobolReconcile_PlaceholderRefusedOverRealNode(t *testing.T) {
 	})
 }
 
+// TestCobolReconcile_PlaceholderSweepByID proves the sweep removes a
+// placeholder by ID only (D-27): once its last CALL is gone the placeholder
+// goes, while a node with an empty FilePath (what evicting the placeholder's
+// own empty path would take with it) and a real file at the placeholder's
+// former slash-form path, with a child owned by that path, all stay. The
+// SQLite run counts one resource eviction and no file eviction.
+func TestCobolReconcile_PlaceholderSweepByID(t *testing.T) {
+	const caller = "r1/a.cbl::APGM"
+	const callNo = "unresolved::cobol::program::NOPGM"
+	const stub = "dep::zqx::Helper" // an empty-FilePath node, like every dependency stub
+	placeholder, _, _ := cobolPlaceholderTarget("r1", cobolRef{key: "NOPGM", isProgram: true})
+	// The pre-D-27 collision: a repository file whose path is the
+	// placeholder ID with a slash after the repository prefix.
+	legacy := strings.Replace(placeholder, "::", "/", 1)
+	child := legacy + "::HOSTPGM"
+	run := func(t *testing.T, g graph.Store, counter *cobolWriteCounter) {
+		seedCobol(g, "r1", caller, graph.KindFunction, "program", "APGM")
+		cobolEdge(g, caller, 1, graph.EdgeCalls, callNo, placeholderMeta(callNo))
+		g.AddNode(&graph.Node{ID: stub, Kind: graph.KindFunction, Name: "Helper", Language: "go"})
+		g.AddNode(&graph.Node{
+			ID: legacy, Kind: graph.KindFile, Name: "NOPGM", FilePath: legacy, Language: "cobol", RepoPrefix: "r1",
+		})
+		g.AddNode(&graph.Node{
+			ID: child, Kind: graph.KindFunction, Name: "HOSTPGM", FilePath: legacy, Language: "cobol", RepoPrefix: "r1",
+		})
+		New(g).ReconcileCobol(nil)
+		require.NotNil(t, g.GetNode(placeholder), "the CALL holds its placeholder")
+
+		require.True(t, g.RemoveEdge(caller, placeholder, graph.EdgeCalls))
+		if counter != nil {
+			counter.reset()
+		}
+		New(g).ReconcileCobol(nil)
+
+		assert.Nil(t, g.GetNode(placeholder), "the unreferenced placeholder is swept")
+		for _, id := range []string{stub, legacy, child} {
+			assert.NotNil(t, g.GetNode(id), "%s survives the sweep", id)
+		}
+		if counter != nil {
+			assert.Equal(t, 1, counter.resourceEvicts, "one EvictResourceNodesByIDs call")
+			assert.Zero(t, counter.evicts, "no EvictFile")
+		}
+	}
+	t.Run("memory", func(t *testing.T) { run(t, graph.New(), nil) })
+	t.Run("sqlite", func(t *testing.T) {
+		opened, err := store_sqlite.Open(filepath.Join(t.TempDir(), "cobol.sqlite"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, opened.Close()) })
+		counter := &cobolWriteCounter{Store: opened}
+		run(t, counter, counter)
+	})
+}
+
 func TestCobolReconcile_PlaceholderRebindOnRetrieve(t *testing.T) {
 	const callNo = "unresolved::cobol::program::NOPGM"
 	const copyNo = "unresolved::cobol::copybook::NOCPY"
