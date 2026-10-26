@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 0
 fixed_count: 4
-total_count: 7
-last_updated: 2026-10-21T17:03:38.047Z
+total_count: 8
+last_updated: 2026-10-26T18:55:45.591Z
 ---
 
 # Broken Windows Ledger
@@ -22,6 +22,7 @@ last_updated: 2026-10-21T17:03:38.047Z
 | 5 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-09: INSERT INTO T1 SELECT ... FROM T2 reads of T2 are not emitted; the producer leaves the SELECT in sql_unparsed_tail (Phase 5 producer gap, no guess) | fixed | Phase 5 (05-12): the INSERT ... SELECT tail is now explicit evidence. Each tail token is one low PARSE_UNRESOLVED unparsed-tail finding (05-01, D-18). Reads of T2 are still not emitted; Gortex does not guess them. | 2026-10-02T08:58:47.347Z | 2026-10-21T17:03:37.962Z |
 | 6 | 03 | deviation | internal/parser/languages/cobol_grammar_sql.go |  | 03-10: every EXEC SQL statement leaves an sql_unparsed_tail under the pinned producer, so any SQL-bearing COBOL document grades amber (unparsed-tail); the 03-10 acceptance program is amber, not green. Phase 5 producer gap | fixed | Phase 5 (05-12): every EXEC SQL tail token is now one low PARSE_UNRESOLVED unparsed-tail finding (05-01, D-18), searchable and counted in index_health (05-04). The amber grade remains; the gap is no longer silent. | 2026-10-02T09:29:09.876Z | 2026-10-21T17:03:38.047Z |
 | 7 | 04 | deviation | internal/indexer/cobol_lifecycle_material_test.go |  | 04-09 config-change tests normalize the incrementally added .gortex.yaml file-node Meta ({} vs null); graphdump empty-Meta gap deferred (deferred-items.md) | fixed |  | 2026-10-13T05:02:39.021Z | 2026-10-13T05:09:07.178Z |
+| 8 | 05 | unmet-truth | cmd/gortex/main_test.go | 74 | 05-17 Task 2 phase gate (GOWORK=off go test -race -timeout 60m ./... on 3abe472d) ended exit=1 in all three runs. Every package passed except cmd/gortex, whose tests all passed but whose TestMain guard failed it because outside Gortex use wrote the real ~/.gortex/cache/query-log.jsonl. Accepted on split evidence by user decision 2026-10-26 (run 1 executed every package fresh; cmd/gortex passed alone twice). Close with a clean full-suite run with no Gortex activity on the machine, or a guard fix; see deferred-items From Plan 05-17 | open |  | 2026-10-26T18:55:45.591Z |  |
 
 ````json
 [
@@ -113,6 +114,19 @@ last_updated: 2026-10-21T17:03:38.047Z
     "reason": "",
     "recorded_at": "2026-10-13T05:02:39.021Z",
     "resolved_at": "2026-10-13T05:09:07.178Z",
+    "milestone": "v1.0"
+  },
+  {
+    "id": 8,
+    "kind": "unmet-truth",
+    "phase": "05",
+    "file": "cmd/gortex/main_test.go",
+    "line": 74,
+    "description": "05-17 Task 2 phase gate (GOWORK=off go test -race -timeout 60m ./... on 3abe472d) ended exit=1 in all three runs. Every package passed except cmd/gortex, whose tests all passed but whose TestMain guard failed it because outside Gortex use wrote the real ~/.gortex/cache/query-log.jsonl. Accepted on split evidence by user decision 2026-10-26 (run 1 executed every package fresh; cmd/gortex passed alone twice). Close with a clean full-suite run with no Gortex activity on the machine, or a guard fix; see deferred-items From Plan 05-17",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-26T18:55:45.591Z",
+    "resolved_at": null,
     "milestone": "v1.0"
   }
 ]
