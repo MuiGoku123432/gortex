@@ -18,24 +18,31 @@ func placeholderMeta(placeholder string) map[string]any {
 }
 
 // cobolWriteCounter counts the writes the reconcile pass issues (edge moves,
-// Meta writes, batch adds, file evictions, finding evictions), so a test can
-// assert that an unchanged decision writes nothing.
+// Meta writes, batch adds, file evictions, finding evictions, resource
+// evictions), so a test can assert that an unchanged decision writes
+// nothing. Each counted capability delegates to the wrapped store, so the
+// reconcile sees it through the wrapper.
 type cobolWriteCounter struct {
 	*store_sqlite.Store
-	reindexes, persists, adds, evicts, findingEvicts int
+	reindexes, persists, adds, evicts, findingEvicts, resourceEvicts int
 }
 
 func (s *cobolWriteCounter) reset() {
-	s.reindexes, s.persists, s.adds, s.evicts, s.findingEvicts = 0, 0, 0, 0, 0
+	s.reindexes, s.persists, s.adds, s.evicts, s.findingEvicts, s.resourceEvicts = 0, 0, 0, 0, 0, 0
 }
 
 func (s *cobolWriteCounter) writes() int {
-	return s.reindexes + s.persists + s.adds + s.evicts + s.findingEvicts
+	return s.reindexes + s.persists + s.adds + s.evicts + s.findingEvicts + s.resourceEvicts
 }
 
 func (s *cobolWriteCounter) EvictFindingNodesByIDs(ids []string) (int, int) {
 	s.findingEvicts++
 	return s.Store.EvictFindingNodesByIDs(ids)
+}
+
+func (s *cobolWriteCounter) EvictResourceNodesByIDs(ids []string) (int, int) {
+	s.resourceEvicts++
+	return s.Store.EvictResourceNodesByIDs(ids)
 }
 
 func (s *cobolWriteCounter) AddBatch(nodes []*graph.Node, edges []*graph.Edge) {
@@ -89,7 +96,7 @@ func TestCobolReconcile_TargetGone(t *testing.T) {
 	New(g).ReconcileCobol(map[string]struct{}{"a": {}})
 
 	e := cobolEdgeAt(t, g, caller, 2)
-	assert.Equal(t, "a/cobol-missing::copybook/CUSTREC", e.To, "a missing copybook targets its placeholder node")
+	assert.Equal(t, "a::cobol-missing::copybook/CUSTREC", e.To, "a missing copybook targets its placeholder node")
 	assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	assert.NotContains(t, e.Meta, "cobol_candidate_ids")
 
@@ -280,7 +287,7 @@ func TestCobolReconcile_Allowlist(t *testing.T) {
 		r.SetCobolPolicyLookup(allowB)
 		r.ReconcileCobol(nil)
 		e := cobolEdgeAt(t, g, caller, 3)
-		assert.Equal(t, "repoA/cobol-missing::program/INNER", e.To, "a nested program in another repository is never a candidate")
+		assert.Equal(t, "repoA::cobol-missing::program/INNER", e.To, "a nested program in another repository is never a candidate")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	})
 
@@ -376,7 +383,7 @@ func TestCobolReconcile_SearchOrder(t *testing.T) {
 		r.SetCobolPolicyLookup(libs(CobolLibrary{Path: "copy/prod"}))
 		r.ReconcileCobol(nil)
 		e := cobolEdgeAt(t, g, caller, 2)
-		assert.Equal(t, "repoA/cobol-missing::copybook/CUSTREC", e.To, "a copybook outside every library is not a candidate")
+		assert.Equal(t, "repoA::cobol-missing::copybook/CUSTREC", e.To, "a copybook outside every library is not a candidate")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 		assert.NotContains(t, e.Meta, "cobol_copy_search_rank")
 	})

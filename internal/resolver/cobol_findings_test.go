@@ -69,12 +69,12 @@ func TestCobolReconcile_PlaceholderEdgeTargets(t *testing.T) {
 		New(g).ReconcileCobol(nil)
 
 		want := map[int][2]string{
-			1: {"r1/cobol-missing::program/NOPGM", "missing"},
-			2: {"r1/cobol-missing::program/NOPGM", "missing"},
-			3: {"r1/cobol-missing::program/NOPGM", "missing"},
-			4: {"r1/cobol-missing::copybook/NOCPY", "missing"},
-			5: {"r1/cobol-missing::inc_member/INCMEM", "missing"},
-			7: {"r1/cobol-missing::idms_dictionary_member/RECORD/EMP-REC", "idms_dictionary_member"},
+			1: {"r1::cobol-missing::program/NOPGM", "missing"},
+			2: {"r1::cobol-missing::program/NOPGM", "missing"},
+			3: {"r1::cobol-missing::program/NOPGM", "missing"},
+			4: {"r1::cobol-missing::copybook/NOCPY", "missing"},
+			5: {"r1::cobol-missing::inc_member/INCMEM", "missing"},
+			7: {"r1::cobol-missing::idms_dictionary_member/RECORD/EMP-REC", "idms_dictionary_member"},
 		}
 		for line, w := range want {
 			e := cobolEdgeAt(t, g, caller, line)
@@ -89,7 +89,7 @@ func TestCobolReconcile_PlaceholderEdgeTargets(t *testing.T) {
 
 		missing := cobolMissingNodes(g)
 		assert.Len(t, missing, 4, "one placeholder per (repository, type, key)")
-		assert.NotContains(t, missing, "r1/cobol-missing::inc_member/PRESENT")
+		assert.NotContains(t, missing, "r1::cobol-missing::inc_member/PRESENT")
 	})
 }
 
@@ -138,7 +138,7 @@ func TestCobolReconcile_PlaceholderNotForBoundAmbiguousDynamicBuiltin(t *testing
 func TestCobolReconcile_PlaceholderIDMSSecondPass(t *testing.T) {
 	const caller = "r1/main.cbl::MAINPGM"
 	const idms = "unresolved::cobol::copybook::idms/RECORD/EMP-REC"
-	const placeholder = "r1/cobol-missing::idms_dictionary_member/RECORD/EMP-REC"
+	const placeholder = "r1::cobol-missing::idms_dictionary_member/RECORD/EMP-REC"
 
 	t.Run("unchanged", func(t *testing.T) {
 		opened, err := store_sqlite.Open(filepath.Join(t.TempDir(), "cobol.sqlite"))
@@ -181,7 +181,7 @@ func TestCobolReconcile_PlaceholderIDMSSecondPass(t *testing.T) {
 func TestCobolReconcile_PlaceholderShape(t *testing.T) {
 	const caller = "r1/main.cbl::MAINPGM"
 	const callNo = "unresolved::cobol::program::NOPGM"
-	const id = "r1/cobol-missing::program/NOPGM"
+	const id = "r1::cobol-missing::program/NOPGM"
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {
 		g.AddNode(&graph.Node{
 			ID: caller, Kind: graph.KindFunction, Name: "MAINPGM", QualName: "MAINPGM",
@@ -200,7 +200,7 @@ func TestCobolReconcile_PlaceholderShape(t *testing.T) {
 		n := g.GetNode(id)
 		require.NotNil(t, n)
 		assert.Equal(t, graph.KindResource, n.Kind)
-		assert.Equal(t, id, n.FilePath, "the placeholder owns its own virtual path")
+		assert.Empty(t, n.FilePath, "the placeholder owns no file path (D-27)")
 		assert.Equal(t, "NOPGM", n.Name)
 		assert.Equal(t, "cobol", n.Language)
 		assert.Equal(t, "r1", n.RepoPrefix)
@@ -257,6 +257,7 @@ func TestCobolReconcile_PlaceholderIdempotent(t *testing.T) {
 	assert.Zero(t, store.reindexes, "no second ReindexEdges")
 	assert.Zero(t, store.persists, "no second Meta write")
 	assert.Zero(t, store.evicts, "no EvictFile")
+	assert.Zero(t, store.resourceEvicts, "no EvictResourceNodesByIDs")
 	assert.Len(t, cobolMissingNodes(store), 4)
 }
 
@@ -287,7 +288,7 @@ func TestCobolReconcile_PlaceholderNeverCandidate(t *testing.T) {
 		cobolEdge(g, "r1/b.cbl::BPGM", 4, graph.EdgeImports, copyNo, cobolCopyMeta("copy", copyNo))
 		New(g).ReconcileCobol(nil)
 
-		for line, to := range map[int]string{3: "r1/cobol-missing::program/NOPGM", 4: "r1/cobol-missing::copybook/NOCPY"} {
+		for line, to := range map[int]string{3: "r1::cobol-missing::program/NOPGM", 4: "r1::cobol-missing::copybook/NOCPY"} {
 			e := cobolEdgeAt(t, g, "r1/b.cbl::BPGM", line)
 			assert.Equal(t, to, e.To, "line %d", line)
 			assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"], "line %d: a placeholder is never a candidate", line)
@@ -299,7 +300,7 @@ func TestCobolReconcile_PlaceholderNeverCandidate(t *testing.T) {
 
 func TestCobolReconcile_PlaceholderSweep(t *testing.T) {
 	const callNo = "unresolved::cobol::program::NOPGM"
-	const placeholder = "r1/cobol-missing::program/NOPGM"
+	const placeholder = "r1::cobol-missing::program/NOPGM"
 	seed := func(g graph.Store, callers ...string) {
 		for i, c := range callers {
 			seedCobol(g, "r1", c, graph.KindFunction, "program", c[len(c)-4:])
@@ -384,10 +385,10 @@ func TestCobolReconcile_PlaceholderRebindOnRetrieve(t *testing.T) {
 		e := cobolEdgeAt(t, g, "r1/main.cbl::MAINPGM", 1)
 		assert.Equal(t, "r1/nopgm.cbl::NOPGM", e.To, "the edge rebinds to the retrieved program")
 		assert.NotContains(t, e.Meta, "cobol_unresolved_reason")
-		assert.Nil(t, g.GetNode("r1/cobol-missing::program/NOPGM"), "its placeholder is removed")
-		assert.NotNil(t, g.GetNode("r2/cobol-missing::program/NOPGM"), "another repository's placeholder stays")
-		assert.Equal(t, "r2/cobol-missing::program/NOPGM", cobolEdgeAt(t, g, "r2/main.cbl::MAINPGM", 1).To)
-		assert.NotNil(t, g.GetNode("r1/cobol-missing::copybook/NOCPY"), "an unrelated placeholder stays")
+		assert.Nil(t, g.GetNode("r1::cobol-missing::program/NOPGM"), "its placeholder is removed")
+		assert.NotNil(t, g.GetNode("r2::cobol-missing::program/NOPGM"), "another repository's placeholder stays")
+		assert.Equal(t, "r2::cobol-missing::program/NOPGM", cobolEdgeAt(t, g, "r2/main.cbl::MAINPGM", 1).To)
+		assert.NotNil(t, g.GetNode("r1::cobol-missing::copybook/NOCPY"), "an unrelated placeholder stays")
 		assert.NotNil(t, g.GetNode(parse), "a parse finding is never touched")
 		assert.NotNil(t, g.GetNode("r1/nopgm.cbl::NOPGM"))
 	})
@@ -401,7 +402,7 @@ func TestCobolReconcile_PlaceholderResolveAllNoPending(t *testing.T) {
 		seedCobol(g, "r1", "r1/main.cbl::MAINPGM", graph.KindFunction, "program", "MAINPGM")
 		cobolEdge(g, "r1/main.cbl::MAINPGM", 1, graph.EdgeCalls, callNo, placeholderMeta(callNo))
 		New(g).ResolveAll()
-		require.Equal(t, "r1/cobol-missing::program/NOPGM", cobolEdgeAt(t, g, "r1/main.cbl::MAINPGM", 1).To)
+		require.Equal(t, "r1::cobol-missing::program/NOPGM", cobolEdgeAt(t, g, "r1/main.cbl::MAINPGM", 1).To)
 
 		seedCobol(g, "r1", "r1/nopgm.cbl::NOPGM", graph.KindFunction, "program", "NOPGM")
 		New(g).ResolveAll()
@@ -429,7 +430,7 @@ func TestCobolReconcile_PlaceholderPerRepository(t *testing.T) {
 		missing := cobolMissingNodes(g)
 		require.Len(t, missing, 2, "one placeholder per referencing repository")
 		for _, repo := range []string{"r1", "r2"} {
-			id := repo + "/cobol-missing::program/NOPGM"
+			id := repo + "::cobol-missing::program/NOPGM"
 			n := missing[id]
 			require.NotNil(t, n, id)
 			assert.Equal(t, repo, n.RepoPrefix)
@@ -455,13 +456,17 @@ func TestCobolReconcile_PlaceholderPrefixDiagnostics(t *testing.T) {
 	}
 
 	New(store).ReconcileCobol(nil)
-	require.Len(t, cobolMissingNodes(store), 6)
+	missing := cobolMissingNodes(store)
+	require.Len(t, missing, 6)
+	for id, n := range missing {
+		assert.False(t, graph.IsAuditableRepoSourceNode(n), "%s sits outside the source audit as an owned <repo>:: node", id)
+	}
 
 	diag, ok := graph.ReadPrefixDiagnostics(store, 10)
 	require.True(t, ok)
 	assert.Zero(t, diag.UnownedCodeNodes, "unowned: %v", diag.UnownedSamples)
 	assert.Zero(t, diag.MisprefixedNodes, "misprefixed: %v", diag.MisprefixedSamples)
-	assert.GreaterOrEqual(t, diag.OwnedCodeNodes, 8, "the placeholders are audited as owned nodes")
+	assert.Equal(t, 8, diag.OwnedCodeNodes, "the two callers and six findings; no placeholder is audited")
 }
 
 // cobolCallMeta is the Meta the extractor stamps on a literal CALL edge:
@@ -527,7 +532,7 @@ func cobolFindingTargets(t *testing.T, g graph.Store, id string) map[graph.EdgeK
 func TestCobolReconcile_ExternalMissingCall(t *testing.T) {
 	const caller = "r1/main.cbl::MAINPGM"
 	const callNo = "unresolved::cobol::program::NOPGM"
-	const placeholder = "r1/cobol-missing::program/NOPGM"
+	const placeholder = "r1::cobol-missing::program/NOPGM"
 	cobolOnStores(t, func(t *testing.T, g graph.Store) {
 		seedCobol(g, "r1", caller, graph.KindFunction, "program", "MAINPGM")
 		// Three identical CALLs, seeded out of source order.
@@ -576,10 +581,10 @@ func TestCobolReconcile_ExternalMissingCopyAndInc(t *testing.T) {
 		require.Len(t, found, 2, "a bound -INC member has no finding (D-17)")
 		want := map[string][3]string{
 			cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "copybook", [6]string{string(graph.EdgeImports), "", "", "copy", "", "NOCPY"}): {
-				"copybook", "NOCPY", "r1/cobol-missing::copybook/NOCPY",
+				"copybook", "NOCPY", "r1::cobol-missing::copybook/NOCPY",
 			},
 			cobolExternalID("r1/main.cbl", "main.cbl::MAINPGM", "inc_member", [6]string{string(graph.EdgeImports), "", "", "inc", "", "INCMEM"}): {
-				"inc_member", "INCMEM", "r1/cobol-missing::inc_member/INCMEM",
+				"inc_member", "INCMEM", "r1::cobol-missing::inc_member/INCMEM",
 			},
 		}
 		for id, w := range want {
@@ -615,7 +620,7 @@ func TestCobolReconcile_ExternalIDMS(t *testing.T) {
 	assert.Equal(t, "idms_dictionary_member", n.Meta[graph.MetaFindingReason])
 	assert.Equal(t, "idms_dictionary_member", n.Meta[graph.MetaFindingArtifactType])
 	assert.Equal(t, "RECORD/EMP-REC", n.Meta[graph.MetaFindingTargetKey])
-	assert.Equal(t, "r1/cobol-missing::idms_dictionary_member/RECORD/EMP-REC",
+	assert.Equal(t, "r1::cobol-missing::idms_dictionary_member/RECORD/EMP-REC",
 		cobolFindingTargets(t, store, id)[graph.EdgeReferences])
 
 	store.reset()
@@ -1011,16 +1016,16 @@ func TestCobolReconcile_ExternalEvictedWhenUndesired(t *testing.T) {
 		require.Equal(t, "r1/nopgm.cbl::NOPGM", cobolEdgeAt(t, g, caller, 1).To)
 		assert.ElementsMatch(t, []string{copyID, otherID}, mapKeys(cobolExternalNodes(g)),
 			"only the bound reference's finding is evicted")
-		assert.Nil(t, g.GetNode("r1/cobol-missing::program/NOPGM"), "then its placeholder is swept")
+		assert.Nil(t, g.GetNode("r1::cobol-missing::program/NOPGM"), "then its placeholder is swept")
 		assert.NotNil(t, g.GetNode(parse), "a parse finding is never touched")
-		assert.NotNil(t, g.GetNode("r2/cobol-missing::program/NOPGM"))
+		assert.NotNil(t, g.GetNode("r2::cobol-missing::program/NOPGM"))
 
 		// The COPY is edited away.
-		require.True(t, g.RemoveEdge(caller, "r1/cobol-missing::copybook/NOCPY", graph.EdgeImports))
+		require.True(t, g.RemoveEdge(caller, "r1::cobol-missing::copybook/NOCPY", graph.EdgeImports))
 		New(g).ReconcileCobol(map[string]struct{}{"r1": {}})
 
 		assert.Equal(t, []string{otherID}, mapKeys(cobolExternalNodes(g)))
-		assert.Nil(t, g.GetNode("r1/cobol-missing::copybook/NOCPY"))
+		assert.Nil(t, g.GetNode("r1::cobol-missing::copybook/NOCPY"))
 		assert.NotNil(t, g.GetNode(parse))
 	})
 }
@@ -1055,6 +1060,7 @@ func TestCobolReconcile_ExternalIdempotent(t *testing.T) {
 	assert.Zero(t, store.persists, "no second Meta write")
 	assert.Zero(t, store.evicts, "no EvictFile")
 	assert.Zero(t, store.findingEvicts, "no EvictFindingNodesByIDs")
+	assert.Zero(t, store.resourceEvicts, "no EvictResourceNodesByIDs")
 	assert.Equal(t, first, mapKeys(cobolExternalNodes(store)))
 }
 
@@ -1078,7 +1084,7 @@ func TestCobolReconcile_ExternalPerRepositoryPrefixDiagnostics(t *testing.T) {
 			assert.Equal(t, repo, n.RepoPrefix, "owned by its own repository")
 			assert.Equal(t, map[graph.EdgeKind]string{
 				graph.EdgeMemberOf:   repo + "/main.cbl::MAINPGM",
-				graph.EdgeReferences: repo + "/cobol-missing::program/NOPGM",
+				graph.EdgeReferences: repo + "::cobol-missing::program/NOPGM",
 			}, cobolFindingTargets(t, g, id))
 		}
 	})
@@ -1128,7 +1134,7 @@ func TestCobolReconcile_FindingChangesDrain(t *testing.T) {
 	repos, added, evicted := r.CobolFindingChanges()
 	f2, f3 := externalOf("r2"), externalOf("r3")
 	assert.Empty(t, repos, "a pass over every edge names no repository set")
-	want := []string{f2, f3, "r2/cobol-missing::program/NOPGM", "r3/cobol-missing::program/NOPGM3"}
+	want := []string{f2, f3, "r2::cobol-missing::program/NOPGM", "r3::cobol-missing::program/NOPGM3"}
 	sort.Strings(want)
 	assert.Equal(t, want, added)
 	assert.Empty(t, evicted)
@@ -1144,10 +1150,10 @@ func TestCobolReconcile_FindingChangesDrain(t *testing.T) {
 	r.ReconcileCobol(changed) // a no-op pass must not hide the first one
 	repos, added, evicted = r.CobolFindingChanges()
 	assert.Equal(t, []string{"r1", "r2"}, repos, "the reconcile set widened by resolve_from")
-	want = []string{f2, "r2/cobol-missing::program/NOPGM"}
+	want = []string{f2, "r2::cobol-missing::program/NOPGM"}
 	sort.Strings(want)
 	assert.Equal(t, want, evicted)
 	assert.Empty(t, added)
 	assert.Equal(t, []string{f3}, mapKeys(cobolExternalNodes(g)), "r3's finding is untouched")
-	assert.NotNil(t, g.GetNode("r3/cobol-missing::program/NOPGM3"), "r3's placeholder is untouched")
+	assert.NotNil(t, g.GetNode("r3::cobol-missing::program/NOPGM3"), "r3's placeholder is untouched")
 }

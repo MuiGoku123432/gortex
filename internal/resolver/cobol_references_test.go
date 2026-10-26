@@ -139,7 +139,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, caller, 4)
-		assert.Equal(t, "a/cobol-missing::program/SUBPGM", e.To, "never bound to another repository's program")
+		assert.Equal(t, "a::cobol-missing::program/SUBPGM", e.To, "never bound to another repository's program")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
 	})
@@ -198,7 +198,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, crossCaller, 5)
-		assert.Equal(t, "a/cobol-missing::program/INNER", e.To, "a contained program is not callable from another file")
+		assert.Equal(t, "a::cobol-missing::program/INNER", e.To, "a contained program is not callable from another file")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 		assert.NotContains(t, e.Meta, "cobol_candidate_ids")
 	})
@@ -274,7 +274,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, "a/p.cbl::P/Y", 12)
-		assert.Equal(t, "a/cobol-missing::program/X", e.To, "a sibling is unreachable unless COMMON, which is not observed")
+		assert.Equal(t, "a::cobol-missing::program/X", e.To, "a sibling is unreachable unless COMMON, which is not observed")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	})
 
@@ -288,7 +288,7 @@ func TestCobolReferences_ProgramBinding(t *testing.T) {
 		New(g).ResolveAll()
 
 		e := cobolEdgeAt(t, g, crossCaller, 5)
-		assert.Equal(t, "a/cobol-missing::program/INNER", e.To, "a program without cobol_nested is never a candidate")
+		assert.Equal(t, "a::cobol-missing::program/INNER", e.To, "a program without cobol_nested is never a candidate")
 		assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 	})
 
@@ -397,11 +397,11 @@ func TestCobolReferences_Copybook(t *testing.T) {
 	assert.Equal(t, []string{"a/c1/x.cpy", "a/c2/x.cpy"}, amb.Meta["cobol_candidate_ids"])
 
 	other := cobolEdgeAt(t, g, caller, 3)
-	assert.Equal(t, "a/cobol-missing::copybook/ONLYB", other.To, "no cross-repository copybook binding")
+	assert.Equal(t, "a::cobol-missing::copybook/ONLYB", other.To, "no cross-repository copybook binding")
 	assert.Equal(t, "missing", other.Meta["cobol_unresolved_reason"])
 
 	idms := cobolEdgeAt(t, g, caller, 4)
-	assert.Equal(t, "a/cobol-missing::idms_dictionary_member/RECORD/EMP", idms.To, "an IDMS member targets its placeholder node")
+	assert.Equal(t, "a::cobol-missing::idms_dictionary_member/RECORD/EMP", idms.To, "an IDMS member targets its placeholder node")
 	assert.Equal(t, cobolIDMSMeta(), idms.Meta, "the IDMS edge Meta is unchanged")
 
 	for line, to := range untouched {
@@ -486,7 +486,7 @@ func TestCobolReconcile_ContainmentUnresolved(t *testing.T) {
 			call(g)
 			New(g).ReconcileCobol(nil)
 			e := cobolEdgeAt(t, g, caller, 5)
-			assert.Equal(t, "r1/cobol-missing::program/INNER", e.To)
+			assert.Equal(t, "r1::cobol-missing::program/INNER", e.To)
 			assert.Equal(t, "missing", e.Meta["cobol_unresolved_reason"])
 			assert.Len(t, cobolMissingNodes(g), 1)
 			assert.Len(t, cobolExternalNodes(g), 1)

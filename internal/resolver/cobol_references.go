@@ -110,7 +110,7 @@ func (r *Resolver) ReconcileCobol(changed map[string]struct{}) {
 // it; unranked candidates drop out and the lowest rank wins (D-10), recorded
 // in cobol_copy_search_rank and cobol_copy_search_rule. One candidate binds.
 // Zero stamps cobol_unresolved_reason=missing and sets To to the caller
-// repository's placeholder node `<repo>/cobol-missing::<type>/<key>` (D-11),
+// repository's placeholder node `<repo>::cobol-missing::<type>/<key>` (D-11),
 // except an EXEC SQL INCLUDE of SQLCA or SQLDA (sql_include_builtin), which
 // keeps its unresolved target (D-19). Two or more set To back to the
 // unresolved placeholder with ambiguous plus the sorted candidate IDs in

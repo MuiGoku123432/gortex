@@ -271,8 +271,8 @@ func TestCobolFindings_ExternalPersisted(t *testing.T) {
 	}
 	idPattern := regexp.MustCompile(`^` + regexp.QuoteMeta(repo.fileID) + `::@finding/external/[0-9a-f]{32}$`)
 	for key, want := range map[string][3]string{
-		"NOPGM": {"program", repo.prefix + "/cobol-missing::program/NOPGM", "'NOPGM'"},
-		"NOCPY": {"copybook", repo.prefix + "/cobol-missing::copybook/NOCPY", ""},
+		"NOPGM": {"program", repo.prefix + "::cobol-missing::program/NOPGM", "'NOPGM'"},
+		"NOCPY": {"copybook", repo.prefix + "::cobol-missing::copybook/NOCPY", ""},
 	} {
 		require.Len(t, byKey[key], 1, "one EXTERNAL_UNRESOLVED finding for %s", key)
 		n := byKey[key][0]
@@ -346,7 +346,7 @@ func cobolFindingsNOPGM(t *testing.T, repo cobolFindingsRepo) (findingID, placeh
 		}
 	}
 	require.Len(t, ids, 1, "one EXTERNAL_UNRESOLVED finding for NOPGM")
-	placeholderID = repo.prefix + "/cobol-missing::program/NOPGM"
+	placeholderID = repo.prefix + "::cobol-missing::program/NOPGM"
 	var callers []string
 	for _, e := range repo.store.GetInEdges(placeholderID) {
 		if e.Kind == graph.EdgeCalls {

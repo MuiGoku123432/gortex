@@ -3,6 +3,7 @@ package indexer
 import (
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -129,9 +130,9 @@ func findingTransitionOf(n *graph.Node) graph.FindingTransition {
 // RATIONALE — the drain runs before the ledger, so the reconciled set
 // covers an earlier pass on another resolver (a discarded master, a cold or
 // fallback ResolveAll) that this tail's own no-op pass merely repeats, and
-// the ID prefixes cover the scope-nil pass. An ID's repository prefix is
-// trusted only when tracked reports it (graph.RepoPrefixOfID returns a
-// directory name for an unprefixed ID), so a nil tracked ignores prefixes.
+// the ID prefixes cover the scope-nil pass. An ID's repository prefix
+// (cobolOwnerPrefix) is trusted only when tracked reports it (an unprefixed
+// ID yields a directory name), so a nil tracked ignores prefixes.
 // The ledger runs on store, the durable graph, only (Pitfall 3, D-06, D-07);
 // the returned IDs feed search sync.
 //
@@ -183,7 +184,7 @@ func recordCobolFindingLedger(
 		prefixes := map[string]struct{}{}
 		for _, ids := range []map[string]struct{}{addedSet, evictedSet} {
 			for id := range ids {
-				if p := graph.RepoPrefixOfID(id); p != "" {
+				if p := cobolOwnerPrefix(id); p != "" {
 					prefixes[p] = struct{}{}
 				}
 			}
@@ -256,10 +257,11 @@ func (idx *Indexer) syncCobolFindingFTS(added, evicted []string) {
 // own repository makes those nodes searchable or gone at the step that
 // drained them (Pitfall 4, D-03 across repositories).
 //
-// RATIONALE — the IDs are grouped by graph.RepoPrefixOfID and written only
-// through a tracked prefix's Indexer, whose projectName yields the tokens;
-// an empty or untracked prefix is skipped, because RepoPrefixOfID returns a
-// directory name for an unprefixed ID.
+// RATIONALE — the IDs are grouped by cobolOwnerPrefix, so a placeholder ID
+// (`<repo>::...`) routes to its owner like a finding ID (`<repo>/...`), and
+// written only through a tracked prefix's Indexer, whose projectName yields
+// the tokens; an empty or untracked prefix is skipped, because an
+// unprefixed ID yields a directory name.
 //
 // KEYWORDS — cobol, finding, placeholder, search, symbol FTS, dependent
 // repository, resolve_from, master resolve, D-03, Pitfall 4.
@@ -267,12 +269,12 @@ func (mi *MultiIndexer) syncCobolFindingFTSByRepo(added, evicted []string) {
 	addedBy, evictedBy := map[string][]string{}, map[string][]string{}
 	prefixes := map[string]struct{}{}
 	for _, id := range added {
-		p := graph.RepoPrefixOfID(id)
+		p := cobolOwnerPrefix(id)
 		addedBy[p] = append(addedBy[p], id)
 		prefixes[p] = struct{}{}
 	}
 	for _, id := range evicted {
-		p := graph.RepoPrefixOfID(id)
+		p := cobolOwnerPrefix(id)
 		evictedBy[p] = append(evictedBy[p], id)
 		prefixes[p] = struct{}{}
 	}
@@ -284,4 +286,19 @@ func (mi *MultiIndexer) syncCobolFindingFTSByRepo(added, evicted []string) {
 			idx.syncCobolFindingFTS(addedBy[p], evictedBy[p])
 		}
 	}
+}
+
+// cobolOwnerPrefix returns the repository prefix a finding or placeholder
+// ID of a COBOL reconcile names: the text before the first "::" when that
+// separator comes before the first slash (a missing-artifact placeholder,
+// `<repo>::cobol-missing::<type>/<key>`), else graph.RepoPrefixOfID (a
+// file-owned finding, `<repo>/<path>::...`). Placeholder IDs are owned under
+// `<repo>::`, which graph.RepoPrefixOfID does not split (D-27).
+func cobolOwnerPrefix(id string) string {
+	if i := strings.Index(id, "::"); i > 0 {
+		if j := strings.IndexByte(id, '/'); j < 0 || i < j {
+			return id[:i]
+		}
+	}
+	return graph.RepoPrefixOfID(id)
 }

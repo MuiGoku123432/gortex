@@ -12,10 +12,13 @@ import (
 	"github.com/zzet/gortex/internal/graph"
 )
 
-// Missing-artifact placeholders (D-11, GAP-05). A literal reference whose
-// target was never obtained points at one owned node per (referencing
-// repository, artifact type, normalized key):
-// `<callerRepo>/cobol-missing::<type>/<key>`.
+// Missing-artifact placeholders (D-11, D-27, GAP-05). A literal reference
+// whose target was never obtained points at one owned node per (referencing
+// repository, artifact type, normalized key), with ID
+// `<callerRepo>::cobol-missing::<type>/<key>` and an empty FilePath. Every
+// node ID minted from a repository file path starts with the repository
+// prefix and a slash, so no repository file, program, or paragraph can
+// produce a placeholder ID (review WR-05).
 const (
 	cobolMissingNamespace    = "cobol-missing::"
 	cobolMissingArtifactKind = "missing_artifact"
@@ -63,7 +66,9 @@ type cobolExternalRef struct {
 // ID, artifact type, and key by string alone: a program key to program/,
 // an -INC copybook key (cobol_copy_form inc) to inc_member/, any other
 // copybook key to copybook/, and an IDMS key to idms_dictionary_member/
-// without its idms/ prefix. Keys are never normalized again (D-18).
+// without its idms/ prefix. Keys are never normalized again (D-18). It is
+// the only builder of placeholder IDs: the repository prefix, "::", then
+// the namespace (D-27).
 func cobolPlaceholderTarget(callerRepo string, ref cobolRef) (id, artifactType, key string) {
 	switch {
 	case ref.idms:
@@ -76,15 +81,16 @@ func cobolPlaceholderTarget(callerRepo string, ref cobolRef) (id, artifactType, 
 			artifactType = cobolArtifactIncMember
 		}
 	}
-	return callerRepo + "/" + cobolMissingNamespace + artifactType + "/" + key, artifactType, key
+	return callerRepo + "::" + cobolMissingNamespace + artifactType + "/" + key, artifactType, key
 }
 
 // cobolUnresolvedFromPlaceholder returns the unresolved COPY IDMS target an
 // idms_dictionary_member placeholder ID stands for, or "" for any other ID.
-// Only IDMS edges need it: every other placeholder-targeted edge keeps its
-// unresolved target in cobol_placeholder.
+// It cuts the ID at its first "::", the separator after the repository
+// prefix. Only IDMS edges need it: every other placeholder-targeted edge
+// keeps its unresolved target in cobol_placeholder.
 func cobolUnresolvedFromPlaceholder(id string) string {
-	_, rel, _ := strings.Cut(id, "/")
+	_, rel, _ := strings.Cut(id, "::")
 	rest, ok := strings.CutPrefix(rel, cobolMissingNamespace+cobolArtifactIDMSMember+"/")
 	if !ok || rest == "" {
 		return ""
@@ -95,15 +101,15 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // reconcileCobolFindings owns the missing-artifact placeholders and the
 // EXTERNAL_UNRESOLVED findings of the binding pass. It evicts the external
 // findings no desired entry produces any more, adds the placeholder and the
-// finding each desired entry needs, and finally evicts every placeholder of
-// the reconcile set repos (every repository when repos is nil) that no code
-// reference targets any more.
+// finding each desired entry needs, and finally evicts by ID every
+// placeholder of the reconcile set repos (every repository when repos is
+// nil) that no code reference targets any more.
 //
 // PURPOSE — a reference whose target was never obtained points at one
 // KindResource node per (referencing repository, artifact type, key) with
-// ID and FilePath `<callerRepo>/cobol-missing::<type>/<key>`, the caller's
-// RepoPrefix, WorkspaceID, and ProjectID, Name the key, and only the D-11
-// Meta: cobol_kind missing_artifact, artifact_type, artifact_key,
+// ID `<callerRepo>::cobol-missing::<type>/<key>`, an empty FilePath, the
+// caller's RepoPrefix, WorkspaceID, and ProjectID, Name the key, and only
+// the D-11 Meta: cobol_kind missing_artifact, artifact_type, artifact_key,
 // artifact_status not_obtained, synthetic, prov_evidence_class
 // EXTERNAL_UNRESOLVED, prov_range_exact false, prov_range_absence
 // not_obtained, and cobol_name_norm. Each such reference occurrence also
@@ -120,8 +126,9 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // evidence digest, the rule IDs, and finding_target_key. When a reference
 // leaves the desired set (bound to a retrieved target, deleted, or edited
 // away) its finding is evicted, and the placeholder goes with its last code
-// reference through EvictFile on its own path, as reconcileCobolResources
-// collects orphaned shared resources (GAP-07).
+// reference, removed by ID through graph.EvictResourceNodesByIDs, as
+// reconcileCobolResources collects orphaned shared resources (GAP-07,
+// D-27).
 //
 // RATIONALE — the placeholder carries no source, body, range, parser stamp,
 // or as-written spelling (GAP-05, P4 D-18), and it is never a binding
@@ -139,8 +146,10 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // references in two containers never share a ledger pairing group and never
 // supersede each other (D-03). The as-written target is hashed, never
 // stored, and no cobol_* key is copied.
-// Owning both nodes by the referencing repository keeps them scope-safe and
-// audited (SEC-01, SEC-08). The existing findings are read from the
+// Owning both nodes by the referencing repository keeps them scope-safe
+// (SEC-01) and owned under the ownership audit (SEC-08): the finding through
+// its file, the placeholder as an owned `<RepoPrefix>::` node with an empty
+// FilePath, which the audit exempts. The existing findings are read from the
 // references in-edges of the reconcile set's placeholders, never by
 // streaming every finding: each external finding has exactly one, to its
 // own repository's placeholder, added with it in one AddBatch. The same
@@ -151,9 +160,18 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 // other node can never go) before the sweep; otherwise the sweep would cut
 // their only references edge and strand them. Only absent placeholders and
 // findings are added, in one AddBatch, so an unchanged rerun writes
-// nothing (ID-07). The sweep evicts only a KindResource node with
-// cobol_kind missing_artifact whose FilePath equals its ID, so no node owned
-// by a real file is ever removed (T-05-17). A `references` edge from a
+// nothing (ID-07). A placeholder ID can never be a repository node's ID:
+// the indexer mints every ID from a repository path as `<RepoPrefix>/...`,
+// and a placeholder owns no file path, so no file eviction touches it
+// (D-27, review WR-05). The sweep removes placeholders by ID, never by file
+// path, with guards split by layer: this pass hands
+// graph.EvictResourceNodesByIDs only IDs it read in the same pass as
+// KindResource nodes with cobol_kind missing_artifact under their own
+// `<RepoPrefix>::cobol-missing::` prefix, and the store applies the kind
+// guard, so no node of another kind is ever removed (T-05-17, T-05-67). The
+// swept IDs join the change record only when the store reports the
+// capability; a store without it keeps its stale placeholders and logs one
+// warning, with no file-path fallback. A `references` edge from a
 // finding never keeps its placeholder; any other in-edge does, including a
 // code `references` edge such as a literal EXEC CICS LOAD PROGRAM. Every
 // pass ends by adding its repository set and the IDs it added and evicted
@@ -162,7 +180,8 @@ func cobolUnresolvedFromPlaceholder(id string) string {
 //
 // KEYWORDS — cobol, missing artifact, placeholder, not obtained,
 // external unresolved, finding, external-reference, sweep, orphan, evict,
-// retrieval, GAP-02, GAP-04, GAP-05, GAP-07, D-03, D-04, D-11, D-25, D-26.
+// retrieval, namespace, evict by ID, GAP-02, GAP-04, GAP-05, GAP-07, D-03,
+// D-04, D-11, D-25, D-26, D-27, WR-05.
 func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []cobolExternalRef) {
 	existing := make(map[string]struct{})
 	var owned []*graph.Node // sweep candidates: placeholders of the reconcile set
@@ -171,7 +190,7 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 			continue
 		}
 		existing[n.ID] = struct{}{}
-		if n.RepoPrefix == "" || n.FilePath != n.ID {
+		if n.RepoPrefix == "" || !strings.HasPrefix(n.ID, n.RepoPrefix+"::"+cobolMissingNamespace) {
 			continue
 		}
 		if repos != nil {
@@ -288,7 +307,7 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 		existing[d.placeholderID] = struct{}{}
 		n := &graph.Node{
 			ID: d.placeholderID, Kind: graph.KindResource, Name: d.key,
-			FilePath: d.placeholderID, Language: "cobol", RepoPrefix: d.callerRepo,
+			Language: "cobol", RepoPrefix: d.callerRepo,
 			Meta: map[string]any{
 				"cobol_kind":            cobolMissingArtifactKind,
 				"artifact_type":         d.artifactType,
@@ -327,6 +346,7 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 
 	// Placeholders added above carry the edges that desired them, so only
 	// the ones found before the add can be orphaned.
+	var stale []string
 	for _, n := range owned {
 		referenced := false
 		for _, e := range inEdges[n.ID] {
@@ -340,8 +360,16 @@ func (r *Resolver) reconcileCobolFindings(repos map[string]struct{}, desired []c
 			break
 		}
 		if !referenced {
-			r.graph.EvictFile(n.FilePath)
-			evicted = append(evicted, n.ID)
+			stale = append(stale, n.ID)
+		}
+	}
+	if len(stale) > 0 {
+		sort.Strings(stale)
+		if _, _, ok := graph.EvictResourceNodesByIDs(r.graph, stale); ok {
+			evicted = append(evicted, stale...)
+		} else {
+			r.logger.Warn("cobol: store cannot evict resource nodes; unreferenced missing-artifact placeholders remain",
+				zap.Int("placeholders", len(stale)))
 		}
 	}
 

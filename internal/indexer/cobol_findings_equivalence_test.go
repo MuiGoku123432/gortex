@@ -178,9 +178,9 @@ func TestCobolFindings_CleanDeterminism(t *testing.T) {
 		}
 	}
 	for _, id := range []string{
-		"fcora/cobol-missing::program/NOPGM", "fcora/cobol-missing::copybook/NOCPY",
-		"fcora/cobol-missing::inc_member/NOINC", "fcora/cobol-missing::idms_dictionary_member/RECORD/EMP-REC",
-		"fcorb/cobol-missing::program/NOPGM", "fcorb/cobol-missing::copybook/NOCPYB",
+		"fcora::cobol-missing::program/NOPGM", "fcora::cobol-missing::copybook/NOCPY",
+		"fcora::cobol-missing::inc_member/NOINC", "fcora::cobol-missing::idms_dictionary_member/RECORD/EMP-REC",
+		"fcorb::cobol-missing::program/NOPGM", "fcorb::cobol-missing::copybook/NOCPYB",
 	} {
 		assert.True(t, placeholders[id], "the dump holds placeholder %s: %v", id, placeholders)
 	}
@@ -215,12 +215,12 @@ func TestCobolFindings_IncrementalEqualsClean(t *testing.T) {
 		"           CALL 'NOPGM'.\n", "           CALL 'NOPGM'.\n           CALL 'NEWPGM'.\n", 1))
 	env.reindex(t, "fcora")
 	got := env.requireCleanEquivalent(t)
-	assert.Contains(t, cobolDumpIDs(cobolDumpNodes(t, got, graph.KindResource)), "fcora/cobol-missing::program/NEWPGM")
+	assert.Contains(t, cobolDumpIDs(cobolDumpNodes(t, got, graph.KindResource)), "fcora::cobol-missing::program/NEWPGM")
 
 	env.remove(t, "fcora", "copy/realcpy.cpy")
 	env.reindex(t, "fcora")
 	got = env.requireCleanEquivalent(t)
-	assert.Contains(t, cobolDumpIDs(cobolDumpNodes(t, got, graph.KindResource)), "fcora/cobol-missing::copybook/REALCPY")
+	assert.Contains(t, cobolDumpIDs(cobolDumpNodes(t, got, graph.KindResource)), "fcora::cobol-missing::copybook/REALCPY")
 	var realcpy int
 	for _, n := range cobolDumpNodes(t, got, graph.KindFinding) {
 		if n.meta[graph.MetaFindingTargetKey] == "REALCPY" {
@@ -284,7 +284,7 @@ const cobolCrossContainerMoved = `       IDENTIFICATION DIVISION.
 // edit closes the old external finding and opens the new one, and never
 // pairs them as a supersede, because findings never match across containers.
 func TestCobolFindings_ExternalCrossContainerNoSupersede(t *testing.T) {
-	const placeholder = "xcont/cobol-missing::program/NOPGM"
+	const placeholder = "xcont::cobol-missing::program/NOPGM"
 	env := newCobolLifecycleEnv(t, map[string]map[string]string{"xcont": {"cobol/x.cbl": cobolCrossContainer}})
 	env.track(t, "xcont")
 	oldID := cobolExternalFindingFor(t, env, "xcont", "NOPGM")

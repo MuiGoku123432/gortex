@@ -183,7 +183,7 @@ func TestCobolLifecycle_Delete(t *testing.T) {
 		}
 	}
 	require.NotNil(t, copyEdge, "COPY CUSTREC edge of main.cbl")
-	assert.Equal(t, "lifea/cobol-missing::copybook/CUSTREC", copyEdge[2])
+	assert.Equal(t, "lifea::cobol-missing::copybook/CUSTREC", copyEdge[2])
 	requireCobolMissingNode(t, got, copyEdge[2])
 	var meta map[string]any
 	require.NoError(t, json.Unmarshal([]byte(copyEdge[6]), &meta))
@@ -255,7 +255,7 @@ func TestCobolLifecycle_CrossFile(t *testing.T) {
 		env.reindex(t, "lifea")
 		res := env.requireCleanEquivalent(t)
 		call := callEdge(t, res)
-		assert.Equal(t, "lifea/cobol-missing::program/SUBPGM", call.to)
+		assert.Equal(t, "lifea::cobol-missing::program/SUBPGM", call.to)
 		assert.Equal(t, "missing", call.meta["cobol_unresolved_reason"])
 		requireCobolMissingNode(t, res, call.to)
 
@@ -270,7 +270,7 @@ func TestCobolLifecycle_CrossFile(t *testing.T) {
 // allowed by its resolve_from, binds and returns to missing (D-09).
 func TestCobolLifecycle_CrossRepoIncremental(t *testing.T) {
 	const callX = "unresolved::cobol::program::XPGM"
-	const missingX = "crossa/cobol-missing::program/XPGM"
+	const missingX = "crossa::cobol-missing::program/XPGM"
 	repos := cobolCrossRepos(map[string]string{".gortex.yaml": cobolCrossAllowlist})
 	repos["crossb"] = maps.Clone(repos["crossb"])
 	xpgm := repos["crossb"]["cobol/xpgm.cbl"]
@@ -322,8 +322,8 @@ func TestCobolLifecycle_CrossRepoUntrack(t *testing.T) {
 	res := env.requireCleanEquivalent(t)
 	edges = cobolDumpEdges(t, res)
 	for placeholder, missing := range map[string]string{
-		"unresolved::cobol::program::XPGM":  "crossa/cobol-missing::program/XPGM",
-		"unresolved::cobol::copybook::XCPY": "crossa/cobol-missing::copybook/XCPY",
+		"unresolved::cobol::program::XPGM":  "crossa::cobol-missing::program/XPGM",
+		"unresolved::cobol::copybook::XCPY": "crossa::cobol-missing::copybook/XCPY",
 	} {
 		e := cobolPlaceholderEdge(t, edges, "crossa", placeholder)
 		assert.Equal(t, missing, e.to)

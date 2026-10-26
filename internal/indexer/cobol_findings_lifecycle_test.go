@@ -317,7 +317,7 @@ func requireNoSuperseded(t *testing.T, env *cobolLifecycleEnv, repos ...string) 
 }
 
 func TestCobolFindings_HistoryDependentRepo(t *testing.T) {
-	const placeholder = "fdepb/cobol-missing::program/NOPGM"
+	const placeholder = "fdepb::cobol-missing::program/NOPGM"
 
 	t.Run("incremental", func(t *testing.T) {
 		env := newCobolLifecycleEnv(t, cobolDepRepos(false))
@@ -580,7 +580,7 @@ func cobolExternalFindingFor(t *testing.T, env *cobolLifecycleEnv, repo, key str
 // the resolver-created placeholder and external finding searchable, and
 // that removing the reference takes both out of search (Pitfall 4).
 func TestCobolFindings_SearchAfterIncremental(t *testing.T) {
-	const placeholder = "finda/cobol-missing::program/NEWPGM"
+	const placeholder = "finda::cobol-missing::program/NEWPGM"
 	env := newCobolLedgerEnv(t)
 
 	withCall := strings.Replace(cobolLedgerFixture, "           CALL 'NOPGM'.\n",
@@ -606,7 +606,7 @@ func TestCobolFindings_SearchAfterIncremental(t *testing.T) {
 // and finding it removes leave search, the close is in history, and the
 // next settle point appends nothing (D-24, WR-02, GAP-06).
 func TestCobolFindings_SearchAfterFallbackMasterResolve(t *testing.T) {
-	const placeholder = "finda/cobol-missing::program/NOPGM"
+	const placeholder = "finda::cobol-missing::program/NOPGM"
 	env := newCobolLedgerEnv(t)
 	id := cobolExternalFindingFor(t, env, "finda", "NOPGM")
 	idx := env.mi.GetIndexer("finda")
@@ -692,7 +692,7 @@ func TestCobolFindings_MasterDrainClosesBeforeLaterEdit(t *testing.T) {
 // on both cold-track orders with the shadow off and on (D-03 across
 // repositories, D-09, GAP-02).
 func TestCobolFindings_CrossRepoDependentLedgerAndSearch(t *testing.T) {
-	const placeholder = "fdepb/cobol-missing::program/NOPGM"
+	const placeholder = "fdepb::cobol-missing::program/NOPGM"
 
 	t.Run("incremental", func(t *testing.T) {
 		env := newCobolLifecycleEnv(t, cobolDepRepos(false))
@@ -780,7 +780,7 @@ func TestCobolFindings_CrossRepoDependentLedgerAndSearch(t *testing.T) {
 // parse findings and the unrelated missing CALL's finding get no row (D-03,
 // D-11, GAP-07).
 func TestCobolFindings_ExternalClosesOnRetrieve(t *testing.T) {
-	const placeholder = "finda/cobol-missing::copybook/NOCPY"
+	const placeholder = "finda::cobol-missing::copybook/NOCPY"
 	env := newCobolLedgerEnv(t)
 	require.NotNil(t, env.store.GetNode(placeholder))
 	id := cobolExternalFindingFor(t, env, "finda", "NOCPY")
@@ -797,14 +797,14 @@ func TestCobolFindings_ExternalClosesOnRetrieve(t *testing.T) {
 	assert.Equal(t, graph.FindingStatusClosed, rows[0].NewStatus)
 	assert.Nil(t, env.store.GetNode(id))
 	assert.Nil(t, env.store.GetNode(placeholder), "the retrieved copybook's placeholder is gone")
-	assert.NotNil(t, env.store.GetNode("finda/cobol-missing::program/NOPGM"), "the missing CALL keeps its placeholder")
+	assert.NotNil(t, env.store.GetNode("finda::cobol-missing::program/NOPGM"), "the missing CALL keeps its placeholder")
 }
 
 // TestCobolFindings_PlaceholderSweptOnLastReference removes the only CALL
 // 'NOPGM': its external finding closes and its placeholder is swept (D-11,
 // GAP-05).
 func TestCobolFindings_PlaceholderSweptOnLastReference(t *testing.T) {
-	const placeholder = "finda/cobol-missing::program/NOPGM"
+	const placeholder = "finda::cobol-missing::program/NOPGM"
 	env := newCobolLedgerEnv(t)
 	require.NotNil(t, env.store.GetNode(placeholder))
 	id := cobolExternalFindingFor(t, env, "finda", "NOPGM")

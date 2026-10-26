@@ -131,7 +131,7 @@ func TestCobolLifecycle_ConfigChange(t *testing.T) {
 // COPY into crossb, and dropping it returns them to missing.
 func TestCobolLifecycle_ConfigReloadRedecides(t *testing.T) {
 	const callX = "unresolved::cobol::program::XPGM"
-	const missingX = "crossa/cobol-missing::program/XPGM"
+	const missingX = "crossa::cobol-missing::program/XPGM"
 	env := newCobolLifecycleEnv(t, cobolCrossRepos(nil))
 	env.track(t, "crossa", "crossb")
 	res := env.dump(t)

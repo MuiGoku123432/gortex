@@ -385,8 +385,8 @@ func TestProjectNode_FindingMeta(t *testing.T) {
 		},
 	}
 	placeholder := &graph.Node{
-		ID: "repo/cobol-missing::program/NOPGM", Kind: graph.KindResource, Name: "NOPGM",
-		FilePath: "repo/cobol-missing::program/NOPGM", RepoPrefix: "repo",
+		ID: "repo::cobol-missing::program/NOPGM", Kind: graph.KindResource, Name: "NOPGM",
+		RepoPrefix: "repo",
 		Meta: map[string]any{
 			"cobol_kind": "missing_artifact", "artifact_type": "program", "artifact_key": "NOPGM",
 			"artifact_status": "not_obtained", "synthetic": true,
