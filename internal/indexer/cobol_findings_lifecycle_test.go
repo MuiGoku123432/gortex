@@ -824,6 +824,103 @@ func TestCobolFindings_PlaceholderSweptOnLastReference(t *testing.T) {
 	assert.Nil(t, env.store.GetNode(placeholder), "the last reference's placeholder is swept")
 }
 
+// The WR-05 corpus: fcoll's MAINPGM calls 'ZQXHOST.CBL', which no program
+// defines, and fcoll also holds a real program file whose repository path
+// spells that CALL's placeholder in the former slash form, so the file node
+// ID is the ID the placeholder had before D-27. The literal keeps its '.'
+// in the key (cobolIDSegment), and the file defines HOSTPGM, not that key,
+// so the CALL stays missing.
+const (
+	cobolCollisionHostRel = "cobol-missing::program/ZQXHOST.CBL"
+	cobolCollisionMain    = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MAINPGM.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'ZQXHOST.CBL'.
+           GOBACK.
+`
+	cobolCollisionHost = `       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HOSTPGM.
+       PROCEDURE DIVISION.
+       HOST-PARA.
+           GOBACK.
+`
+)
+
+// TestCobolFindings_PlaceholderNamespaceNoFileCollision is review WR-05 on
+// the real path: the placeholder of the missing CALL never takes the real
+// file's node, neither when it is created nor when it is swept, because it
+// lives in its repository's `<repo>::` namespace with no file path; the
+// file and its program keep their nodes, and incremental equals clean after
+// each step (D-27, GAP-05).
+func TestCobolFindings_PlaceholderNamespaceNoFileCollision(t *testing.T) {
+	const (
+		fileID    = "fcoll/" + cobolCollisionHostRel
+		programID = fileID + "::HOSTPGM"
+	)
+	env := newCobolLifecycleEnv(t, map[string]map[string]string{"fcoll": {
+		"cobol/main.cbl":      cobolCollisionMain,
+		cobolCollisionHostRel: cobolCollisionHost,
+	}})
+	env.track(t, "fcoll")
+
+	// requireHost: the real file and its program are untouched.
+	requireHost := func(t *testing.T) {
+		t.Helper()
+		file := env.store.GetNode(fileID)
+		require.NotNil(t, file, "the real file node %s", fileID)
+		assert.Equal(t, graph.KindFile, file.Kind, "the file node keeps its kind")
+		assert.Equal(t, fileID, file.FilePath)
+		program := env.store.GetNode(programID)
+		require.NotNil(t, program, "the real program node %s", programID)
+		assert.Equal(t, graph.KindFunction, program.Kind)
+		assert.Equal(t, fileID, program.FilePath)
+	}
+	// placeholderOf locates the CALL's placeholder through the store, never
+	// by spelling its ID: the one missing-artifact node keyed ZQXHOST.CBL.
+	placeholderOf := func(t *testing.T) *graph.Node {
+		t.Helper()
+		var found []*graph.Node
+		for n := range env.store.NodesByKind(graph.KindResource) {
+			if n != nil && n.Meta["cobol_kind"] == "missing_artifact" && n.Meta["artifact_key"] == "ZQXHOST.CBL" {
+				found = append(found, n)
+			}
+		}
+		if len(found) == 0 {
+			return nil
+		}
+		require.Len(t, found, 1, "one placeholder for ZQXHOST.CBL")
+		return found[0]
+	}
+
+	ph := placeholderOf(t)
+	require.NotNil(t, ph, "the missing CALL has a placeholder")
+	assert.NotEqual(t, fileID, ph.ID, "the placeholder never takes the file's ID")
+	assert.Equal(t, "", ph.FilePath, "the placeholder owns no file path")
+	assert.Equal(t, "fcoll", ph.RepoPrefix)
+	assert.Equal(t, "program", ph.Meta["artifact_type"])
+	assert.True(t, strings.HasPrefix(ph.ID, "fcoll::"), "owned under its repository's namespace: %s", ph.ID)
+	assert.False(t, graph.IsAuditableRepoSourceNode(ph), "the ownership audit exempts it as an owned <repo>:: node")
+	calls := 0
+	for _, e := range env.store.GetInEdges(ph.ID) {
+		if e.Kind == graph.EdgeCalls {
+			calls++
+		}
+	}
+	assert.Equal(t, 1, calls, "the CALL targets the placeholder")
+	requireHost(t)
+	env.requireCleanEquivalent(t)
+
+	// The CALL goes: the placeholder is swept by ID and takes nothing with it.
+	noCall := strings.Replace(cobolCollisionMain, "           CALL 'ZQXHOST.CBL'.\n", "", 1)
+	require.NotEqual(t, cobolCollisionMain, noCall)
+	env.write(t, "fcoll", "cobol/main.cbl", noCall)
+	env.reindex(t, "fcoll")
+	assert.Nil(t, placeholderOf(t), "the unreferenced placeholder is swept")
+	requireHost(t)
+	env.requireCleanEquivalent(t)
+}
+
 // TestCobolFindings_HistorySurvivesRestart reopens the same SQLite file and
 // warm-reconciles finda: every row survives and none is appended (D-07).
 func TestCobolFindings_HistorySurvivesRestart(t *testing.T) {
