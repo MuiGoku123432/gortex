@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Neo4j Projection and Mainframe Graph Foundation
-current_phase: 05
-current_phase_name: explicit-unresolved-evidence
-status: verifying
+current_phase: 06
+current_phase_name: Native Deterministic Acceptance and Pre-AI Release Gate
+status: planning
 stopped_at: Completed 05-17-PLAN.md
-last_updated: "2026-10-26T19:01:05.431Z"
-last_activity: 2026-10-23
-last_activity_desc: Phase 05 execution started
+last_updated: "2026-10-27T00:56:49.251Z"
+last_activity: 2026-10-26
+last_activity_desc: Phase 05 complete, transitioned to Phase 06
 progress:
   total_phases: 10
   completed_phases: 5
@@ -22,17 +22,17 @@ state_head: b23a688f39d205a044579929357e2d8b206c71d9
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-21)
+See: .planning/PROJECT.md (updated 2026-10-27)
 
 **Core value:** A trustworthy graph representation of a mainframe estate that modernization cutover decisions can be made against -- deterministic and reproducible first, enriched and simulated later.
-**Current focus:** Phase 05 — explicit-unresolved-evidence
+**Current focus:** Phase 06 -- native-deterministic-acceptance-and-pre-ai-release-gate
 
 ## Current Position
 
-Phase: 05 (explicit-unresolved-evidence) — EXECUTING
-Plan: 17 of 17
-Status: Phase complete — ready for verification
-Last activity: 2026-10-23 — Phase 05 execution started
+Phase: 06 — Native Deterministic Acceptance and Pre-AI Release Gate
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-26 — Phase 05 complete, transitioned to Phase 06
 
 Progress: [██████████] 100%
 
@@ -40,7 +40,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 13
+- Total plans completed: 30
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -50,6 +50,7 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 01 | 7 | - | - |
 | 02 | 6 | - | - |
+| 05 | 17 | - | - |
 
 **Recent Trend:**
 
@@ -303,7 +304,8 @@ None yet.
 - [Phase 4]: Copybook/library search order and canonical cross-repository resolution domains need corpus evidence.
 - [Phases 7-9]: Provider authorization, retention, claim-ledger, reviewer authority, and evaluation thresholds remain policy/design decisions.
 - [Phase 2]: windows-latest CI test shard fails (runs 36877578916, 36889132850); cause unknown pending job-log access — see 02 deferred-items From Plan 02-06
-- [Phase 5]: a full-suite run fails cmd/gortex whenever Gortex is used anywhere on the machine during it (TestMain query-log guard); see deferred-items From Plan 05-17 and WINDOWS.md entry 8
+- [Phase 5]: a full-suite run fails cmd/gortex whenever Gortex is used anywhere on the machine during it (TestMain query-log guard); run release gates with every Gortex session stopped, or fix the guard. See deferred-items From Plan 05-17 (WINDOWS.md entry 8 closed by a clean run 2026-10-27)
+- [Phase 5]: shared DB2/IDMS/CICS resource nodes still use ID = FilePath and are swept with EvictFile, the WR-05 hazard D-27 removed for placeholders only; see deferred-items From Plan 05-16
 
 ### Roadmap Evolution
 
@@ -319,6 +321,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-26T19:00:14.005Z
-Stopped at: Completed 05-17-PLAN.md
+Last session: 2026-10-27T00:45:00.000Z
+Stopped at: Phase 05 complete (UAT 3/3, SECURITY 75/75 closed), ready to plan Phase 06
 Resume file: None

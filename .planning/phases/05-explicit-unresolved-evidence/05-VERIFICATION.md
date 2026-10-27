@@ -2,11 +2,12 @@
 phase: 05-explicit-unresolved-evidence
 verified: 2026-10-26T23:51:21Z
 verified_at_commit: 64d20a6e
-status: human_needed
+status: passed
 score: 5/5 roadmap success criteria; gap-closure plan truths 42/42 (1 by override); 05-01..05-12 truths hold
 behavior_unverified: 0
 overrides_applied: 1
 overrides:
+
   - must_have: "The full suite `GOWORK=off go test -race -timeout 60m ./...` runs once, after `df -g /System/Volumes/Data` shows at least 10 GiB available, and its log ends with exit=0 and holds no FAIL line (the gap-closure phase gate)."
     reason: "The substance is verified on split evidence; the literal clause cannot be met while any Gortex process on this machine appends to the developer's real query log during the run. Run 1 (05-17-full-suite.run1.log) executed all 156 testable packages fresh (0 cached) with 0 '--- FAIL', 0 'panic:', and 0 'DATA RACE' lines; cmd/gortex printed PASS (m.Run returned 0) and failed only on the pre-existing TestMain fingerprint guard (cmd/gortex/main_test.go:56-61), whose report names only ~/.gortex/cache/query-log.jsonl, written by outside sessions. cmd/gortex passed alone with the guard intact (05-17-cmd-gortex-isolated.log, exit=0), and the guard also stayed intact in this verification's targeted cmd/gortex COBOL run. No non-.planning file changed after 3abe472d. WINDOWS.md entry 8 stays open until a clean full run or a guard fix."
     accepted_by: "cfanch06 (user decision recorded in 05-17-SUMMARY key-decisions and deviation 6, and in WINDOWS.md entry 8)"
@@ -18,21 +19,28 @@ re_verification:
   previous_report_commit: c93bce3c
   commits_verified: ["fc0fe9e9", "1750e339", "be0f4f83", "64d20a6e"]
   gaps_closed:
+
     - "Gap 1, review CR-01 (SC1 / GAP-02; 05-16 truths 5 and 6; 05-08 truths 1 and 9 for '::' prefixes): resolver.ParseCobolPlaceholderID (cobol_findings.go:97-111) finds the namespace marker by its last occurrence, and cobolUnresolvedFromPlaceholder (:117-123) and cobolOwnerPrefix (finding_ledger.go:296-301) both use it. TestCobolReconcile_IDMSColonRepoPrefix (memory and SQLite, three passes) and TestCobolFindings_IDMSColonRepoPrefix (real path) pass. The verifier's earlier a::b probes now keep the finding, and a new nil-base master-path probe proves ledger and search routing to a::b, with a negative control."
     - "Gap 2, review WR-01 (D-24 and clause 2 of the 05-14 GAP-07 test-tier prohibition): writer-free masters skip ResolveAll's COBOL reconcile (DeferCobolReconcile; resolver.go:177-184, :754, :1702) and run ReconcileCobol, the drain, the ledger, and the search sync in one reach-writer section (multi.go:1087-1097). TestCobolFindings_MasterReconcileExcludesLane (both production writer-free entries) and TestCobolReconcile_ResolveAllDefersReconcile pass. A verifier overlay mutation without the writer section fails both subtests in 4.46 s with 'active -> superseded'. docs/languages.md:279 no longer claims timing independence and states what ships."
   warnings_closed:
+
     - "Review WR-02 (D-26): later occurrences of an imageless edge keep the edge's own absence reason and get no line or coordinate (cobol_findings.go:274). TestCobolReconcile_ExternalImagelessOccurrences passes (4 subtests), and the verifier's earlier probe now shows #2 as no_original_projection."
   gaps_remaining: []
   regressions: []
   previous_human_verification_open:
+
     - "Judgment-tier prohibitions 05-07 (GAP-08) and 05-09 (GAP-07): still not deterministically provable; carried forward below with refreshed evidence."
+
 human_verification:
+
   - test: "Judgment-tier prohibition 05-07 (GAP-08): an uncontained cascade never passes silently or behind a flag, never blocks indexing or marks a repository unhealthy, and no later AI output can clear the cascade finding."
     expected: "Confirm. Non-authoritative LLM-judge verdict: HOLDS. TestCobolCascadeGate_{CleanControl,Positive,Negative,Copybook} pass at HEAD 64d20a6e in the default -race run with no flag. TestFindingWriters_Inventory passes at HEAD. TestIndexHealth_FindingsDoNotScore passed at c93bce3c, and internal/mcp is untouched since. The graph exposes no generic remove-by-ID, so a finding leaves the store only through eviction of its file or repository or the fenced resolver call to EvictFindingNodesByIDs. The review-fix commits add no finding writer."
     why_human: "Judgment-tier prohibition (unverified-prohibition: human review recommended). A must-NOT about future AI output cannot be proven by a present-day test."
+
   - test: "Judgment-tier prohibition 05-09 (GAP-07): no path other than deterministic evidence (source edit, parser or extractor change, retrieval or binding) closes, supersedes, suppresses, or alters a finding."
     expected: "Confirm. Non-authoritative LLM-judge verdict: HOLDS. The D-16 inventory (TestFindingWriters_Inventory, PASS at HEAD) confines KindFinding construction, finding_status writes, AppendFindingTransitions, and EvictFindingNodesByIDs to the extractor, the resolver, and the ledger. The new writer section (multi.go:1087-1097) only calls the existing resolver reconcile and ledger. Residual: the inventory matches literal write shapes, not a Meta write through a computed key. The previous residual (a race could mislabel close versus supersede on writer-free master paths) is closed by be0f4f83."
     why_human: "Judgment-tier prohibition (unverified-prohibition: human review recommended)."
+
   - test: "Re-run the full race suite on HEAD 64d20a6e with no Gortex sessions active (stop the daemon and every 'gortex mcp' process first): GOWORK=off go test -race -timeout 60m ./..."
     expected: "exit=0, with no '--- FAIL', 'DATA RACE', or 'panic:' line, and cmd/gortex passing with its TestMain guard intact. That re-certifies the 05-17 gate on the code that now ships and closes WINDOWS.md entry 8."
     why_human: "Code changed in internal/resolver and internal/indexer after 3abe472d, the commit the 05-17 override covers. This verification ran the whole resolver package (1075 tests) but only 151 of the 1688 internal/indexer test functions, and not cmd/gortex, whose daemon warmup is the production caller of the changed writer-free master path. cmd/gortex cannot pass while any Gortex session on this machine writes the real query log (guard at cmd/gortex/main_test.go:56-61), and sessions are active now."
@@ -83,6 +91,7 @@ human_verification:
 | `docs/languages.md:279` claims exactly what ships | VERIFIED | "does not depend on timing" is gone. The text now says a full resolve outside indexing (the daemon warmup resolve or a fallback catch-up) "reconciles and records its transitions in one step that no edit can interleave", and that a finding is recorded as superseded only when the same step removed it and added a same-class, same-kind finding in the same container. That matches the code: writer-free masters use the new section; writer-held masters keep the caller's writer across the pass; lanes hold the writer from commit through ledger (D-23); supersede is the D-03 pairing within one ledger diff. Note (INFO): if an edit's own step runs before a writer-free master's section and makes both the retrieval close and a new open in the same container, that step records a supersede. That is legitimate under D-03 ("a different active finding of the same class and kind now sits in the same container") and is exactly what the sentence says. Clause 2 of the 05-14 prohibition ("MUST NOT let close versus supersede depend on when a later settle point happens to run") concerns a later step recording another step's change, which can no longer happen on these paths. |
 
 **Behavior changes on writer-free paths** (verified by code reading):
+
 - `OnComputeDone` (`markReady`) still fires inside the pass, so readiness is not delayed.
 - The COBOL reconcile now runs after the refinement tail. Nothing in that tail reads COBOL bindings:
   - terminal stamping never classifies `cobol::` targets (`TestCobolNamespaceExclusions/generic` PASS);
@@ -222,6 +231,7 @@ The other gap-closure artifacts (extractor anchor, rule constants, resource evic
 | Ledger widening and search sync | `cobolOwnerPrefix` | `finding_ledger.go:186`, `:271`, `:276` | WIRED (previously misrouted `::` prefixes) |
 
 Unchanged links from `c93bce3c` are carried as WIRED:
+
 - extractor anchor to `graph.FindingSymbol`;
 - ledger transition to `MetaFindingContainer`;
 - reconcile to `cobol_occurrence_count`;

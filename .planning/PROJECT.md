@@ -36,6 +36,7 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 - ✓ **General Neo4j projection command** — Phase 1 validated 2026-09-22: `gortex neo4j push` and MCP `neo4j_push` materialize an explicit workspace/project/repository SQLite snapshot through one shared request/result contract
 - ✓ **Scoped, retry-safe projection lifecycle** — stable keys, Neo4j constraints, bounded batches, exact-attempt fencing, atomic activation, bounded stale reconciliation, dry-run target planning, progress, cancellation, and truthful incomplete results
 - ✓ **SQLite authority and optional Neo4j** — DB/WAL/SHM plus canonical immutability verified; no index-time dual write, reverse write, background synchronization, or ordinary startup dependency
+- ✓ **Explicit unresolved evidence** -- Phase 5 validated 2026-10-27: COBOL parse gaps persist as `PARSE_UNRESOLVED` findings and never-obtained targets as `EXTERNAL_UNRESOLVED` findings with repository-owned, source-free placeholders; finding IDs anchor to name-stable containers (`gortex-finding-id/2`) and survive unrelated edits; close and supersede history is ledgered under the topology writer; uncontained parser cascades stay a deterministic regression gate (GAP-01..GAP-08)
 
 ### Shipped in this fork
 
@@ -68,7 +69,6 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 - [ ] Deliver the first vertical slice as a thin deterministic tracer from one existing COBOL parser node through the native graph and CLI/MCP query surfaces
 - [ ] Extend deterministic extraction across source-positioned COBOL, IDMS, CICS, SQL, copybook, call, and resource facts
 - [ ] Make deterministic facts and findings stable and idempotent across identical and incremental indexing runs
-- [ ] Represent parser failures and unavailable artifacts as separate, queryable unresolved gaps before any AI enrichment
 - [ ] Validate the user-approved manual Neo4j projection boundary without widening it into continuous synchronization or authority
 - [ ] Add optional, policy-gated AI review that emits schema-validated, evidence-linked claims without mutating deterministic facts
 - [ ] Support human confirmation, contradiction, and supersession while retaining claim lineage
@@ -126,6 +126,9 @@ A trustworthy graph representation of a mainframe estate that modernization cuto
 | Pin the v0.26.0 parser line through go.mod with embedded attestation | A go.mod `require` of the fork `preprocessor` plus a `replace` of the forest COBOL module with the fork's `forest-shim/cobol`, both at the `f9eaf99c34a9` pseudo-version, resolve reproducibly under `GOWORK=off`; the fork attests its grammar against an embedded hash, and Gortex checks the result against its own approved-grammar ID, failing COBOL extraction on any mismatch (D-01 through D-05) | ✓ Decided 2026-09-30 |
 | Grammar-only COBOL extraction: program node and source-file edge only | Grammar facts are accurate where the regex extractor guessed; COBOL extraction now yields programs from the enhanced grammar, and the temporary loss of divisions, sections, paragraphs, COPY, CALL, and PERFORM/THRU/GO TO edges is accepted until Phase 3 rebuilds them from parser observations (D-06, D-15) | ✓ Decided 2026-09-30 |
 | Release binaries embed the private fork's `grammar.json` and query `.scm` files | An accepted consequence of linking the fork through go.mod (D-02); the fork's releases are the user's own, so no release-job changes (D-19) | ✓ Accepted 2026-09-30 |
+| Finding IDs anchor to a name-stable container and an unkeyed evidence digest | Statement ordinals re-IDed unchanged findings on unrelated edits (Phase 5 CR-01); an unkeyed digest keeps IDs reproducible across machines and clean rebuilds, accepting that short evidence can be confirmed by dictionary hashing (Phase 5 D-21, D-22) | ✓ Shipped in Phase 5, 2026-10-27 |
+| Finding history is a best-effort, non-canonical SQLite sidecar written under the topology writer | The active finding set is canonical; history must not depend on timing, so every settle point and every master resolve records its ledger inside one writer section (Phase 5 D-06, D-07, D-23, D-24) | ✓ Shipped in Phase 5, 2026-10-27 |
+| Missing-artifact placeholders live in a `<repo>::cobol-missing::` namespace with no file path and are evicted by ID | A placeholder sharing a real file path could overwrite or evict that file's nodes (Phase 5 WR-05, D-27); shared DB2/IDMS resources still use the old shape and are deferred | ✓ Shipped in Phase 5, 2026-10-27 |
 
 ## Evolution
 
@@ -145,7 +148,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-22 -- Phase 1 general Neo4j projection verified complete; COBOL graph phases remain deferred until parser/grammar readiness.*
+*Last updated: 2026-10-27 -- Phase 5 explicit unresolved evidence verified complete (UAT 3/3 passed, 75/75 threats closed, full race suite green).*
 
 *Companion docs: `FORK-NOTES.md` (how to run this fork, fix order, upstream
 workflow) and `PythonApps/cobol-kg/HANDOFF.md` (session entry point, corpus,

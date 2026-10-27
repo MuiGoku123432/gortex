@@ -15,7 +15,7 @@ This milestone now begins with a general, manually invoked projection that mater
 - [x] **Phase 2: Thin Deterministic Native Tracer and Minimum Contracts** - Deliver one trustworthy native COBOL trace after parser/grammar readiness. (completed 2026-10-01)
 - [ ] **Phase 3: Deterministic COBOL and Mainframe Breadth** - Expand native extraction across COBOL structure, control flow, data, calls, copybooks, IDMS, CICS, and SQL.
 - [ ] **Phase 4: Stable Incremental and Cross-Repository Lifecycle** - Make identity, reconciliation, and scoped resolution stable across reruns, changes, and repositories.
-- [ ] **Phase 5: Explicit Unresolved Evidence** - Persist parser gaps and unavailable artifacts as distinct, lifecycle-aware deterministic findings.
+- [x] **Phase 5: Explicit Unresolved Evidence** - Persist parser gaps and unavailable artifacts as distinct, lifecycle-aware deterministic findings. (completed 2026-10-26)
 - [ ] **Phase 6: Native Deterministic Acceptance and Pre-AI Release Gate** - Prove native queries, deterministic fixtures, lifecycle equivalence, monitoring, and unresolved-boundary behavior before AI.
 - [ ] **Phase 7: AI Contract, Policy, and Evaluation Foundation** - Define and enforce the bounded, redacted, provider-authorized AI boundary before claim implementation.
 - [ ] **Phase 8: Evidence-Linked Claims and Human Review** - Persist validated AI claims separately and support auditable review and lifecycle transitions.
@@ -410,7 +410,7 @@ Phase 1 starts immediately. Phases 2-9 retain numeric dependency order but remai
 | 2. Thin Deterministic Native Tracer and Minimum Contracts | 6/6 | Complete    | 2026-10-01 |
 | 3. Deterministic COBOL and Mainframe Breadth | 17/17 | In Progress|  |
 | 4. Stable Incremental and Cross-Repository Lifecycle | 22/22 | In Progress|  |
-| 5. Explicit Unresolved Evidence | 17/17 | In Progress|  |
+| 5. Explicit Unresolved Evidence | 17/17 | Complete    | 2026-10-26 |
 | 6. Native Deterministic Acceptance and Pre-AI Release Gate | 0/TBD | Deferred: Phase 5 | - |
 | 7. AI Contract, Policy, and Evaluation Foundation | 0/TBD | Deferred: Phase 6 | - |
 | 8. Evidence-Linked Claims and Human Review | 0/TBD | Deferred: Phase 7 | - |
