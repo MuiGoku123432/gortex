@@ -1,0 +1,203 @@
+head=b69bee7d code=64d20a6e
+started=2026-10-27T00:15:16Z
+avail_gib=142
+cmd=GOWORK=off go test -race -timeout 60m ./...
+ok  	github.com/zzet/gortex/bench/baselines	(cached)
+ok  	github.com/zzet/gortex/bench/daemon-latency	5.260s
+?   	github.com/zzet/gortex/bench/fixtures/mktypos	[no test files]
+ok  	github.com/zzet/gortex/bench/index-perf	4.115s
+ok  	github.com/zzet/gortex/bench/perf	13.579s
+ok  	github.com/zzet/gortex/bench/token-efficiency	5.283s
+ok  	github.com/zzet/gortex/bench/wire-format	(cached)
+ok  	github.com/zzet/gortex/cmd/gortex	154.110s
+ok  	github.com/zzet/gortex/internal/agents	6.288s
+?   	github.com/zzet/gortex/internal/agents/agentstest	[no test files]
+?   	github.com/zzet/gortex/internal/agents/aider	[no test files]
+ok  	github.com/zzet/gortex/internal/agents/antigravity	5.229s
+ok  	github.com/zzet/gortex/internal/agents/claudecode	7.188s
+ok  	github.com/zzet/gortex/internal/agents/cline	6.113s
+ok  	github.com/zzet/gortex/internal/agents/codex	4.899s
+ok  	github.com/zzet/gortex/internal/agents/continuedev	3.608s
+ok  	github.com/zzet/gortex/internal/agents/copilotcli	5.897s
+ok  	github.com/zzet/gortex/internal/agents/cursor	3.286s
+ok  	github.com/zzet/gortex/internal/agents/gemini	3.168s
+ok  	github.com/zzet/gortex/internal/agents/hermes	4.054s
+?   	github.com/zzet/gortex/internal/agents/internalutil	[no test files]
+ok  	github.com/zzet/gortex/internal/agents/kilocode	3.712s
+ok  	github.com/zzet/gortex/internal/agents/kimi	3.992s
+ok  	github.com/zzet/gortex/internal/agents/kiro	4.301s
+ok  	github.com/zzet/gortex/internal/agents/ohmypi	4.416s
+?   	github.com/zzet/gortex/internal/agents/openclaw	[no test files]
+ok  	github.com/zzet/gortex/internal/agents/opencode	10.119s
+ok  	github.com/zzet/gortex/internal/agents/pi	4.436s
+ok  	github.com/zzet/gortex/internal/agents/skillpack	3.777s
+ok  	github.com/zzet/gortex/internal/agents/vscode	3.236s
+ok  	github.com/zzet/gortex/internal/agents/windsurf	3.701s
+ok  	github.com/zzet/gortex/internal/agents/zed	3.462s
+ok  	github.com/zzet/gortex/internal/analysis	13.413s
+ok  	github.com/zzet/gortex/internal/analyzer	(cached)
+ok  	github.com/zzet/gortex/internal/artifacts	(cached)
+ok  	github.com/zzet/gortex/internal/astquery	(cached)
+ok  	github.com/zzet/gortex/internal/audit	(cached)
+ok  	github.com/zzet/gortex/internal/blame	(cached)
+ok  	github.com/zzet/gortex/internal/callpath	(cached)
+ok  	github.com/zzet/gortex/internal/cfg	(cached)
+ok  	github.com/zzet/gortex/internal/churn	(cached)
+ok  	github.com/zzet/gortex/internal/claudemd	(cached)
+ok  	github.com/zzet/gortex/internal/clones	(cached)
+ok  	github.com/zzet/gortex/internal/cochange	(cached)
+ok  	github.com/zzet/gortex/internal/codegen	(cached)
+ok  	github.com/zzet/gortex/internal/codeowners	(cached)
+ok  	github.com/zzet/gortex/internal/config	(cached)
+ok  	github.com/zzet/gortex/internal/contracts	(cached)
+ok  	github.com/zzet/gortex/internal/coverage	(cached)
+ok  	github.com/zzet/gortex/internal/daemon	17.101s
+ok  	github.com/zzet/gortex/internal/dataflow	(cached)
+ok  	github.com/zzet/gortex/internal/docs	(cached)
+ok  	github.com/zzet/gortex/internal/doctor	3.923s
+ok  	github.com/zzet/gortex/internal/elide	(cached)
+ok  	github.com/zzet/gortex/internal/embedding	(cached)
+ok  	github.com/zzet/gortex/internal/entrypoints	(cached)
+ok  	github.com/zzet/gortex/internal/eval	3.607s
+ok  	github.com/zzet/gortex/internal/eval/packeval	(cached)
+ok  	github.com/zzet/gortex/internal/eval/parity	(cached)
+ok  	github.com/zzet/gortex/internal/eval/parity/golden	(cached)
+ok  	github.com/zzet/gortex/internal/eval/quality	(cached)
+ok  	github.com/zzet/gortex/internal/eval/recall	(cached)
+ok  	github.com/zzet/gortex/internal/eval/stdbench	(cached)
+ok  	github.com/zzet/gortex/internal/excludes	(cached)
+ok  	github.com/zzet/gortex/internal/exporter	(cached)
+ok  	github.com/zzet/gortex/internal/fixtures	(cached)
+ok  	github.com/zzet/gortex/internal/forge	3.737s
+ok  	github.com/zzet/gortex/internal/gitcmd	(cached)
+ok  	github.com/zzet/gortex/internal/githooks	(cached)
+ok  	github.com/zzet/gortex/internal/gitstate	(cached)
+ok  	github.com/zzet/gortex/internal/graph	29.712s
+?   	github.com/zzet/gortex/internal/graph/overlaytest	[no test files]
+ok  	github.com/zzet/gortex/internal/graph/store_sqlite	(cached)
+ok  	github.com/zzet/gortex/internal/graph/storetest	(cached)
+ok  	github.com/zzet/gortex/internal/graphpath	(cached)
+ok  	github.com/zzet/gortex/internal/graphview	(cached)
+ok  	github.com/zzet/gortex/internal/hooks	10.813s
+ok  	github.com/zzet/gortex/internal/indexer	1193.552s
+ok  	github.com/zzet/gortex/internal/indexer/merkle	(cached)
+ok  	github.com/zzet/gortex/internal/indexer/source	(cached)
+ok  	github.com/zzet/gortex/internal/intern	(cached)
+ok  	github.com/zzet/gortex/internal/licenses	(cached)
+ok  	github.com/zzet/gortex/internal/lint	(cached)
+ok  	github.com/zzet/gortex/internal/llm	(cached)
+ok  	github.com/zzet/gortex/internal/llm/agent	(cached)
+ok  	github.com/zzet/gortex/internal/llm/conversationlog	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/agentcli	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/anthropic	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/azure	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/bedrock	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/claudecli	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/codex	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/copilot	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/cursor	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/deepseek	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/gemini	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/httpx	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/local	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/ollama	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/openai	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/openaicompat	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/opencode	(cached)
+ok  	github.com/zzet/gortex/internal/llm/registry	(cached)
+ok  	github.com/zzet/gortex/internal/llm/svc	(cached)
+ok  	github.com/zzet/gortex/internal/localizationauth	(cached)
+ok  	github.com/zzet/gortex/internal/lspuri	(cached)
+ok  	github.com/zzet/gortex/internal/mcp	544.568s
+ok  	github.com/zzet/gortex/internal/mcp/streamable	3.485s
+ok  	github.com/zzet/gortex/internal/modelhint	(cached)
+ok  	github.com/zzet/gortex/internal/modules	(cached)
+ok  	github.com/zzet/gortex/internal/neo4jprojection	(cached)
+ok  	github.com/zzet/gortex/internal/parser	(cached)
+ok  	github.com/zzet/gortex/internal/parser/crashpool	(cached)
+ok  	github.com/zzet/gortex/internal/parser/forest	(cached)
+ok  	github.com/zzet/gortex/internal/parser/forest/cobolprobe	(cached)
+ok  	github.com/zzet/gortex/internal/parser/languages	(cached)
+ok  	github.com/zzet/gortex/internal/parser/tsalias	(cached)
+ok  	github.com/zzet/gortex/internal/parser/tsitter	(cached)
+?   	github.com/zzet/gortex/internal/parser/tsitter/bash	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/c	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/cpp	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/csharp	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/css	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/dart	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/dockerfile	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/elixir	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/golang	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/hcl	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/html	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/java	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/javascript	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/kotlin	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/lua	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/markdown	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/ocaml	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/orgmode	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/php	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/protobuf	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/python	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/ruby	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/rust	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/scala	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/sql	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/swift	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/toml	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/tsx	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/typescript	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/yaml	[no test files]
+ok  	github.com/zzet/gortex/internal/pathguard	(cached)
+ok  	github.com/zzet/gortex/internal/pathkey	(cached)
+ok  	github.com/zzet/gortex/internal/persistence	(cached)
+ok  	github.com/zzet/gortex/internal/platform	(cached)
+ok  	github.com/zzet/gortex/internal/procio	(cached)
+ok  	github.com/zzet/gortex/internal/profiles	(cached)
+ok  	github.com/zzet/gortex/internal/progress	(cached)
+?   	github.com/zzet/gortex/internal/progress/demo	[no test files]
+ok  	github.com/zzet/gortex/internal/query	15.466s
+ok  	github.com/zzet/gortex/internal/reach	(cached)
+ok  	github.com/zzet/gortex/internal/reconcile	(cached)
+ok  	github.com/zzet/gortex/internal/releases	(cached)
+ok  	github.com/zzet/gortex/internal/resolver	69.962s
+ok  	github.com/zzet/gortex/internal/respbudget	(cached)
+ok  	github.com/zzet/gortex/internal/review	4.701s
+?   	github.com/zzet/gortex/internal/routeguard	[no test files]
+ok  	github.com/zzet/gortex/internal/runtimeactivity	(cached)
+ok  	github.com/zzet/gortex/internal/savings	(cached)
+ok  	github.com/zzet/gortex/internal/search	(cached)
+ok  	github.com/zzet/gortex/internal/search/packstrategy	(cached)
+ok  	github.com/zzet/gortex/internal/search/rerank	(cached)
+ok  	github.com/zzet/gortex/internal/search/trigram	(cached)
+ok  	github.com/zzet/gortex/internal/semantic	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/goanalysis	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/lsp	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/scip	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/tstypes	(cached)
+ok  	github.com/zzet/gortex/internal/server	6.123s
+ok  	github.com/zzet/gortex/internal/server/hub	3.245s
+ok  	github.com/zzet/gortex/internal/serverstack	12.916s
+ok  	github.com/zzet/gortex/internal/skills	(cached)
+ok  	github.com/zzet/gortex/internal/sql	(cached)
+ok  	github.com/zzet/gortex/internal/telemetry	(cached)
+ok  	github.com/zzet/gortex/internal/testenv	(cached)
+ok  	github.com/zzet/gortex/internal/testpath	(cached)
+?   	github.com/zzet/gortex/internal/testutil/gitpromisor	[no test files]
+ok  	github.com/zzet/gortex/internal/testutil/graphdump	(cached)
+ok  	github.com/zzet/gortex/internal/testutil/graphfixture	(cached)
+ok  	github.com/zzet/gortex/internal/thirdparty/fswatcher	(cached)
+ok  	github.com/zzet/gortex/internal/todos	(cached)
+ok  	github.com/zzet/gortex/internal/tokens	(cached)
+ok  	github.com/zzet/gortex/internal/toolref	(cached)
+?   	github.com/zzet/gortex/internal/tui	[no test files]
+ok  	github.com/zzet/gortex/internal/version	(cached)
+ok  	github.com/zzet/gortex/internal/viewmetrics	(cached)
+ok  	github.com/zzet/gortex/internal/wiki	(cached)
+ok  	github.com/zzet/gortex/internal/workspace	(cached)
+ok  	github.com/zzet/gortex/pkg/gortex	9.349s
+exit=0
+ended=2026-10-27T00:36:16Z
