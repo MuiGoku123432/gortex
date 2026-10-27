@@ -72,7 +72,10 @@ func (idx *Indexer) admitWalkFileKnownType(root, absPath string, size int64, mod
 	if !mode.IsRegular() {
 		return idx.admitWalkEntry(root, absPath, size, false)
 	}
-	if idx.shouldExcludeRules(absPath, root, false) {
+	// Skipping the symlink guard does not skip the nested-root check: a
+	// re-include can keep the walk descending into another tracked
+	// repository's root, and PathIndexability never prunes at all.
+	if idx.inNestedTrackedRoot(absPath, root) || idx.shouldExcludeRules(absPath, root, false) {
 		return walkAdmission{excluded: true}
 	}
 	return idx.admitUnexcludedWalkFile(absPath, size)

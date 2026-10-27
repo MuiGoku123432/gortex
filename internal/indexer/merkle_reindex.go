@@ -89,7 +89,7 @@ func (idx *Indexer) merkleStaleFilesInScope(rootAbs string, diskFiles map[string
 	}
 	treePath := merkleTreeFile(rootAbs)
 	prior, _ := merkle.Load(treePath)
-	tree := merkle.Build(rootAbs, rels, prior, merkleSaltFor)
+	tree := merkle.Build(rootAbs, rels, prior, idx.merkleSaltFor)
 	changed, _ := tree.Diff(prior)
 	if contains != nil {
 		tree = merkle.MergeScope(prior, tree, contains)
@@ -115,7 +115,7 @@ func (idx *Indexer) saveMerkleBaselineWithKnownFiles(
 			rels = append(rels, filepath.ToSlash(rel))
 		}
 	}
-	tree := merkle.BuildWithKnownFiles(rootAbs, rels, nil, merkleSaltFor, knownFiles)
+	tree := merkle.BuildWithKnownFiles(rootAbs, rels, nil, idx.merkleSaltFor, knownFiles)
 	if err := tree.Save(merkleTreeFile(rootAbs)); err != nil {
 		idx.logger.Warn("indexer: merkle baseline save failed", zap.Error(err))
 	}

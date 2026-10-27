@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -398,7 +399,6 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	defer ss.Close()
 
 	g := ss.Graph
-	idx := ss.Indexer
 	cm := ss.ConfigMgr
 	mi := ss.MultiIndexer
 	srv := ss.MCP
@@ -483,50 +483,53 @@ func runMCP(cmd *cobra.Command, args []string) error {
 
 	// Background: index, watch, analyze — graph populates while MCP is live.
 	go func() {
+		// The embedded tree is a workspace of one (D-14): it is indexed
+		// and watched through the MultiIndexer's prefixed per-repo
+		// Indexer, so every node it writes is owned by the repository.
+		var prefix string
 		if mcpIndex != "" {
 			// The embedded server holds its graph for the life of the
 			// process only: it indexes the tree on every launch. A
 			// long-lived graph is what the daemon is for.
 			fmt.Fprintf(os.Stderr, "[gortex] indexing %s...\n", mcpIndex)
-			result, err := idx.Index(mcpIndex)
+			result, repoPrefix, err := indexEmbeddedRepo(context.Background(), mi, mcpIndex)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[gortex] indexing failed: %v\n", err)
 				return
 			}
-			fmt.Fprintf(os.Stderr, "[gortex] indexed %d files (%d nodes, %d edges) in %dms\n",
-				result.FileCount, result.NodeCount, result.EdgeCount, result.DurationMs)
+			prefix = repoPrefix
+			if result != nil {
+				fmt.Fprintf(os.Stderr, "[gortex] indexed %d files (%d nodes, %d edges) in %dms\n",
+					result.FileCount, result.NodeCount, result.EdgeCount, result.DurationMs)
+			}
 		}
 
-		// Search backend is auto-updated via SearchProvider (idx.Search)
-
-		// Pass contract registry to MCP server.
-		// In multi-repo mode, merge all per-repo registries.
+		// Pass the merged per-repo contract registry to the MCP server.
 		if mi != nil {
 			srv.SetContractRegistry(mi.MergedContractRegistry())
-		} else if cr := idx.ContractRegistry(); cr != nil {
-			srv.SetContractRegistry(cr)
 		}
 
 		// Start watcher if requested.
 		if mcpWatch {
+			if prefix == "" {
+				fmt.Fprintln(os.Stderr, "[gortex] watch mode needs an indexed repository; not starting the watcher")
+				return
+			}
 			wcfg := cfg.Watch
 			wcfg.Enabled = true
 			if mcpDebounce > 0 {
 				wcfg.DebounceMs = mcpDebounce
 			}
 
-			watcher, err := indexer.NewWatcher(idx, wcfg, logger)
+			watcher, err := indexer.NewWatcher(mi.GetIndexer(prefix), wcfg, logger)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[gortex] watcher setup failed: %v\n", err)
 				return
 			}
 
 			watchPaths := wcfg.Paths
-			if len(watchPaths) == 0 && mcpIndex != "" {
-				watchPaths = []string{mcpIndex}
-			}
 			if len(watchPaths) == 0 {
-				watchPaths = []string{"."}
+				watchPaths = []string{mcpIndex}
 			}
 
 			if err := watcher.Start(watchPaths); err != nil {
@@ -554,4 +557,24 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "\n[gortex] received %s, shutting down\n", sig)
 		return nil
 	}
+}
+
+// indexEmbeddedRepo indexes the embedded tree as a workspace of one (D-14):
+// through the MultiIndexer, so every node it writes carries the repository
+// prefix. It returns that prefix so the caller can watch through the same
+// prefixed per-repo Indexer. A bare Indexer would write unowned nodes, so a
+// nil MultiIndexer is an error rather than a fallback.
+func indexEmbeddedRepo(ctx context.Context, mi *indexer.MultiIndexer, path string) (*indexer.IndexResult, string, error) {
+	if mi == nil {
+		return nil, "", fmt.Errorf("embedded index of %s needs a MultiIndexer, which the server stack did not build (the global config failed to load); refusing to write nodes no repository owns", path)
+	}
+	result, err := mi.TrackRepoCtx(ctx, config.RepoEntry{Path: path})
+	if err != nil {
+		return nil, "", err
+	}
+	prefix := mi.RepoForFile(path)
+	if prefix == "" {
+		return nil, "", fmt.Errorf("embedded index of %s registered no repository prefix", path)
+	}
+	return result, prefix, nil
 }

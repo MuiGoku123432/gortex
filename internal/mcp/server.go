@@ -31,6 +31,7 @@ import (
 	"github.com/zzet/gortex/internal/llm/registry"
 	"github.com/zzet/gortex/internal/llm/svc"
 	"github.com/zzet/gortex/internal/modelhint"
+	"github.com/zzet/gortex/internal/neo4jprojection"
 	"github.com/zzet/gortex/internal/platform"
 	"github.com/zzet/gortex/internal/profiles"
 	"github.com/zzet/gortex/internal/query"
@@ -143,6 +144,7 @@ type Server struct {
 	watcher       watcherHistory
 	multiIndexer  *indexer.MultiIndexer
 	configManager *config.ConfigManager
+	neo4jPush     func(context.Context, neo4jprojection.Request) (neo4jprojection.Result, error)
 	// lifecycle is the shared owner of checkout track / forget side effects.
 	lifecycle     *indexer.CheckoutLifecycle
 	activeProject string
@@ -1904,6 +1906,7 @@ func NewServer(engine *query.Engine, g graph.Store, idx *indexer.Indexer, watche
 	s.registerGraphCompletionTool()
 	s.registerWikiTools()
 	s.registerExportTools()
+	s.registerNeo4jTools()
 	s.registerAuditTool()
 	s.registerWalkGraphTool()
 	s.registerContextClosureTool()

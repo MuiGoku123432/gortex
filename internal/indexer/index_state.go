@@ -38,7 +38,7 @@ func (idx *Indexer) persistRepoIndexState(diskTarget graph.Store, rootAbs, works
 		return
 	}
 	sha, dirty := repoHeadAndDirty(rootAbs)
-	vers, _ := json.Marshal(extractorVersionsSnapshot())
+	vers, _ := json.Marshal(idx.repoExtractorVersionsSnapshot())
 	st := graph.RepoIndexState{
 		RepoPrefix:        idx.repoPrefix,
 		IndexedSHA:        sha,
@@ -107,6 +107,11 @@ func (idx *Indexer) reconcileRepoIndexState(ctx context.Context, rootAbs string)
 	if r, ok := graph.Store(idx.graph).(graph.RepoIndexStateReader); ok {
 		if prev, found, _ := r.GetRepoIndexState(idx.repoPrefix); found {
 			prevFP = prev.WorkspaceFP
+			// D-17: HEAD moved since the row was written, so unchanged
+			// files may now be (or no longer be) the blob HEAD holds.
+			if repoHead(rootAbs) != prev.IndexedSHA {
+				idx.restampSourceRevisions(rootAbs)
+			}
 		}
 	}
 	nodes, edges := idx.repoNodeEdgeCount()

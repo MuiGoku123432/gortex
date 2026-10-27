@@ -110,6 +110,8 @@ func RunConformance(t *testing.T, factory Factory, semantics Semantics) {
 	t.Run("EvictFile_NoNodes", func(t *testing.T) { testEvictFileNoNodes(t, factory) })
 	t.Run("EvictRepo", func(t *testing.T) { testEvictRepo(t, factory) })
 	t.Run("EvictRepo_NoNodes", func(t *testing.T) { testEvictRepoNoNodes(t, factory) })
+	t.Run("FindingNodeEvict", func(t *testing.T) { testFindingNodeEvict(t, factory) })
+	t.Run("ResourceNodeEvict", func(t *testing.T) { testResourceNodeEvict(t, factory) })
 	t.Run("NodeAndEdgeCount", func(t *testing.T) { testNodeAndEdgeCount(t, factory) })
 	t.Run("AllNodesAndEdges", func(t *testing.T) { testAllNodesAndEdges(t, factory) })
 	t.Run("FindNodesByName", func(t *testing.T) { testFindNodesByName(t, factory) })
@@ -222,6 +224,12 @@ func testPrefixDiagnostics(t *testing.T, factory Factory) {
 	// never carry its prefix. Auditing it reported a misprefixed node on every
 	// healthy graph that had a repo-scoped memory.
 	s.AddNode(mkRepoNode("rationale::mem3539475d73f80040", "why the resolver stubs res://", ".gortex/rationale", "r1", graph.KindRationale))
+	// D-14: an empty-FilePath node is exempt only through an enumerated
+	// global namespace (unowned) or its own repo's "<prefix>::" namespace
+	// (owned). An unlisted namespace is audited, so mystery:: counts as
+	// unowned while the r1:: synthetic builtin changes nothing.
+	s.AddNode(mkNode("mystery::Ghost", "Ghost", "", graph.KindFunction))
+	s.AddNode(mkRepoNode("r1::builtin::go::len", "len", "", "r1", graph.KindBuiltin))
 
 	d, ok := graph.ReadPrefixDiagnostics(s, 5)
 	if !ok {
@@ -231,8 +239,8 @@ func testPrefixDiagnostics(t *testing.T, factory Factory) {
 	if d.OwnedCodeNodes != 1 {
 		t.Errorf("OwnedCodeNodes = %d, want 1 (%s)", d.OwnedCodeNodes, d.Summary())
 	}
-	if d.UnownedCodeNodes != 1 {
-		t.Errorf("UnownedCodeNodes = %d, want 1 — synthetic virtual paths must not count (%s)",
+	if d.UnownedCodeNodes != 2 {
+		t.Errorf("UnownedCodeNodes = %d, want 2 — synthetic virtual paths must not count, an unlisted empty-path namespace must (%s)",
 			d.UnownedCodeNodes, d.Summary())
 	}
 	if d.MisprefixedNodes != 1 {
@@ -244,8 +252,10 @@ func testPrefixDiagnostics(t *testing.T, factory Factory) {
 	if d.Clean() {
 		t.Errorf("Clean() = true for a mixed, misprefixed graph (%s)", d.Summary())
 	}
-	if len(d.UnownedSamples) != 1 || d.UnownedSamples[0] != "b.go::Unowned" {
-		t.Errorf("UnownedSamples = %v, want [b.go::Unowned]", d.UnownedSamples)
+	samples := append([]string(nil), d.UnownedSamples...)
+	sort.Strings(samples)
+	if len(samples) != 2 || samples[0] != "b.go::Unowned" || samples[1] != "mystery::Ghost" {
+		t.Errorf("UnownedSamples = %v, want [b.go::Unowned mystery::Ghost]", d.UnownedSamples)
 	}
 }
 
@@ -5137,4 +5147,85 @@ func testEmptyRepoPrefix(t *testing.T, factory Factory, semantics Semantics) {
 			t.Fatalf("EvictRepo(\"\") must never touch a prefixed repository")
 		}
 	})
+}
+
+// testFindingNodeEvict pins the finding eviction capability (D-05, D-06) on
+// every backend: the dispatcher must reach the backend's set-oriented evicter,
+// which removes only the finding among the IDs, once, with its one incident
+// edge, and leaves the resource named in the same list untouched.
+func testFindingNodeEvict(t *testing.T, factory Factory) {
+	t.Helper()
+	s := factory(t)
+	const (
+		file     = "r1/app.cbl"
+		finding  = "r1/app.cbl::@finding/parse/0123456789abcdef0123456789abcdef"
+		resource = "r1/app.cbl::QUEUE"
+		program  = "r1/app.cbl::APP"
+	)
+	s.AddNode(mkRepoNode(finding, "unparsed-tail", file, "r1", graph.KindFinding))
+	s.AddNode(mkRepoNode(resource, "QUEUE", file, "r1", graph.KindResource))
+	s.AddNode(mkRepoNode(program, "APP", file, "r1", graph.KindFunction))
+	s.AddEdge(mkEdge(finding, program, graph.EdgeMemberOf))
+	s.AddEdge(mkEdge(program, resource, graph.EdgeReferences))
+
+	if nodes, edges, supported := graph.EvictFindingNodesByIDs(s, nil); nodes != 0 || edges != 0 || !supported {
+		t.Fatalf("EvictFindingNodesByIDs(empty) = (%d, %d, %v), want (0, 0, true)", nodes, edges, supported)
+	}
+	nodes, edges, supported := graph.EvictFindingNodesByIDs(s, []string{finding, finding, resource})
+	if !supported {
+		t.Fatal("EvictFindingNodesByIDs reported the capability unsupported")
+	}
+	if nodes != 1 || edges != 1 {
+		t.Fatalf("EvictFindingNodesByIDs = (%d, %d), want (1, 1)", nodes, edges)
+	}
+	if s.GetNode(finding) != nil {
+		t.Fatalf("finding %q survived eviction", finding)
+	}
+	if s.GetNode(resource) == nil || s.GetNode(program) == nil {
+		t.Fatalf("kind guard failed: resource=%v program=%v", s.GetNode(resource), s.GetNode(program))
+	}
+	if got := s.EdgeCount(); got != 1 {
+		t.Fatalf("EdgeCount after eviction = %d, want 1 (the program's reference survives)", got)
+	}
+}
+
+// testResourceNodeEvict pins the resource eviction capability (D-27) on every
+// backend: the dispatcher must reach the backend's set-oriented evicter, which
+// removes only the placeholder-shaped resource among the IDs, once, with its
+// incident edges, and leaves the finding named in the same list untouched.
+func testResourceNodeEvict(t *testing.T, factory Factory) {
+	t.Helper()
+	s := factory(t)
+	const (
+		file     = "r1/app.cbl"
+		resource = "r1::cobol-missing::program/NOPGM"
+		finding  = "r1/app.cbl::@finding/external/0123456789abcdef0123456789abcdef"
+		program  = "r1/app.cbl::APP"
+	)
+	s.AddNode(mkRepoNode(resource, "NOPGM", "", "r1", graph.KindResource))
+	s.AddNode(mkRepoNode(finding, "external-unresolved", file, "r1", graph.KindFinding))
+	s.AddNode(mkRepoNode(program, "APP", file, "r1", graph.KindFunction))
+	s.AddEdge(mkEdge(program, resource, graph.EdgeCalls))
+	s.AddEdge(mkEdge(finding, resource, graph.EdgeReferences))
+	s.AddEdge(mkEdge(finding, program, graph.EdgeMemberOf))
+
+	if nodes, edges, supported := graph.EvictResourceNodesByIDs(s, nil); nodes != 0 || edges != 0 || !supported {
+		t.Fatalf("EvictResourceNodesByIDs(empty) = (%d, %d, %v), want (0, 0, true)", nodes, edges, supported)
+	}
+	nodes, edges, supported := graph.EvictResourceNodesByIDs(s, []string{resource, resource, finding})
+	if !supported {
+		t.Fatal("EvictResourceNodesByIDs reported the capability unsupported")
+	}
+	if nodes != 1 || edges != 2 {
+		t.Fatalf("EvictResourceNodesByIDs = (%d, %d), want (1, 2)", nodes, edges)
+	}
+	if s.GetNode(resource) != nil {
+		t.Fatalf("resource %q survived eviction", resource)
+	}
+	if s.GetNode(finding) == nil || s.GetNode(program) == nil {
+		t.Fatalf("kind guard failed: finding=%v program=%v", s.GetNode(finding), s.GetNode(program))
+	}
+	if got := s.EdgeCount(); got != 1 {
+		t.Fatalf("EdgeCount after eviction = %d, want 1 (the finding's member_of survives)", got)
+	}
 }

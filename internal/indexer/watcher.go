@@ -2941,9 +2941,16 @@ func pickKind(types []fswatcher.EventType) ChangeKind {
 // the fix would hold on startup and silently regress on the next edit.
 // Every admission site (startup replay, native events, direct daemon
 // mutations) funnels through here, so one check covers them all.
+//
+// It likewise refuses paths under another tracked repository's root nested
+// inside this one: without it, an edit to the nested repository's file would
+// be re-indexed under the outer repository as well.
 func (w *Watcher) isExcluded(path string) bool {
 	root := w.indexer.rootPath
 	if pathguard.SymlinkEscapes(path, root) {
+		return true
+	}
+	if w.indexer.inNestedTrackedRoot(path, root) {
 		return true
 	}
 	if root == "" {

@@ -25,7 +25,10 @@ func TestIndexHealth_PathLivenessCleanWorkspace(t *testing.T) {
 	assert.Equal(t, true, liveness["clean"])
 	assert.Equal(t, 0, liveness["orphan_files"])
 	assert.Positive(t, liveness["checked"])
-	assert.NotContains(t, payload, "recommendation")
+	// The fixture is single-repo (unowned), which D-14 reports through the
+	// ownership recommendation; path liveness itself must add nothing.
+	rec, _ := payload["recommendation"].(string)
+	assert.NotContains(t, rec, "no longer exist on disk")
 }
 
 // The issue: a deleted subtree's nodes survive in the graph, keep answering

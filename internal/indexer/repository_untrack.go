@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/zzet/gortex/internal/graph"
 	"github.com/zzet/gortex/internal/reach"
 	"github.com/zzet/gortex/internal/search"
 )
@@ -30,7 +31,36 @@ func (mi *MultiIndexer) purgeRepoChecked(
 	return mi.untrackRepoChecked(ctx, repoPrefix, true, finalize)
 }
 
+// untrackRepoChecked tears the repository down, then admits its former root
+// into every enclosing repository. UntrackRepo, UntrackRepoChecked and
+// purgeRepoChecked all pass through here (WR-01, ID-09). The teardown holds
+// the batch gate and the topology writer through its defers, so the admission
+// runs only after it returns.
 func (mi *MultiIndexer) untrackRepoChecked(
+	ctx context.Context,
+	repoPrefix string,
+	force bool,
+	finalize func(*RepoMetadata) error,
+) (nodesRemoved, edgesRemoved int, err error) {
+	// A retry finds the registry entry already hidden; the continuation keeps
+	// the metadata until the teardown completes.
+	root := ""
+	mi.mu.RLock()
+	if meta := mi.repos[repoPrefix]; meta != nil {
+		root = meta.RootPath
+	} else if state := mi.pendingRepositoryUntracks[repoPrefix]; state != nil && state.metadata != nil {
+		root = state.metadata.RootPath
+	}
+	mi.mu.RUnlock()
+
+	nodesRemoved, edgesRemoved, err = mi.untrackRepoTeardown(ctx, repoPrefix, force, finalize)
+	if err == nil {
+		mi.reconcileEnclosingRepos(ctx, root, false)
+	}
+	return nodesRemoved, edgesRemoved, err
+}
+
+func (mi *MultiIndexer) untrackRepoTeardown(
 	ctx context.Context,
 	repoPrefix string,
 	force bool,
@@ -205,6 +235,20 @@ func (mi *MultiIndexer) untrackRepoChecked(
 func (mi *MultiIndexer) purgeRepositoryPayload(
 	repoPrefix string, meta *RepoMetadata,
 ) (nodesRemoved, edgesRemoved int, err error) {
+	// The purge deletes every edge whose target is in repoPrefix, including
+	// other repositories' COBOL CALL/COPY edges bound into it (D-09). Return
+	// those to their placeholders first, as file eviction does, and
+	// re-decide the affected repositories once the payload is gone, so the
+	// result equals a clean build without repoPrefix. The only caller
+	// (untrackRepoTeardown's refresh closure) holds the reach topology writer,
+	// so the reconcile and its ledger use the held variant (D-23).
+	if reconcile := mi.restubCobolEdgesInto(repoPrefix); reconcile != nil {
+		defer func() {
+			if err == nil {
+				mi.reconcileCobolReposTopologyHeld(reconcile)
+			}
+		}()
+	}
 	if purger, ok := mi.graph.(interface{ PurgeRepo(string) error }); ok {
 		if err := purger.PurgeRepo(repoPrefix); err != nil {
 			return 0, 0, fmt.Errorf("purge repository payload: %w", err)
@@ -215,4 +259,48 @@ func (mi *MultiIndexer) purgeRepositoryPayload(
 		return 0, 0, nil
 	}
 	return evictRepoAllGenerations(mi.graph, repoPrefix)
+}
+
+// restubCobolEdgesInto moves every COBOL CALL/COPY edge from another
+// repository that is bound to a program or copybook of repoPrefix back to its
+// cobol_placeholder, and returns the repositories to reconcile after the
+// purge: repoPrefix (which expands to every repository whose resolve_from
+// names it, while its mutation lane still counts it as tracked) plus each
+// restubbed edge's caller repository. It returns nil when repoPrefix holds
+// no COBOL program or copybook, so no other repository can bind into it.
+func (mi *MultiIndexer) restubCobolEdgesInto(repoPrefix string) map[string]struct{} {
+	var ids []string
+	for _, n := range mi.graph.GetRepoNodesByLanguage(repoPrefix, "cobol") {
+		if n == nil {
+			continue
+		}
+		if kind, _ := n.Meta["cobol_kind"].(string); kind == "program" || kind == "copybook" {
+			ids = append(ids, n.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	repos := map[string]struct{}{repoPrefix: {}}
+	var batch []graph.EdgeReindex
+	for _, edges := range mi.graph.GetInEdgesByNodeIDs(ids) {
+		for _, e := range edges {
+			if e == nil {
+				continue
+			}
+			placeholder, _ := e.Meta["cobol_placeholder"].(string)
+			from := graph.RepoPrefixOfID(e.From)
+			if placeholder == "" || from == repoPrefix || e.To == placeholder {
+				continue
+			}
+			oldTo := e.To
+			e.To, e.CrossRepo = placeholder, false
+			batch = append(batch, graph.EdgeReindex{Edge: e, OldTo: oldTo})
+			repos[from] = struct{}{}
+		}
+	}
+	if len(batch) > 0 {
+		mi.graph.ReindexEdges(batch)
+	}
+	return repos
 }

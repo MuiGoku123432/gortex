@@ -97,6 +97,9 @@ var extractorSaltExtLang = map[string]string{
 	".sh":     "bash",
 	".bash":   "bash",
 	".jl":     "julia",
+	".cob":    "cobol",
+	".cbl":    "cobol",
+	".cpy":    "cobol",
 }
 
 // ExtractorLangForFile returns the extractor-staleness language key for a
@@ -144,15 +147,22 @@ func merkleSaltFor(rel string) string {
 // binary" into "reindex only Go + Python" — a scoped reindex instead of a full
 // cold rebuild. An empty/absent stored map (no baseline) reports nothing.
 func ExtractorVersionStaleLangs(storedJSON string) []string {
+	return staleLangsBetween(decodeExtractorVersions(storedJSON), extractorVersionsSnapshot())
+}
+
+// decodeExtractorVersions decodes a persisted extractor-version map. An
+// empty or undecodable value yields nil, which staleLangsBetween reads as
+// "no baseline".
+func decodeExtractorVersions(storedJSON string) map[string]int {
 	storedJSON = strings.TrimSpace(storedJSON)
 	if storedJSON == "" {
 		return nil
 	}
 	var stored map[string]int
-	if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil || len(stored) == 0 {
+	if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
 		return nil
 	}
-	return staleLangsBetween(stored, extractorVersionsSnapshot())
+	return stored
 }
 
 // staleLangsBetween returns the languages whose stored version is behind the
@@ -162,7 +172,9 @@ func ExtractorVersionStaleLangs(storedJSON string) []string {
 // running binary has raised it above that baseline.
 //
 // The reserved post-extraction policy epoch is global: when current tracks it
-// and stored is missing or behind, every real current language is stale. A
+// and stored is missing or behind, every real current language is stale. The
+// reserved COBOL material fingerprint is an identity, not a version: when
+// current carries it and stored is missing or different, cobol is stale. A
 // language present in stored but absent from current is dropped because its
 // extension is no longer version-tracked.
 func staleLangsBetween(stored, current map[string]int) []string {
@@ -177,15 +189,20 @@ func staleLangsBetween(stored, current map[string]int) []string {
 		storedPolicy, found := stored[postExtractionPolicySnapshotKey]
 		if !found || storedPolicy < currentPolicy {
 			for lang := range current {
-				if lang != postExtractionPolicySnapshotKey {
+				if lang != postExtractionPolicySnapshotKey && lang != cobolMaterialKey {
 					staleSet[lang] = struct{}{}
 				}
 			}
 		}
 	}
+	if currentFP, tracked := current[cobolMaterialKey]; tracked {
+		if storedFP, found := stored[cobolMaterialKey]; !found || storedFP != currentFP {
+			staleSet["cobol"] = struct{}{}
+		}
+	}
 
 	for lang, cur := range current {
-		if lang == postExtractionPolicySnapshotKey {
+		if lang == postExtractionPolicySnapshotKey || lang == cobolMaterialKey {
 			continue
 		}
 		storedV, recorded := stored[lang]
@@ -212,10 +229,11 @@ func staleLangsBetween(stored, current map[string]int) []string {
 
 // extractorVersionStaleLangSet reads the repo's persisted extractor
 // versions and returns the languages the running binary has bumped
-// since. nil when the backend has no durable index state (the
-// in-memory graph), no row was recorded, or nothing is stale — the
-// non-Merkle upgrade path is then inert, exactly the pre-feature
-// behaviour.
+// since, plus cobol when this repository's COBOL material fingerprint
+// moved (repoExtractorVersionsSnapshot). nil when the backend has no
+// durable index state (the in-memory graph), no row was recorded, or
+// nothing is stale — the non-Merkle upgrade path is then inert, exactly
+// the pre-feature behaviour.
 func (idx *Indexer) extractorVersionStaleLangSet() map[string]struct{} {
 	r, ok := graph.Store(idx.graph).(graph.RepoIndexStateReader)
 	if !ok {
@@ -232,7 +250,7 @@ func (idx *Indexer) extractorVersionStaleLangSet() map[string]struct{} {
 	if !found {
 		return nil
 	}
-	langs := ExtractorVersionStaleLangs(st.ExtractorVersions)
+	langs := staleLangsBetween(decodeExtractorVersions(st.ExtractorVersions), idx.repoExtractorVersionsSnapshot())
 	if len(langs) == 0 {
 		return nil
 	}

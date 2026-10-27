@@ -294,6 +294,10 @@ type Indexer struct {
 	// test rather than the process-wide default. Nil in production.
 	trigramBudgetOverride *trigramBudget
 
+	// cobolMu guards config.Cobol, which SetCobolConfig swaps on a live
+	// Indexer when its repository's `.gortex.yaml` is re-read.
+	cobolMu sync.RWMutex
+
 	// repoPrefix is set in multi-repo mode to prefix all file paths and node IDs.
 	// When empty, the indexer operates in single-repo mode (backward compatible).
 	repoPrefix string
@@ -588,6 +592,15 @@ func New(g graph.Store, reg *parser.Registry, cfg config.IndexConfig, logger *za
 	// Break same-named import collisions in favour of the importer's
 	// own package-manager workspace member. Same lazy-build rationale.
 	idx.resolver.SetWorkspaceMembership(idx.indexerWorkspaceMembership)
+	// A standalone Indexer honours its own repository's index.cobol policy
+	// (libraries and default qualifiers) and no other repository's. A
+	// MultiIndexer replaces this with its tracked-repository lookup.
+	idx.resolver.SetCobolPolicyLookup(func(repoPrefix string) resolver.CobolPolicy {
+		if repoPrefix != idx.repoPrefix {
+			return resolver.CobolPolicy{}
+		}
+		return cobolPolicyFromConfig(idx.cobolConfig())
+	})
 	return idx
 }
 
@@ -1718,6 +1731,7 @@ func (idx *Indexer) applyCoverageDomains(relPath, lang string, src []byte, resul
 	// ASP.NET host files): symbols reachable only from a runtime.
 	// Stamped so dead-code analysis treats them as live roots.
 	entrypoints.Detect(relPath, lang, result.Nodes, result.Edges)
+	idx.stampSourceRevision(relPath, src, result)
 	if !idx.config.Coverage.IsEnabled("function_shape") {
 		stripFunctionShape(result)
 	}
@@ -1865,20 +1879,22 @@ func applyMigrationExtraction(relPath string, src []byte, result *parser.Extract
 // db.Get / db.Query / db.Exec produces false positives when
 // domain code shares method names (cache.Get, etc.).
 //
-// Two table-node origins survive the gate, because neither is the
+// Three table-node origins survive the gate, because none is the
 // noisy code-side matching the gate exists for: migration-origin DDL
-// (unambiguous CREATE TABLE — see applyMigrationExtraction), and
+// (unambiguous CREATE TABLE — see applyMigrationExtraction),
 // ORM-origin model attribution (declaration-anchored: @Entity/@Table
 // annotations, [Table] attributes, ActiveRecord bases, DbSet
-// properties). Stripping the ORM nodes would leave the models_table
-// layer silently empty for every ORM ecosystem under the default
-// config.
+// properties), and COBOL embedded-SQL tables (parsed EXEC SQL
+// statements, not string literals). Stripping the ORM nodes would leave
+// the models_table layer silently empty for every ORM ecosystem under
+// the default config; stripping the COBOL ones would drop every DB2
+// read and write a program makes.
 func stripSQLArtifacts(result *parser.ExtractionResult) {
 	stripped := make(map[string]struct{})
 	keptNodes := result.Nodes[:0]
 	for _, n := range result.Nodes {
 		if (n.Kind == graph.KindTable || n.Kind == graph.KindMigration) &&
-			!isMigrationOriginNode(n) && !isORMOriginTableNode(n) {
+			!isMigrationOriginNode(n) && !isORMOriginTableNode(n) && !isCobolSQLTableNode(n) {
 			stripped[n.ID] = struct{}{}
 			continue
 		}
@@ -1969,6 +1985,13 @@ func isORMOriginTableNode(n *graph.Node) bool {
 	}
 	d, _ := n.Meta["dialect"].(string)
 	return d == "orm"
+}
+
+// isCobolSQLTableNode reports whether a KindTable node was minted by the
+// COBOL grammar extractor from a parsed EXEC SQL statement. Those nodes
+// are the only KindTable nodes with Language "cobol".
+func isCobolSQLTableNode(n *graph.Node) bool {
+	return n != nil && n.Kind == graph.KindTable && n.Language == "cobol"
 }
 
 // isInfraOriginConfigKey reports whether a KindConfigKey node was
@@ -5205,6 +5228,12 @@ func (idx *Indexer) reresolveFileScopedRaw(filePath string) error {
 // agnostic: GetInEdges + ReindexEdges are the same Store primitives the
 // resolver uses, so this behaves identically on the in-memory and disk
 // stores.
+//
+// A COBOL in-edge (one carrying cobol_placeholder) goes back to its own
+// placeholder instead, whatever its kind and whether the target is a
+// program or a copybook file, with no provenance stash and no Origin
+// change (CR-01, D-18): the COBOL reconcile pass, not the generic name
+// resolver, owns its binding.
 func (idx *Indexer) restubIncomingRefs(graphPath string) {
 	nodes := idx.graph.GetFileNodes(graphPath)
 	if len(nodes) == 0 {
@@ -5217,7 +5246,8 @@ func (idx *Indexer) restubIncomingRefs(graphPath string) {
 			continue
 		}
 		evicted[n.ID] = struct{}{}
-		if n.Name != "" && graph.IsReferenceableSymbol(n.Kind) {
+		if (n.Name != "" && graph.IsReferenceableSymbol(n.Kind)) ||
+			(n.Kind == graph.KindFile && n.Language == "cobol") {
 			refIDs = append(refIDs, n.ID)
 		}
 	}
@@ -5230,16 +5260,30 @@ func (idx *Indexer) restubIncomingRefs(graphPath string) {
 	inEdges := idx.graph.GetInEdgesByNodeIDs(refIDs)
 	var batch []graph.EdgeReindex
 	for _, n := range nodes {
-		if n == nil || n.Name == "" || !graph.IsReferenceableSymbol(n.Kind) {
+		if n == nil {
 			continue
 		}
+		referenceable := n.Name != "" && graph.IsReferenceableSymbol(n.Kind)
 		stub := graph.UnresolvedMarker + n.Name
 		for _, e := range inEdges[n.ID] {
-			if e == nil || !graph.IsResolvableRefEdge(e.Kind) {
+			if e == nil {
 				continue
 			}
 			if _, fromEvicted := evicted[e.From]; fromEvicted {
 				continue // intra-file edge: the source is evicted too
+			}
+			// note: the same COBOL-first restub is inline in
+			// restubIncomingRefsFromView (incremental_batch.go).
+			if placeholder, _ := e.Meta["cobol_placeholder"].(string); placeholder != "" {
+				if e.To != placeholder {
+					oldTo := e.To
+					e.To = placeholder
+					batch = append(batch, graph.EdgeReindex{Edge: e, OldTo: oldTo})
+				}
+				continue
+			}
+			if !referenceable || !graph.IsResolvableRefEdge(e.Kind) {
+				continue
 			}
 			if graph.IsUnresolvedTarget(e.To) {
 				continue // already a pending stub
@@ -5620,7 +5664,40 @@ func (idx *Indexer) shouldExclude(path, root string, isDir bool) bool {
 	if !isDir && pathguard.SymlinkEscapes(path, root) {
 		return true
 	}
+	// Another tracked repository's root nested inside this one owns its
+	// files. The check sits ahead of the rule-based re-includes so no
+	// `!pattern` or agent-config re-include can re-admit them.
+	if idx.inNestedTrackedRoot(path, root) {
+		return true
+	}
 	return idx.shouldExcludeRules(path, root, isDir)
+}
+
+// inNestedTrackedRoot reports whether path lies inside a tracked repository
+// root nested strictly under root.
+//
+// PURPOSE — one path has one owner, the longest tracked root containing it
+// (MultiIndexer.RepoForFile), so the outer repository must not index it as
+// its own. Without this, alpha mints alpha/nested/... duplicates of a nested
+// repository's files (CR-01; SEC-08 double ownership).
+//
+// RATIONALE — a root equal to or containing root never excludes anything, so
+// the nested repository's own walk is unaffected. Roots are read live from the
+// owning MultiIndexer: the registered repositories plus the roots an in-flight
+// batch declared before its siblings publish. Nothing is copied per Indexer,
+// so a later track, an untrack, or a config reload takes effect immediately,
+// and an entry no batch indexes never prunes (CR-01, WR-01). An Indexer with
+// no owner prunes nothing.
+//
+// KEYWORDS — nested repository, tracked root, walk pruning, ownership.
+func (idx *Indexer) inNestedTrackedRoot(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	if owner := idx.repositoryMutationOwner; owner != nil {
+		return owner.nestedTrackedRootContains(root, path)
+	}
+	return false
 }
 
 // shouldExcludeRules applies the lexical and per-directory ignore rules.
@@ -5824,6 +5901,23 @@ func (idx *Indexer) SetExcludePatterns(patterns []string) {
 	defer idx.excludeMu.Unlock()
 	idx.config.Exclude = patterns
 	idx.excludes.Store(excludes.New(effectiveExcludePatterns(patterns)))
+}
+
+// SetCobolConfig installs a re-read index.cobol policy on a live Indexer.
+// RefreshRepoConfigs calls it beside SetExcludePatterns: the per-repository
+// Indexer outlives `.gortex.yaml` edits, so without it the Indexer kept the
+// block it was constructed with (Pitfall 6).
+func (idx *Indexer) SetCobolConfig(cfg config.CobolConfig) {
+	idx.cobolMu.Lock()
+	defer idx.cobolMu.Unlock()
+	idx.config.Cobol = cfg
+}
+
+// cobolConfig returns a copy of this repository's index.cobol policy.
+func (idx *Indexer) cobolConfig() config.CobolConfig {
+	idx.cobolMu.RLock()
+	defer idx.cobolMu.RUnlock()
+	return idx.config.Cobol
 }
 
 // effectiveExcludePatterns falls back to the builtin baseline when the

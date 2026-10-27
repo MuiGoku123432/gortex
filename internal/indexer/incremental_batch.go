@@ -963,15 +963,30 @@ func restubIncomingRefsFromView(
 	var reindexes []graph.EdgeReindex
 	for _, stage := range stages {
 		for _, node := range stage.priorNodes {
-			if node == nil || node.Name == "" || !graph.IsReferenceableSymbol(node.Kind) {
+			if node == nil {
 				continue
 			}
+			referenceable := node.Name != "" && graph.IsReferenceableSymbol(node.Kind)
 			stub := graph.UnresolvedMarker + node.Name
 			for _, edge := range view.inByNode[node.ID] {
-				if edge == nil || !graph.IsResolvableRefEdge(edge.Kind) || graph.IsUnresolvedTarget(edge.To) {
+				if edge == nil {
 					continue
 				}
 				if _, sourceEvicted := evicted[edge.From]; sourceEvicted {
+					continue
+				}
+				// note: the same COBOL-first restub (CR-01) is inline in
+				// Indexer.restubIncomingRefs (indexer.go): a COBOL in-edge goes
+				// back to its own placeholder, never to a bare name.
+				if placeholder, _ := edge.Meta["cobol_placeholder"].(string); placeholder != "" {
+					if edge.To != placeholder {
+						oldTo := edge.To
+						edge.To = placeholder
+						reindexes = append(reindexes, graph.EdgeReindex{Edge: edge, OldTo: oldTo})
+					}
+					continue
+				}
+				if !referenceable || !graph.IsResolvableRefEdge(edge.Kind) || graph.IsUnresolvedTarget(edge.To) {
 					continue
 				}
 				oldTo := edge.To
@@ -1491,11 +1506,11 @@ func (idx *Indexer) planAffectedByStages(stages []*incrementalBatchStage) affect
 			files = append(files, filePath)
 		}
 		sort.Strings(files)
+		// note: the same escalation is logged in reresolveAffectedBy (two sites).
 		if maxFiles := idx.affectedByMaxFiles(); len(files) > maxFiles {
-			idx.logger.Debug("affected-by: re-resolve set truncated",
+			idx.logger.Info("affected-by: cap exceeded, resolving full affected set",
 				zap.String("file", changedPath), zap.Int("affected", len(files)),
-				zap.Int("cap", maxFiles), zap.Int("dropped", len(files)-maxFiles))
-			files = files[:maxFiles]
+				zap.Int("cap", maxFiles))
 		}
 		if len(files) == 0 {
 			continue

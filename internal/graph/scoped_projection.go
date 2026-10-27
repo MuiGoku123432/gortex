@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"context"
 	"iter"
 	"sort"
 )
@@ -12,6 +13,29 @@ type ScopedEdgeRow struct {
 	Edge   *Edge
 	Source *Node
 	Target *Node
+}
+
+// ProjectionScope is the projection's name for Scope (D-16).
+type ProjectionScope = Scope
+
+// ProjectionSnapshotDescriptor records the source generation and exact scope.
+type ProjectionSnapshotDescriptor struct {
+	SourceGeneration int64
+	Scope            ProjectionScope
+}
+
+// ScopedProjectionSnapshot is one immutable source view shared by node and
+// edge reads. Implementations must surface errors and honor cancellation.
+type ScopedProjectionSnapshot interface {
+	Descriptor() ProjectionSnapshotDescriptor
+	ReadNodePages(context.Context, func([]*Node) error) error
+	ReadEdgePages(context.Context, func([]ScopedEdgeRow) error) error
+	Close() error
+}
+
+// ScopedProjectionSnapshotOpener creates immutable exact-scope snapshots.
+type ScopedProjectionSnapshotOpener interface {
+	OpenScopedProjectionSnapshot(context.Context, ProjectionScope) (ScopedProjectionSnapshot, error)
 }
 
 // ScopedProjectionSequencer streams full rows owned by a repository or file

@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+// unprefixedFileBackedNodePredicate is the audit's unowned population
+// narrowed to rows that name a source file.
+var unprefixedFileBackedNodePredicate = `repo_prefix = '' AND file_path <> '' AND (` + auditableRepoSourceNodePredicate + `)`
+
 // purgeUnprefixedRepoRows is the v6→v7 in-place step that retires
 // single-repo (unprefixed) mode's on-disk residue.
 //
@@ -28,37 +32,48 @@ import (
 // either way, since its ids all change; this targets the cost at the stores
 // that actually need to pay it.
 //
-// WHAT IS DELETED, AND WHAT IS DELIBERATELY KEPT. The predicate selects rows
-// with an empty repo_prefix AND a non-empty file_path. The file_path guard is
-// the whole safety argument: synthetic GLOBAL EXTERNALS (dep::…, external::…,
-// non-Go module::…, legacy bare builtin::…) also carry an empty repo_prefix
-// and must survive — they model third-party symbols owned by no repository
-// and are visible from every repo by construction. They have no source file,
-// so requiring one selects exactly the file-backed code nodes that used to be
-// a solo repo, and never the shared stub namespace.
+// WHAT IS DELETED, AND WHAT IS DELIBERATELY KEPT. The predicate selects
+// exactly the file-backed rows the ownership audit counts as unowned: an
+// empty repo_prefix, a non-empty file_path, and auditable under
+// auditableRepoSourceNodePredicate. The file_path guard keeps synthetic
+// GLOBAL EXTERNALS with no path (dep::…, non-Go module::…, legacy bare
+// builtin::…); the auditable predicate keeps the populations that carry an
+// empty repo_prefix legitimately even WITH a path — semantic externals and
+// their module::go:… attribution under external::/external-call:: paths,
+// and the exempt kinds (a workspace-scoped memory projects a rationale node
+// with no repo). All of them model things owned by no repository, and
+// deleting them would drop live attribution on every store this runs on.
+//
+// v22 re-runs this step for the D-14 rollout, so it must be safe on a
+// current store, not only on a pre-v7 one.
 func purgeUnprefixedRepoRows(tx *sql.Tx) error {
+	unowned := `SELECT id FROM nodes WHERE ` + unprefixedFileBackedNodePredicate
 	// Edges first, while the nodes they reference still exist. An edge is
 	// dropped when EITHER endpoint is an unprefixed code node: a half-
 	// dangling edge is worse than none, because the resolver would keep
 	// re-materialising its missing target as an unresolved stub.
-	if _, err := tx.Exec(`
-DELETE FROM edges
-WHERE from_id IN (SELECT id FROM nodes WHERE repo_prefix = '' AND file_path <> '')
-   OR to_id   IN (SELECT id FROM nodes WHERE repo_prefix = '' AND file_path <> '')`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM edges WHERE from_id IN (` + unowned + `) OR to_id IN (` + unowned + `)`); err != nil {
 		return fmt.Errorf("delete unprefixed edges: %w", err)
 	}
 
 	// Embeddings are keyed by node_id alone — the vectors table has no
 	// repo_prefix column — so they can only be reached through node
 	// membership, and only while the nodes are still present.
-	if _, err := tx.Exec(`
-DELETE FROM vectors
-WHERE node_id IN (SELECT id FROM nodes WHERE repo_prefix = '' AND file_path <> '')`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM vectors WHERE node_id IN (` + unowned + `)`); err != nil {
 		return fmt.Errorf("delete unprefixed vectors: %w", err)
 	}
 
-	if _, err := tx.Exec(`DELETE FROM nodes WHERE repo_prefix = '' AND file_path <> ''`); err != nil {
+	res, err := tx.Exec(`DELETE FROM nodes WHERE ` + unprefixedFileBackedNodePredicate)
+	if err != nil {
 		return fmt.Errorf("delete unprefixed nodes: %w", err)
+	}
+	// A store with no unowned file-backed node holds no unprefixed repository
+	// residue, so its empty-prefix sidecar rows belong to the populations kept
+	// above. v22 runs on every current store; leave them alone.
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("count unprefixed nodes: %w", err)
+	} else if n == 0 {
+		return nil
 	}
 
 	// Sidecar residue written under the empty prefix. Both table sets are

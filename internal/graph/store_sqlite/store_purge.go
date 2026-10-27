@@ -42,6 +42,7 @@ import (
 // repo_prefix is essential because synthetic chunk IDs are not graph node IDs.
 var purgeSidecarTables = []string{
 	"file_index_failures",
+	"finding_history",
 	"file_mtimes",
 	"repo_index_state",
 	"symbol_fts_state",
@@ -151,6 +152,7 @@ func (s *Store) PurgeRepo(prefix string) error {
 // nodes-only scan, which is why the sidecar tables are unioned in.
 var orphanScanTables = []string{
 	"file_index_failures",
+	"finding_history",
 	"nodes",
 	"file_mtimes",
 	"repo_index_state",
@@ -242,6 +244,8 @@ var rekeyMoveTables = []string{
 // semantic_binding_types is the exception: it is keyed by repo_prefix and
 // file_path, but a re-mint rewrites every file path too, so relabeling would
 // preserve unusable stale keys.
+// finding_history rows name finding IDs that embed the old prefix, so they
+// are dropped too; the history is best-effort and restarts empty (D-07).
 // Dropping these tables is correct: re-index rewrites index-time sidecars
 // and semantic bindings under the new IDs and paths, while enrichment
 // sidecars must re-run for the new IDs regardless. The FTS vtables sit here
@@ -249,6 +253,7 @@ var rekeyMoveTables = []string{
 // column is awkward, so delete-then-reindex is the clean path.
 var rekeyDropTables = []string{
 	"file_index_failures",
+	"finding_history",
 	"semantic_binding_types",
 	"clone_shingles",
 	"clone_corpus_state",

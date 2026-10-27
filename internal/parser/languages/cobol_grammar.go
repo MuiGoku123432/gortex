@@ -1,0 +1,327 @@
+//go:build darwin || linux
+
+package languages
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"path/filepath"
+	"runtime/debug"
+	"strings"
+	"sync"
+
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/handoff"
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/sourcemap"
+	"github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor/transform"
+
+	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/parser"
+)
+
+const (
+	// cobolApprovedGrammarID is the Gortex-side approved-grammar pin. The
+	// preprocessor's embedded attestation proves the linked grammar is the
+	// one that module was generated against; this constant checks the
+	// compiled grammar the handoff reports (BASE-02). It does not move when
+	// only the preprocessor module changes; cobolApprovedPreprocessorModule
+	// covers that.
+	cobolApprovedGrammarID = "f97452e11a2b80b92acb7edf776131470bc2e1ffd7c077f4ade4ce3c3a47503d"
+	// cobolApprovedPreprocessorModule pins the producer module itself
+	// (BASE-01). A go.mod bump of the preprocessor alone can change the
+	// transform catalog, grade policy, handoff shape, or observation
+	// semantics this mapping depends on while the grammar ID stays the
+	// same, so init refuses any other module version and nothing is parsed
+	// under an unapproved producer.
+	cobolApprovedPreprocessorModule = cobolPreprocessorModulePath + "@v0.0.0-20261002100409-e64234cc493c"
+	// cobolGrammarExtractorVersion identifies this handoff-to-graph mapping.
+	// Bump it whenever the emitted nodes, edges, or prov_* keys change.
+	// /6 is the Phase 5 mapping: finding nodes for producer parse gaps and
+	// uncontained cascades, on programs and copybooks (D-05, D-10, D-13).
+	// Later Phase 5 extractor changes (05-10: WR-06, WR-07, IN-08) keep /6
+	// until the phase gate, as Phase 4 kept /5.
+	cobolGrammarExtractorVersion = "gortex-cobol-grammar/6"
+	// cobolForestModulePath is the module path the enhanced grammar is
+	// linked under; go.mod replaces it with the fork's forest-shim.
+	cobolForestModulePath = "github.com/alexaandru/go-sitter-forest/cobol"
+	// cobolPreprocessorModulePath is the producer module that builds the
+	// handoff.
+	cobolPreprocessorModulePath = "github.com/MuiGoku123432/tree-sitter-cobol-upgrade/preprocessor"
+)
+
+// errCobolGrammarNotApproved reports a handoff produced by a grammar other
+// than the approved one. Extraction fails; nothing falls back (D-05).
+var errCobolGrammarNotApproved = errors.New("COBOL handoff grammar is not the approved enhanced grammar")
+
+// errCobolPreprocessorNotApproved reports a binary linked against a
+// preprocessor module other than the approved one. Every Extract fails;
+// nothing falls back (D-05).
+var errCobolPreprocessorNotApproved = errors.New("COBOL preprocessor module is not the approved producer")
+
+// cobolAnalyzeSlot serializes Analyze across every extractor instance in
+// this process. A single COBOL parse can need a large share of memory on a
+// 16 GB host, so COBOL files parse one at a time while other languages stay
+// parallel.
+//
+// Known limits (code review WR-04, not yet fixed):
+//   - The bound is per process. Under crash isolation
+//     (index.crash_isolation or GORTEX_PARSER_ISOLATION=1) every parse
+//     worker subprocess has its own slot, so N workers can run N COBOL
+//     analyses at once and the memory bound does not hold.
+//   - Extract cannot see the indexer's max_extract_millis budget, whose
+//     timer starts before Extract waits here. Files queued behind a slow
+//     parse can time out while waiting, and each abandoned Extract still
+//     takes the slot later and runs Analyze to completion for a discarded
+//     result.
+var cobolAnalyzeSlot = make(chan struct{}, 1)
+
+// CobolGrammarExtractor extracts COBOL program definitions from the
+// enhanced tree-sitter-cobol-upgrade grammar through its preprocessor
+// handoff (cobol-handoff-v1). It emits the file node, one KindFunction node
+// per named program with cobol_kind=program, and a file-to-program
+// EdgeDefines edge, each carrying the prov_* provenance keys. When the
+// enhanced parser is unavailable or unapproved, Extract returns an error
+// and no result: there is no regex or stock-grammar fallback.
+type CobolGrammarExtractor struct {
+	approvedGrammarID          string
+	approvedPreprocessorModule string
+	once                       sync.Once
+	analyzer                   preprocessor.Analyzer
+	parserModule               string
+	preprocessorModule         string
+	initErr                    error
+}
+
+// NewCobolGrammarExtractor returns a grammar extractor pinned to the
+// approved grammar and preprocessor module. Attestation runs lazily on the
+// first Extract, because RegisterAll runs for every gortex command.
+func NewCobolGrammarExtractor() *CobolGrammarExtractor {
+	return &CobolGrammarExtractor{
+		approvedGrammarID:          cobolApprovedGrammarID,
+		approvedPreprocessorModule: cobolApprovedPreprocessorModule,
+	}
+}
+
+// Language returns "cobol".
+func (e *CobolGrammarExtractor) Language() string { return "cobol" }
+
+// Extensions returns the COBOL source and copybook extensions, the same set
+// the regex CobolExtractor claims, so registering this extractor replaces it.
+func (e *CobolGrammarExtractor) Extensions() []string {
+	return []string{".cob", ".cbl", ".cpy", ".COB", ".CBL", ".CPY"}
+}
+
+// init attests the embedded grammar, records the parser module identity, and
+// checks the preprocessor module against its pin. Its error is cached so
+// every later Extract fails the same way.
+func (e *CobolGrammarExtractor) init() {
+	analyzer, err := preprocessor.NewEmbeddedAnalyzer(transform.NewCatalog(nil))
+	if err != nil {
+		e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w", err)
+		return
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w", errors.New("binary carries no build info"))
+		return
+	}
+	for _, dep := range info.Deps {
+		if dep.Path != cobolForestModulePath && dep.Path != cobolPreprocessorModulePath {
+			continue
+		}
+		module := dep
+		if dep.Replace != nil {
+			module = dep.Replace
+		}
+		if dep.Path == cobolForestModulePath {
+			e.parserModule = module.Path + "@" + module.Version
+		} else {
+			e.preprocessorModule = module.Path + "@" + module.Version
+		}
+	}
+	for _, m := range []struct{ path, found string }{
+		{cobolForestModulePath, e.parserModule},
+		{cobolPreprocessorModulePath, e.preprocessorModule},
+	} {
+		if m.found == "" {
+			e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w",
+				fmt.Errorf("build info lists no %s dependency", m.path))
+			return
+		}
+	}
+	if e.preprocessorModule != e.approvedPreprocessorModule {
+		e.initErr = fmt.Errorf("enhanced COBOL parser unavailable: %w: linked %s, approved %s",
+			errCobolPreprocessorNotApproved, e.preprocessorModule, e.approvedPreprocessorModule)
+		return
+	}
+	e.analyzer = analyzer
+}
+
+// MaterialIdentity returns the extractor identity every observation is
+// stamped with (D-07): the approved grammar ID (prov_parser_grammar_id,
+// which Extract requires the handoff to match), the parser module
+// (prov_parser_module), the preprocessor module (prov_preprocessor_module),
+// the extractor version (prov_extractor_version), and the cobol_name_norm
+// rule, joined with "|". The indexer folds it into the COBOL material
+// fingerprint, so the stamp and the invalidation trigger cannot drift. The
+// preprocessor tool and configuration IDs are fixed by the module pin init
+// enforces. When init failed it returns "unavailable:" plus the error class,
+// so a broken toolchain still yields a distinct fingerprint while Extract
+// fails as before.
+func (e *CobolGrammarExtractor) MaterialIdentity() string {
+	e.once.Do(e.init)
+	if e.initErr != nil {
+		if errors.Is(e.initErr, errCobolPreprocessorNotApproved) {
+			return "unavailable:preprocessor-not-approved"
+		}
+		return "unavailable:parser"
+	}
+	return strings.Join([]string{
+		e.approvedGrammarID, e.parserModule, e.preprocessorModule,
+		cobolGrammarExtractorVersion, cobolNameNormRule,
+	}, "|")
+}
+
+// Extract analyzes one COBOL document and maps its handoff onto graph nodes
+// and edges. filePath is the unprefixed repository-relative path; the
+// indexer applies the repository prefix and scope fields afterwards. A
+// copybook whose analysis fails yields an identity-only result (WR-06);
+// every other failure returns an error and no result.
+func (e *CobolGrammarExtractor) Extract(filePath string, src []byte) (*parser.ExtractionResult, error) {
+	e.once.Do(e.init)
+	if e.initErr != nil {
+		return nil, e.initErr
+	}
+	sourceID, err := preprocessor.NewSourceID(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("COBOL source identity for %s: %w", filePath, err)
+	}
+	// A standalone copybook runs the producer's copybook mode (D-16), which
+	// wraps the member in a synthetic header and keeps its own coordinates.
+	copybook := strings.EqualFold(filepath.Ext(filePath), ".cpy")
+	var h handoff.Handoff
+	func() {
+		cobolAnalyzeSlot <- struct{}{}
+		defer func() { <-cobolAnalyzeSlot }()
+		if copybook {
+			h, err = e.analyzer.AnalyzeCopybook(context.Background(), sourceID, src)
+		} else {
+			h, err = e.analyzer.Analyze(context.Background(), sourceID, src)
+		}
+	}()
+	switch {
+	case err != nil && copybook:
+		// WR-06: the copybook exists, so it stays a binding candidate with
+		// a parse finding instead of failing. Programs keep failing (D-20).
+		return e.cobolCopybookAnalysisFailed(filePath, src, sourceID), nil
+	case err != nil:
+		return nil, fmt.Errorf("enhanced COBOL analysis of %s: %w", filePath, err)
+	}
+	if h.Tool.CompiledLanguageID != e.approvedGrammarID {
+		return nil, fmt.Errorf("%w: handoff grammar %s, approved grammar %s",
+			errCobolGrammarNotApproved, h.Tool.CompiledLanguageID, e.approvedGrammarID)
+	}
+
+	docMeta := map[string]any{
+		"prov_source_path":            filePath,
+		"prov_source_id":              string(h.SourceID),
+		"prov_revision_content_id":    string(h.OriginalContentID),
+		"prov_parser_tool_id":         h.ToolID,
+		"prov_parser_grammar_id":      h.Tool.CompiledLanguageID,
+		"prov_parser_module":          e.parserModule,
+		"prov_preprocessor_module":    e.preprocessorModule,
+		"prov_parse_config_id":        h.ParseConfigurationID,
+		"prov_transform_config_id":    h.Ledger.ConfigurationID,
+		"prov_handoff_schema":         h.SchemaVersion,
+		"prov_extractor_version":      cobolGrammarExtractorVersion,
+		"prov_evidence_class":         "DETERMINISTIC",
+		"prov_origin":                 graph.OriginASTResolved,
+		"prov_confidence":             1.0,
+		"prov_document_grade":         string(h.Assessment.Grade),
+		"prov_document_grade_reasons": append([]string{}, h.Assessment.Reasons...),
+		"prov_grade_policy":           h.Assessment.PolicyVersion,
+	}
+	fileNode := &graph.Node{
+		ID: filePath, Kind: graph.KindFile, Name: filePath,
+		FilePath: filePath, StartLine: 1, EndLine: bytes.Count(src, []byte("\n")) + 1,
+		Language: "cobol", Meta: docMeta,
+	}
+	result := &parser.ExtractionResult{Nodes: []*graph.Node{fileNode}}
+	if copybook {
+		cobolCopybook(h, src, filePath, docMeta, result)
+		result.Edges = cobolDedupeEdges(result.Edges)
+		return result, nil
+	}
+
+	programs, containmentUnresolved, unnamed := cobolProgramSymbols(h)
+	for _, p := range programs {
+		o := h.Facts.Observations[p.index]
+		meta := maps.Clone(docMeta)
+		meta["cobol_kind"] = "program"
+		meta["cobol_name_key"] = cobolIDSegment(cobolNameNorm(p.name))
+		meta["cobol_name_norm"] = cobolNameNormRule
+		meta["cobol_nested"] = p.nested
+		if p.nested {
+			meta["cobol_container"] = filePath + "::" + p.container
+			if containmentUnresolved {
+				// IN-08: the nesting is a guess, so the resolver must not
+				// report a cross-file call it drops as plainly missing.
+				meta["cobol_nested_unresolved"] = true
+			}
+		}
+		meta["prov_observation_kind"] = o.Kind
+		meta["prov_affected"] = o.Affected
+		id := filePath + "::" + p.symbol
+		node := &graph.Node{
+			ID: id, Kind: graph.KindFunction, Name: p.name, QualName: p.symbol,
+			FilePath: filePath, Language: "cobol", Meta: meta,
+		}
+		cobolStampRange(node, o.Original)
+		result.Nodes = append(result.Nodes, node)
+		result.Edges = append(result.Edges, &graph.Edge{
+			From: fileNode.ID, To: id, Kind: graph.EdgeDefines,
+			FilePath: filePath, Line: node.StartLine,
+			Origin: graph.OriginASTResolved, Confidence: 1.0, ConfidenceLabel: "EXTRACTED",
+		})
+	}
+	// Breadth runs before the document-level flags below are set, so they
+	// are not cloned into breadth node or edge Meta either.
+	w := newCobolWalk(h, src, filePath, docMeta, programs, result)
+	cobolProcedure(w)
+	data := cobolDataItems(w)
+	cobolReferences(w, data)
+	cobolMainframe(w, data)
+	cobolSQL(w, data)
+	cobolFindings(w)
+	// Set after the loop so these document-level flags stay on the file
+	// node and are not cloned into program or finding Meta.
+	if containmentUnresolved {
+		docMeta["prov_containment_unresolved"] = true
+	}
+	if unnamed > 0 {
+		docMeta["prov_unnamed_program_count"] = unnamed
+	}
+	result.Edges = cobolDedupeEdges(result.Edges)
+	return result, nil
+}
+
+// cobolStampRange records r, the original-coordinate projection of a
+// program observation, on node and its Meta (D-10, PROV-03). Coordinates
+// are written only when r images original bytes. A missing projection, a
+// no-image projection, and a projection made only of inserted (synthetic)
+// bytes get prov_range_exact=false and a prov_range_absence reason instead:
+// their points are anchors, not where the program is in the file.
+func cobolStampRange(node *graph.Node, r *sourcemap.Projection) {
+	if cobolStampMeta(node.Meta, r) == 0 {
+		return
+	}
+	node.StartLine = int(r.Start.Row) + 1
+	node.EndLine = int(r.End.Row) + 1
+	node.StartColumn = int(r.Start.Column)
+	node.EndColumn = int(r.End.Column)
+}
+
+var _ parser.Extractor = (*CobolGrammarExtractor)(nil)

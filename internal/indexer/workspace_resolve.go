@@ -3,7 +3,9 @@ package indexer
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -140,6 +142,37 @@ func (mi *MultiIndexer) bestRepoPrefixForPathLocked(path string) string {
 		return prefix
 	}
 	return mi.bestRepoPrefixForSpellingLocked(pathkey.CanonicalPath(path), true)
+}
+
+// nestedTrackedRootContains reports whether path lies inside a repository
+// root nested strictly under root, where the candidate roots are the
+// registered repositories and the roots an in-flight batch declared
+// (DeclarePendingRoots). It takes mi.mu.RLock, so a caller must not hold
+// mi.mu (walks and watcher admission run unlocked).
+func (mi *MultiIndexer) nestedTrackedRootContains(root, path string) bool {
+	nested := func(r string) bool {
+		return pathkey.HasPathPrefix(path, r) && !pathkey.EqualPaths(r, root) && pathkey.HasPathPrefix(r, root)
+	}
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+	for _, meta := range mi.repos {
+		if meta == nil {
+			continue
+		}
+		r := filepath.Clean(meta.RootPath)
+		if r == "" || r == "." {
+			continue
+		}
+		if nested(r) {
+			return true
+		}
+	}
+	for r := range mi.pendingRoots {
+		if nested(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func (mi *MultiIndexer) bestRepoPrefixForSpellingLocked(path string, canonicalRoots bool) string {
@@ -685,5 +718,71 @@ func (mi *MultiIndexer) crossWorkspaceLookup() resolver.CrossWorkspaceDepLookup 
 		// must treat the returned rules and their Modules slices as read-only;
 		// returning them directly keeps this hot lookup allocation-free.
 		return snapshot.rulesByWorkspace[sourceWS]
+	}
+}
+
+// cobolPolicyFromConfig converts a repository's index.cobol block into the
+// resolver's policy shape, field by field.
+func cobolPolicyFromConfig(cfg config.CobolConfig) resolver.CobolPolicy {
+	p := resolver.CobolPolicy{
+		ResolveFrom:          slices.Clone(cfg.ResolveFrom),
+		DB2DefaultSchema:     cfg.DB2DefaultSchema,
+		IDMSDefaultSubschema: cfg.IDMSDefaultSubschema,
+	}
+	for _, lib := range cfg.CopybookLibraries {
+		p.CopybookLibraries = append(p.CopybookLibraries,
+			resolver.CobolLibrary{Name: lib.Name, Repo: lib.Repo, Path: lib.Path})
+	}
+	return p
+}
+
+// cobolPolicyLookup is the COBOL policy source for the master resolver and
+// every per-repository resolver (D-09): each repository's merged index.cobol
+// block, minus the ResolveFrom entries and library repositories that are not
+// tracked. Those are dropped and named in one Warn (prefixes only), so an
+// unknown name never widens resolution.
+//
+// A repository counts as tracked when it is registered or holds a live
+// mutation lane; the lane covers a repository whose own track pass is running
+// before it is registered, which a cross-repository binding into it needs.
+// Tracking is read on each call (once per repository per reconcile pass)
+// rather than when the lookup is built, because a per-repository resolver
+// outlives every later track and untrack.
+func (mi *MultiIndexer) cobolPolicyLookup() resolver.CobolPolicyLookup {
+	if mi == nil || mi.configMgr == nil {
+		return nil
+	}
+	tracked := func(prefix string) bool {
+		mi.mu.RLock()
+		_, ok := mi.repos[prefix]
+		mi.mu.RUnlock()
+		return ok || mi.existingRepositoryMutationCoordinator(prefix) != nil
+	}
+	return func(repoPrefix string) resolver.CobolPolicy {
+		p := cobolPolicyFromConfig(mi.configMgr.GetRepoConfig(repoPrefix).Index.Cobol)
+		var dropped []string
+		p.ResolveFrom = slices.DeleteFunc(p.ResolveFrom, func(repo string) bool {
+			repo = strings.TrimSpace(repo)
+			if tracked(repo) {
+				return false
+			}
+			dropped = append(dropped, repo)
+			return true
+		})
+		p.CopybookLibraries = slices.DeleteFunc(p.CopybookLibraries, func(lib resolver.CobolLibrary) bool {
+			repo := strings.TrimSpace(lib.Repo)
+			if repo == "" || tracked(repo) {
+				return false
+			}
+			dropped = append(dropped, repo)
+			return true
+		})
+		if len(dropped) > 0 {
+			slices.Sort(dropped)
+			mi.logger.Warn("index.cobol names repositories that are not tracked; dropped from the COBOL policy",
+				zap.String("repo", repoPrefix),
+				zap.Strings("untracked", slices.Compact(dropped)))
+		}
+		return p
 	}
 }

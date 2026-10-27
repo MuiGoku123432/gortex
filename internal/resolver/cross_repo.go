@@ -24,6 +24,10 @@ type CrossRepoStats struct {
 	ByRepo          map[string]int `json:"by_repo"`
 	peakPendingPage int
 	peakLookupKeys  int
+	// ambiguous carries edges that received a Meta-only ambiguity stamp
+	// (To unchanged) so the pass can persist them on disk backends. Each
+	// worker owns its own stats value, so appends need no lock.
+	ambiguous []*graph.Edge
 }
 
 // CrossWorkspaceDepRule names one allowed dependency from a source
@@ -351,6 +355,63 @@ func (cr *CrossRepoResolver) pickQualNameCandidate(callerRepo, callerWS, qualNam
 	return eligible, false
 }
 
+// pickCrossRepoCandidate chooses the bind target for a generic cross-repository
+// fallback tier, or reports the tier as ambiguous.
+//
+// PURPOSE — D-12 / SEC-03: a same-named function or method visible in several
+// reachable repositories must not bind to whichever one an unordered map of
+// reachable repositories yields first.
+//
+// RATIONALE — accept carries the tier's existing gates (kind, receiver type,
+// import reachability, workspace eligibility). An eligible synthetic no-repo
+// node (empty RepoPrefix) keeps its historical precedence. Otherwise eligible
+// candidates in exactly one repository bind to the lowest node ID (the
+// lowestIDQualNameCandidate precedent); candidates spanning two or more
+// repositories bind nothing and return their sorted IDs as evidence. Returns
+// nil, nil when no candidate is eligible.
+//
+// KEYWORDS — cross-repo, ambiguity, deterministic, fail-closed, D-12, SEC-03
+func (cr *CrossRepoResolver) pickCrossRepoCandidate(candidates []*graph.Node, accept func(*graph.Node) bool) (*graph.Node, []string) {
+	if synthetic := lowestIDQualNameCandidate(candidates, func(n *graph.Node) bool {
+		return n.RepoPrefix == "" && accept(n)
+	}); synthetic != nil {
+		return synthetic, nil
+	}
+	var picked *graph.Node
+	var ids []string
+	multiRepo := false
+	for _, c := range candidates {
+		if c == nil || !accept(c) {
+			continue
+		}
+		ids = append(ids, c.ID)
+		if picked != nil && c.RepoPrefix != picked.RepoPrefix {
+			multiRepo = true
+		}
+		if picked == nil || c.ID < picked.ID {
+			picked = c
+		}
+	}
+	if !multiRepo {
+		return picked, nil
+	}
+	sort.Strings(ids)
+	return nil, ids
+}
+
+// stampCrossRepoAmbiguous records a refused multi-repository fallback on e:
+// To stays unresolved, Meta names the reason and the sorted candidate IDs,
+// and the edge is queued for Meta-only persistence.
+func stampCrossRepoAmbiguous(e *graph.Edge, ids []string, stats *CrossRepoStats) {
+	if e.Meta == nil {
+		e.Meta = make(map[string]any, 2)
+	}
+	e.Meta["resolution_unresolved_reason"] = "ambiguous"
+	e.Meta["resolution_candidate_ids"] = ids
+	stats.Unresolved++
+	stats.ambiguous = append(stats.ambiguous, e)
+}
+
 // ResolveAll resolves all unresolved edges in the graph, trying same-repo
 // matches first, then cross-repo search. Sets Edge.CrossRepo = true for
 // cross-repo matches.
@@ -535,10 +596,12 @@ func (cr *CrossRepoResolver) ResolveAllContext(ctx context.Context) (*CrossRepoS
 			for i := range perWorkerBatch {
 				scBatch = append(scBatch, perWorkerBatch[i]...)
 			}
+			var scAmbiguous []*graph.Edge
 			for _, ws := range perWorkerStats {
 				if ws == nil {
 					continue
 				}
+				scAmbiguous = append(scAmbiguous, ws.ambiguous...)
 				stats.Resolved += ws.Resolved
 				stats.Unresolved += ws.Unresolved
 				stats.CrossRepoEdges += ws.CrossRepoEdges
@@ -554,6 +617,12 @@ func (cr *CrossRepoResolver) ResolveAllContext(ctx context.Context) (*CrossRepoS
 				reconcilePlaceholderSources(cr.graph, &cr.placeholderSrcIdx, scBatch)
 				reindexTotal += len(scBatch)
 				DetectCrossRepoEdgesForReindexes(cr.graph, scBatch)
+			}
+			// Meta-only ambiguity stamps (To unchanged, so ReindexEdges never
+			// sees them). In-memory edges are live, so only disk backends need it.
+			// note: duplicated in resolveScopedLocked (two uses).
+			if p, ok := cr.graph.(graph.EdgeMetaBatchPersister); ok && len(scAmbiguous) > 0 {
+				p.PersistEdgeAttributesBatch(scAmbiguous)
 			}
 			if cr.validateLiveness && (hi < len(pending) || !streamDone) {
 				revBefore, revKnown := loadMutationRevision(cr.graph)
@@ -690,6 +759,10 @@ func (cr *CrossRepoResolver) resolveScopedLocked(edges []*graph.Edge) *CrossRepo
 		// nil index: scoped batches are repo- or file-sized, direct
 		// probes beat a whole-graph placeholder-source stream.
 		reconcilePlaceholderSources(cr.graph, nil, reindexBatch)
+	}
+	// note: duplicated in ResolveAllContext (two uses).
+	if p, ok := cr.graph.(graph.EdgeMetaBatchPersister); ok && len(stats.ambiguous) > 0 {
+		p.PersistEdgeAttributesBatch(stats.ambiguous)
 	}
 	return stats
 }
@@ -1118,6 +1191,8 @@ func (cr *CrossRepoResolver) resolveEdge(e *graph.Edge, stats *CrossRepoStats, b
 		// rather than let resolveFunctionCall match a coincidental
 		// cross-repo function of the same name.
 		stats.Unresolved++
+	case strings.HasPrefix(target, "cobol::"): // owned by resolveCobolReferences; never bound across repos by name
+		stats.Unresolved++
 	default:
 		cr.resolveFunctionCall(e, target, stats)
 		// Last-resort cross-daemon proxy-edge stitch: only when local
@@ -1130,6 +1205,10 @@ func (cr *CrossRepoResolver) resolveEdge(e *graph.Edge, stats *CrossRepoStats, b
 	}
 
 	if e.To != oldTo {
+		// A bind supersedes any earlier ambiguity stamp; ReindexEdges
+		// persists the full payload, Meta included.
+		delete(e.Meta, "resolution_unresolved_reason")
+		delete(e.Meta, "resolution_candidate_ids")
 		*batch = append(*batch, graph.EdgeReindex{Edge: e, OldTo: oldTo})
 		cr.noteRetargetedCall(e)
 	}
@@ -1292,7 +1371,7 @@ func (cr *CrossRepoResolver) resolveFunctionCall(e *graph.Edge, funcName string,
 		}
 	}
 
-	// 2. Cross-repo fallback: first function/method match that clears
+	// 2. Cross-repo fallback: a function/method match that clears
 	// BOTH evidence gates —
 	//   (a) import-reachability: the caller's file must actually import
 	//       the candidate's repo. Without this, a bare name like `len`
@@ -1300,16 +1379,17 @@ func (cr *CrossRepoResolver) resolveFunctionCall(e *graph.Edge, funcName string,
 	//   (b) workspace boundary: same-workspace cross-repo is allowed;
 	//       cross-workspace requires a declared cross_workspace_deps
 	//       entry covering the workspace pair.
-	for _, c := range candidates {
-		if c.Kind != graph.KindFunction && c.Kind != graph.KindMethod {
-			continue
-		}
-		if !reachable(c.RepoPrefix) {
-			continue
-		}
-		if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-			continue
-		}
+	// Matches in two or more repositories are refused (D-12).
+	c, ambiguousIDs := cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+		return (c.Kind == graph.KindFunction || c.Kind == graph.KindMethod) &&
+			reachable(c.RepoPrefix) &&
+			cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+	})
+	if ambiguousIDs != nil {
+		stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+		return
+	}
+	if c != nil {
 		e.To = c.ID
 		stats.Resolved++
 		if isCrossRepoHop(callerRepo, c.RepoPrefix) {
@@ -1550,17 +1630,18 @@ func (cr *CrossRepoResolver) resolveMethodCall(e *graph.Edge, methodName string,
 			}
 		}
 		// Cross-repo + exact type — bounded by the import-reachability
-		// and workspace evidence gates.
-		for _, c := range candidates {
-			if c.Kind != graph.KindMethod || nodeReceiverType(c) != receiverType {
-				continue
-			}
-			if !reachable(c.RepoPrefix) {
-				continue
-			}
-			if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-				continue
-			}
+		// and workspace evidence gates. An ambiguous tier stops the walk
+		// (D-12): a weaker tier must not bind what this one refused.
+		c, ambiguousIDs := cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+			return c.Kind == graph.KindMethod && nodeReceiverType(c) == receiverType &&
+				reachable(c.RepoPrefix) &&
+				cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+		})
+		if ambiguousIDs != nil {
+			stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+			return
+		}
+		if c != nil {
 			e.To = c.ID
 			e.Confidence = 0.85
 			e.Origin = graph.OriginASTResolved
@@ -1595,16 +1676,16 @@ func (cr *CrossRepoResolver) resolveMethodCall(e *graph.Edge, methodName string,
 			return
 		}
 	}
-	for _, c := range candidates {
-		if c.Kind != graph.KindMethod {
-			continue
-		}
-		if !reachable(c.RepoPrefix) {
-			continue
-		}
-		if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-			continue
-		}
+	c, ambiguousIDs := cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+		return c.Kind == graph.KindMethod &&
+			reachable(c.RepoPrefix) &&
+			cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+	})
+	if ambiguousIDs != nil {
+		stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+		return
+	}
+	if c != nil {
 		e.To = c.ID
 		stats.Resolved++
 		if isCrossRepoHop(callerRepo, c.RepoPrefix) {
@@ -1621,16 +1702,16 @@ func (cr *CrossRepoResolver) resolveMethodCall(e *graph.Edge, methodName string,
 			return
 		}
 	}
-	for _, c := range candidates {
-		if c.Kind != graph.KindFunction {
-			continue
-		}
-		if !reachable(c.RepoPrefix) {
-			continue
-		}
-		if !cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "") {
-			continue
-		}
+	c, ambiguousIDs = cr.pickCrossRepoCandidate(candidates, func(c *graph.Node) bool {
+		return c.Kind == graph.KindFunction &&
+			reachable(c.RepoPrefix) &&
+			cr.crossWorkspaceEligible(callerWS, candidateWorkspaceID(c), "")
+	})
+	if ambiguousIDs != nil {
+		stampCrossRepoAmbiguous(e, ambiguousIDs, stats)
+		return
+	}
+	if c != nil {
 		e.To = c.ID
 		stats.Resolved++
 		if isCrossRepoHop(callerRepo, c.RepoPrefix) {

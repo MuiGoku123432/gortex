@@ -53,8 +53,9 @@ import (
 // the sidecar can't see, e.g. edges currently parked on an unresolved
 // stub and cross-repo sources persisted under a sibling repo prefix.
 
-// defaultAffectedByMax bounds the re-resolve fan-out when the config
-// carries no explicit cap. See IndexConfig.AffectedByReresolveMax.
+// defaultAffectedByMax is the affected-by escalation threshold (and the
+// builder closure cap) when the config carries no explicit value. See
+// IndexConfig.AffectedByReresolveMax.
 const defaultAffectedByMax = 200
 
 // affectedByMaxFiles returns the effective fan-out cap.
@@ -476,7 +477,7 @@ func affectedByDelta(g graph.Store, snap *affectedBySnapshot, newNodes []*graph.
 // changed file itself. The snapshot stores referrer NODE IDs; their
 // files are resolved here in one batched GetNodesByIDs — work that runs
 // only for a real delta, never on the body-only path. Sorted for
-// deterministic truncation and tests.
+// deterministic resolution order and tests.
 func (idx *Indexer) affectedFilesFor(changedPath string, deltaKeys []string, snap *affectedBySnapshot) []string {
 	fileSet := make(map[string]struct{})
 	// Durable reverse lookup: the sidecar answers by concrete target ID,
@@ -553,13 +554,12 @@ func (idx *Indexer) reresolveAffectedBy(changedPath string, snap *affectedBySnap
 	if len(files) == 0 {
 		return
 	}
+	// note: the same escalation is logged in planAffectedByStages (two sites).
 	if maxFiles := idx.affectedByMaxFiles(); len(files) > maxFiles {
-		idx.logger.Debug("affected-by: re-resolve set truncated",
+		idx.logger.Info("affected-by: cap exceeded, resolving full affected set",
 			zap.String("file", changedPath),
 			zap.Int("affected", len(files)),
-			zap.Int("cap", maxFiles),
-			zap.Int("dropped", len(files)-maxFiles))
-		files = files[:maxFiles]
+			zap.Int("cap", maxFiles))
 	}
 	idx.resolver.ResolveFilesAndIncoming(files)
 	resolver.SynthesizeExternalCallsForFiles(idx.graph, idx.externalCallSynthesisEnabled(), files)

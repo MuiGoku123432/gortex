@@ -194,7 +194,10 @@ func TestSearchText_MultiRepoFanout(t *testing.T) {
 	})
 
 	// Each repo's unique marker must surface, prefixed with the repo name.
-	alpha := callTool(t, srv, "search_text", map[string]any{"query": "unique_alpha_marker"})
+	// Two tracked repos: match lines are source bytes, so each request names
+	// a repo (D-13) and goes through the production middleware that carries it.
+	alpha := callSourceTool(t, srv, context.Background(), srv.handleSearchText, "search_text",
+		map[string]any{"query": "unique_alpha_marker", "repo": "alpha"})
 	require.False(t, alpha.IsError)
 	var alphaOut struct {
 		Matches []searchTextMatch `json:"matches"`
@@ -205,7 +208,8 @@ func TestSearchText_MultiRepoFanout(t *testing.T) {
 	require.True(t, strings.HasPrefix(alphaOut.Matches[0].Path, "alpha/"),
 		"match path must be repo-prefixed, got %q", alphaOut.Matches[0].Path)
 
-	beta := callTool(t, srv, "search_text", map[string]any{"query": "unique_beta_marker"})
+	beta := callSourceTool(t, srv, context.Background(), srv.handleSearchText, "search_text",
+		map[string]any{"query": "unique_beta_marker", "repo": "beta"})
 	require.False(t, beta.IsError)
 	var betaOut struct {
 		Matches []searchTextMatch `json:"matches"`
@@ -317,8 +321,10 @@ func TestFilterTextMatchesByResolvedScope_FailsClosed(t *testing.T) {
 
 	// Active narrowing (workspace ceiling + repo allow-set): the
 	// unattributable ghost match is dropped; the node-backed real match
-	// survives.
-	narrowed := srv.filterTextMatchesByResolvedScope(context.Background(), in, ResolvedScope{
+	// survives. The middleware stores the request; the per-path source gate
+	// reads it.
+	betaCtx := withSourceScopeRequest(context.Background(), makeReq("search_text", map[string]any{"repo": "beta"}))
+	narrowed := srv.filterTextMatchesByResolvedScope(betaCtx, in, ResolvedScope{
 		WorkspaceID: "shared",
 		RepoAllow:   map[string]bool{"beta": true},
 	})

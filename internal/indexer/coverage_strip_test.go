@@ -121,3 +121,26 @@ func TestStripSQLArtifacts_PreservesORMTableNodes(t *testing.T) {
 		t.Errorf("models_table edge to the surviving ORM table node should be kept")
 	}
 }
+
+// TestStripSQLArtifacts_PreservesCobolSQLTables: COBOL embedded-SQL tables
+// come from parsed EXEC SQL statements, not string-literal guesses, so the
+// default-off sql gate must keep them and the reads edge to them.
+func TestStripSQLArtifacts_PreservesCobolSQLTables(t *testing.T) {
+	result := &parser.ExtractionResult{
+		Nodes: []*graph.Node{
+			{ID: "db2::MYSCH/ORDERS", Kind: graph.KindTable, Name: "ORDERS", Language: "cobol"},
+			{ID: "db::sqlite::guessed", Kind: graph.KindTable, Name: "guessed", Language: "go"},
+		},
+		Edges: []*graph.Edge{
+			{From: "cobol/ordpgm.cbl::ORDPGM/@proc/P1", To: "db2::MYSCH/ORDERS", Kind: graph.EdgeReads},
+		},
+	}
+	stripSQLArtifacts(result)
+
+	if len(result.Nodes) != 1 || result.Nodes[0].ID != "db2::MYSCH/ORDERS" {
+		t.Fatalf("nodes after strip = %v, want only the COBOL table", result.Nodes)
+	}
+	if len(result.Edges) != 1 {
+		t.Fatalf("edges after strip = %v, want the reads edge kept", result.Edges)
+	}
+}

@@ -286,3 +286,53 @@ func TestValidateSkillNameComponent(t *testing.T) {
 		require.Error(t, validateSkillNameComponent(name), "%q must be refused", name)
 	}
 }
+
+// TestGenerateSkill_NestedTrackedRootExcluded: an alpha-scoped generate_skill
+// over alpha's directory bundles alpha's files and none from beta, whose
+// tracked root sits inside alpha (D-13, D-20, SEC-02).
+func TestGenerateSkill_NestedTrackedRootExcluded(t *testing.T) {
+	srv, _, _ := newNestedGoModuleServer(t)
+	res := callSourceTool(t, srv, context.Background(), srv.handleGenerateSkill, "generate_skill", map[string]any{
+		"directory": "alpha/", "repo": "alpha", "dry_run": true, "skill_name": "alphaskill",
+	})
+	require.Falsef(t, res.IsError, "generate_skill: %s", sourceScopeText(res))
+	var out struct {
+		References []generateSkillRef `json:"references"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(sourceScopeText(res)), &out))
+	var rels []string
+	for _, ref := range out.References {
+		rels = append(rels, filepath.ToSlash(ref.RelPath))
+	}
+	assert.Contains(t, rels, "a/a.go", "alpha's own file is bundled")
+	for _, rel := range rels {
+		assert.Falsef(t, strings.HasPrefix(rel, "nested/"), "beta's file %s must not be bundled", rel)
+	}
+}
+
+// TestGenerateSkill_SymlinkOutsideRootsExcluded: a symlink inside alpha whose
+// target lies outside every tracked root is refused like read_file refuses
+// it, so generate_skill never bundles the outside bytes (CR-04, SEC-01).
+func TestGenerateSkill_SymlinkOutsideRootsExcluded(t *testing.T) {
+	srv, alphaDir, _ := newNestedGoModuleServer(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("TOP-SECRET-OUTSIDE-ROOTS\n"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(alphaDir, "a", "link.txt")))
+
+	res := callSourceTool(t, srv, context.Background(), srv.handleGenerateSkill, "generate_skill", map[string]any{
+		"directory": "alpha/", "repo": "alpha", "skill_name": "alphaskill",
+	})
+	require.Falsef(t, res.IsError, "generate_skill: %s", sourceScopeText(res))
+	var out struct {
+		References []generateSkillRef `json:"references"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(sourceScopeText(res)), &out))
+	var rels []string
+	for _, ref := range out.References {
+		rels = append(rels, filepath.ToSlash(ref.RelPath))
+	}
+	assert.Contains(t, rels, "a/a.go", "alpha's own file is bundled")
+	assert.NotContains(t, rels, "a/link.txt", "the outside-root symlink must not be bundled")
+	_, err := os.Stat(filepath.Join(alphaDir, ".claude", "skills", "alphaskill", "references", "a", "link.txt"))
+	assert.True(t, os.IsNotExist(err), "no bundled copy of the outside file")
+}

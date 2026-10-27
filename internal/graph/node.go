@@ -279,6 +279,20 @@ const (
 	// reconcile pass can evict the stale generation with one
 	// EvictFile call before re-minting.
 	KindContractBridge NodeKind = "contract_bridge"
+	// KindFinding represents one deterministic unresolved-evidence
+	// finding (D-05): a span the parser could not fully interpret
+	// (PARSE_UNRESOLVED) or a reference to an artifact that was never
+	// obtained (EXTERNAL_UNRESOLVED). ID convention:
+	// `<path>::@finding/<parse|external>/<32 hex>[#k]`, where the hex is
+	// FindingSymbol's digest and `#k` (k >= 2) separates identical
+	// evidence in one container. Extractors emit the repository-relative
+	// form and the indexer prefixes it; the node is owned by its source
+	// file and evicted with it. Meta carries prov_evidence_class, the
+	// finding_* keys declared in finding.go, the parser provenance
+	// stamps, and either exact prov_start_*/prov_end_* range keys or
+	// prov_range_exact=false with prov_range_absence. EdgeMemberOf links
+	// the finding to its containing symbol.
+	KindFinding NodeKind = "finding"
 )
 
 // IsValidNodeKind reports whether s names a known node kind. Used by
@@ -305,6 +319,7 @@ var validNodeKinds = map[NodeKind]bool{
 	KindArtifact: true, KindDoc: true, KindTopic: true,
 	KindRationale: true,
 	KindMacro:     true, KindAgent: true, KindContractBridge: true,
+	KindFinding: true,
 }
 
 type Node struct {
@@ -322,8 +337,8 @@ type Node struct {
 	StartColumn int            `json:"start_column,omitempty"`
 	EndColumn   int            `json:"end_column,omitempty"`
 	Language    string         `json:"language"`
-	Meta       map[string]any `json:"meta,omitempty"`
-	RepoPrefix string         `json:"repo_prefix,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
+	RepoPrefix  string         `json:"repo_prefix,omitempty"`
 	// WorkspaceID is the hard graph boundary slug. Two nodes with
 	// different WorkspaceIDs are not allowed to be matched as contract
 	// provider/consumer pairs and queries scope by it by default.

@@ -302,7 +302,7 @@ func (s *Server) workspaceEditVerificationFiles(ctx context.Context, edit lsp.Wo
 	}
 	files := make([]verificationFile, 0, len(fileEdits))
 	for _, fe := range fileEdits {
-		_, rel, err := s.resolveFilePath(ctx, fe.overlayPath)
+		_, rel, err := s.resolveConfinedFilePath(ctx, fe.overlayPath)
 		if err != nil {
 			return nil, fmt.Errorf("cannot determine repository ownership for workspace edit path %q: %w", fe.overlayPath, err)
 		}

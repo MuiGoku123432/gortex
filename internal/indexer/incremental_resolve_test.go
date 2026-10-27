@@ -290,3 +290,10 @@ func TestSetReparsePendingEnrichment_SetAndClear(t *testing.T) {
 	_, had = fileMeta()[graph.MetaReparsePendingEnrichment]
 	assert.False(t, had, "marker must be cleared when enrichment re-ran")
 }
+
+// TestReuseIdentifierSkipsCobolNamespace pins that COBOL targets, owned by the
+// resolver's resolveCobolReferences pass, are never reused by bare name.
+func TestReuseIdentifierSkipsCobolNamespace(t *testing.T) {
+	assert.Equal(t, "", reuseIdentifier("cobol::program::X"))
+	assert.Equal(t, "", reuseIdentifier("cobol::copybook::Y"))
+}

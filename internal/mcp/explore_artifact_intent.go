@@ -393,6 +393,11 @@ func (s *Server) gatherExploreArtifactLane(ctx context.Context, intent exploreAr
 		} else {
 			matches = s.indexer.GrepText(probe, exploreArtifactTextHitLimit)
 		}
+		// Snippets are source bytes, so a match is admitted through the same
+		// physical-owner gate search_text uses (D-16, SEC-01): a tracked root
+		// nested inside the outer repository cannot leak through the outer
+		// spelling, and a dropped match no longer raises a hit's score.
+		matches = s.filterTextMatchesByResolvedScope(ctx, matches, ResolvedScope{WorkspaceID: scope.WorkspaceID, ProjectID: scope.ProjectID, RepoAllow: scope.RepoAllow})
 		enriched, _ := s.enrichTextMatchesContext(ctx, matches, scope)
 		for _, match := range enriched {
 			hit := byPath[strings.ToLower(strings.ReplaceAll(match.Path, "\\", "/"))]

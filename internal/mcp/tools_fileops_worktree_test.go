@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,7 +114,10 @@ func TestEditFile_LandsInLinkedWorktree(t *testing.T) {
 	require.NoError(t, err)
 
 	// Edit shared.go via the worktree's repo prefix.
-	result := callTool(t, srv, "edit_file", map[string]any{
+	// Two tracked prefixes: the source gate (D-20) needs a repo narrowing,
+	// which the request carries through the production middleware.
+	result := callSourceTool(t, srv, context.Background(), srv.handleEditFile, "edit_file", map[string]any{
+		"repo":       "feature-worktree",
 		"path":       "feature-worktree/shared.go",
 		"old_string": `return "worktree"`,
 		"new_string": `return "worktree-edited"`,
@@ -145,7 +149,8 @@ func TestWriteFile_LandsInLinkedWorktree(t *testing.T) {
 	mainBefore, err := os.ReadFile(mainShared)
 	require.NoError(t, err)
 
-	result := callTool(t, srv, "write_file", map[string]any{
+	result := callSourceTool(t, srv, context.Background(), srv.handleWriteFile, "write_file", map[string]any{
+		"repo":    "feature-worktree",
 		"path":    "feature-worktree/shared.go",
 		"content": "package main\n\nfunc Shared() string { return \"rewritten-in-worktree\" }\n",
 	})
@@ -174,7 +179,8 @@ func TestEditFile_MainCheckoutPrefixStillEditsMainCheckout(t *testing.T) {
 	wtBefore, err := os.ReadFile(wtShared)
 	require.NoError(t, err)
 
-	result := callTool(t, srv, "edit_file", map[string]any{
+	result := callSourceTool(t, srv, context.Background(), srv.handleEditFile, "edit_file", map[string]any{
+		"repo":       "main-checkout",
 		"path":       "main-checkout/shared.go",
 		"old_string": `return "main"`,
 		"new_string": `return "main-edited"`,

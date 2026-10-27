@@ -1,0 +1,383 @@
+Filesystem   1G-blocks Used Available Capacity iused      ifree %iused  Mounted on
+/dev/disk3s5       460  256       172    60% 4164188 1808257760    0%   /System/Volumes/Data
+ok  	github.com/zzet/gortex/bench/baselines	(cached)
+ok  	github.com/zzet/gortex/bench/daemon-latency	(cached)
+?   	github.com/zzet/gortex/bench/fixtures/mktypos	[no test files]
+ok  	github.com/zzet/gortex/bench/index-perf	(cached)
+ok  	github.com/zzet/gortex/bench/perf	(cached)
+ok  	github.com/zzet/gortex/bench/token-efficiency	(cached)
+ok  	github.com/zzet/gortex/bench/wire-format	(cached)
+2026/10/26 13:40:24 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=21.511959ms
+2026/10/26 13:40:25 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.749709ms
+2026/10/26 13:40:27 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=19.737875ms
+2026/10/26 13:40:28 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.955667ms
+2026/10/26 13:40:29 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=25.5355ms
+2026/10/26 13:40:30 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.545042ms
+2026/10/26 13:40:32 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=21.420459ms
+2026/10/26 13:40:33 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.903167ms
+2026/10/26 13:40:34 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=20.596083ms
+2026/10/26 13:40:35 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.804167ms
+2026/10/26 13:40:37 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=20.26325ms
+2026/10/26 13:40:37 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.780792ms
+2026/10/26 13:40:39 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=19.824584ms
+2026/10/26 13:40:40 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=18.088875ms
+2026/10/26 13:40:41 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=19.699ms
+2026/10/26 13:40:42 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.6005ms
+2026/10/26 13:40:43 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=19.632166ms
+2026/10/26 13:40:45 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=19.510959ms
+2026/10/26 13:40:47 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.202291ms
+2026/10/26 13:40:49 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=21.180542ms
+2026/10/26 13:40:51 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.333375ms
+2026/10/26 13:40:52 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.004375ms
+2026/10/26 13:40:54 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.679209ms
+2026/10/26 13:40:56 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=19.734625ms
+2026/10/26 13:40:58 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/8 edges=0/9 receivers=0/0 elapsed=19.453791ms
+2026/10/26 13:40:58 store_sqlite: planner stats refreshed reason=growth:nodes_by_kind believed=8 actual=131 base=8 indexes=7/7 nodes=8/131 edges=9/186 receivers=0/0 elapsed=17.846917ms
+2026/10/26 13:41:00 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.849583ms
+2026/10/26 13:41:02 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.511459ms
+2026/10/26 13:41:04 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=21.374667ms
+2026/10/26 13:41:06 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.335791ms
+2026/10/26 13:41:07 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.406791ms
+2026/10/26 13:41:09 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.677792ms
+2026/10/26 13:41:11 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.091125ms
+2026/10/26 13:41:12 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/0 edges=0/0 receivers=0/0 elapsed=20.334541ms
+2026/10/26 13:41:21 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/2 edges=0/1 receivers=0/0 elapsed=21.916625ms
+2026/10/26 13:41:30 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/2 edges=0/1 receivers=0/0 elapsed=19.129084ms
+2026/10/26 13:41:32 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/2 edges=0/1 receivers=0/0 elapsed=19.471291ms
+[gortex] added server "r2" (https://r2.example:4747) to /var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestServerAdd_ReadOnlyPersisted1598957633/001/servers.toml
+[gortex daemon] not running
+{"level":"info","ts":1793040127.263117,"caller":"indexer/indexer.go:2780","msg":"indexer: shadow-swap decision","repo":"","bulk_loader":true,"first_index":true,"files":0,"shadow_max_files":50000,"below_shadow_max":true,"total_file_bytes":0,"shadow_max_bytes":1073741824,"below_shadow_bytes":true,"shadow_weight_bytes":33554432,"shadow_process_budget_bytes":1073741824,"shadow_process_used_bytes":33554432,"shadow_process_peak_bytes":33554432,"shadow_max_concurrent":1,"shadow_active":1,"shadow_peak_active":1,"shadow_waiters":0,"shadow_admissions":6,"shadow_queued_admissions":0,"shadow_waited":0.000003958,"shadow_budget_granted":true,"shadow_taken":true}
+{"level":"info","ts":1793040127.263614,"caller":"indexer/indexer.go:2828","msg":"indexer: memory envelope admitted","repo":"","files":0,"input_bytes":0,"native_pressure_files":0,"native_pressure_bytes":0,"shadow_eligible":true,"shadow_taken":true,"requested_weight_bytes":100663296,"weight_bytes":100663296,"waited":0.000001667,"capacity_bytes":3221225472,"used_bytes":100663296,"peak_bytes":201326592,"waiters":0,"bounded_bypasses":0,"admissions":79,"queued_admissions":0}
+{"level":"info","ts":1793040127.264645,"caller":"indexer/indexer.go:3958","msg":"indexer: parse subphases","repo":"","wall":0.000250542,"sem_wait_workers":0,"read_workers":0,"extract_workers":0,"batch_workers":0,"workers":10,"files":0}
+{"level":"info","ts":1793040127.276114,"caller":"indexer/indexer.go:6896","msg":"contracts extracted","repo":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitDryRunJSONReportShape1295941455/001","count":0,"commit_bulk_elapsed":0.000000042}
+{"level":"info","ts":1793040127.732327,"caller":"indexer/indexer.go:2940","msg":"indexer: drain start (shadow → disk)","repo":"","shadow_nodes":0,"shadow_edges":0,"shadow_estimated_bytes":0,"pressure_guard":false}
+{"level":"info","ts":1793040127.734359,"caller":"indexer/indexer.go:3046","msg":"indexer: FlushBulk start","repo":"","drain_elapsed":0.00207}
+{"level":"info","ts":1793040127.734394,"caller":"indexer/indexer.go:3053","msg":"indexer: FlushBulk complete","repo":"","flush_elapsed":0.000035042,"total_drain":0.002105167,"nodes":0,"edges":0,"fts_items":0}
+{"level":"info","ts":1793040127.7465012,"caller":"indexer/indexer.go:2851","msg":"indexer: memory envelope released","repo":"","reason":"index_exit","held":0.482883,"weight_bytes":100663296,"used_bytes":0,"waiters":0,"bounded_bypasses":0,"queued_admissions":0}
+{"level":"info","ts":1793040127.746911,"caller":"indexer/cold_manifest_census.go:242","msg":"persisted file mtimes","repo":"","count":0,"authoritative":true}
+{"level":"info","ts":1793040128.488396,"caller":"indexer/indexer.go:2780","msg":"indexer: shadow-swap decision","repo":"","bulk_loader":true,"first_index":true,"files":0,"shadow_max_files":50000,"below_shadow_max":true,"total_file_bytes":0,"shadow_max_bytes":1073741824,"below_shadow_bytes":true,"shadow_weight_bytes":33554432,"shadow_process_budget_bytes":1073741824,"shadow_process_used_bytes":33554432,"shadow_process_peak_bytes":33554432,"shadow_max_concurrent":1,"shadow_active":1,"shadow_peak_active":1,"shadow_waiters":0,"shadow_admissions":7,"shadow_queued_admissions":0,"shadow_waited":0.000003291,"shadow_budget_granted":true,"shadow_taken":true}
+{"level":"info","ts":1793040128.488443,"caller":"indexer/indexer.go:2828","msg":"indexer: memory envelope admitted","repo":"","files":0,"input_bytes":0,"native_pressure_files":0,"native_pressure_bytes":0,"shadow_eligible":true,"shadow_taken":true,"requested_weight_bytes":100663296,"weight_bytes":100663296,"waited":0.00000175,"capacity_bytes":3221225472,"used_bytes":100663296,"peak_bytes":201326592,"waiters":0,"bounded_bypasses":0,"admissions":80,"queued_admissions":0}
+{"level":"info","ts":1793040128.489425,"caller":"indexer/indexer.go:3958","msg":"indexer: parse subphases","repo":"","wall":0.000251209,"sem_wait_workers":0,"read_workers":0,"extract_workers":0,"batch_workers":0,"workers":10,"files":0}
+{"level":"info","ts":1793040128.5003781,"caller":"indexer/indexer.go:6896","msg":"contracts extracted","repo":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitAgentsFilterRejectsUnknownName3804312207/001","count":0,"commit_bulk_elapsed":0}
+{"level":"info","ts":1793040128.9414358,"caller":"indexer/indexer.go:2940","msg":"indexer: drain start (shadow → disk)","repo":"","shadow_nodes":0,"shadow_edges":0,"shadow_estimated_bytes":0,"pressure_guard":false}
+{"level":"info","ts":1793040128.9447181,"caller":"indexer/indexer.go:3046","msg":"indexer: FlushBulk start","repo":"","drain_elapsed":0.003350458}
+{"level":"info","ts":1793040128.944747,"caller":"indexer/indexer.go:3053","msg":"indexer: FlushBulk complete","repo":"","flush_elapsed":0.000029,"total_drain":0.003379458,"nodes":0,"edges":0,"fts_items":0}
+{"level":"info","ts":1793040128.957949,"caller":"indexer/indexer.go:2851","msg":"indexer: memory envelope released","repo":"","reason":"index_exit","held":0.469496875,"weight_bytes":100663296,"used_bytes":0,"waiters":0,"bounded_bypasses":0,"queued_admissions":0}
+{"level":"info","ts":1793040128.958734,"caller":"indexer/cold_manifest_census.go:242","msg":"persisted file mtimes","repo":"","count":0,"authoritative":true}
+{"level":"warn","ts":1793040129.709027,"caller":"indexer/indexer.go:5835","msg":"indexer: no source files were indexed — an ignore pattern excludes the whole repo","repo":"","root":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitCreatesProjectMarker2505735748/005","example_file":".gortex/.gitignore","excluded_by":"exclude list (.gitignore, .gortex.yaml, or global config)","pattern":".gortex/"}
+{"level":"info","ts":1793040129.709078,"caller":"indexer/indexer.go:2780","msg":"indexer: shadow-swap decision","repo":"","bulk_loader":true,"first_index":true,"files":0,"shadow_max_files":50000,"below_shadow_max":true,"total_file_bytes":0,"shadow_max_bytes":1073741824,"below_shadow_bytes":true,"shadow_weight_bytes":33554432,"shadow_process_budget_bytes":1073741824,"shadow_process_used_bytes":33554432,"shadow_process_peak_bytes":33554432,"shadow_max_concurrent":1,"shadow_active":1,"shadow_peak_active":1,"shadow_waiters":0,"shadow_admissions":8,"shadow_queued_admissions":0,"shadow_waited":0.000004208,"shadow_budget_granted":true,"shadow_taken":true}
+{"level":"info","ts":1793040129.709104,"caller":"indexer/indexer.go:2828","msg":"indexer: memory envelope admitted","repo":"","files":0,"input_bytes":0,"native_pressure_files":0,"native_pressure_bytes":0,"shadow_eligible":true,"shadow_taken":true,"requested_weight_bytes":100663296,"weight_bytes":100663296,"waited":0.000001,"capacity_bytes":3221225472,"used_bytes":100663296,"peak_bytes":201326592,"waiters":0,"bounded_bypasses":0,"admissions":81,"queued_admissions":0}
+{"level":"info","ts":1793040129.7101362,"caller":"indexer/indexer.go:3958","msg":"indexer: parse subphases","repo":"","wall":0.000281708,"sem_wait_workers":0,"read_workers":0,"extract_workers":0,"batch_workers":0,"workers":10,"files":0}
+{"level":"info","ts":1793040129.7204921,"caller":"indexer/indexer.go:6896","msg":"contracts extracted","repo":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitCreatesProjectMarker2505735748/005","count":0,"commit_bulk_elapsed":0}
+{"level":"info","ts":1793040130.159803,"caller":"indexer/indexer.go:2940","msg":"indexer: drain start (shadow → disk)","repo":"","shadow_nodes":0,"shadow_edges":0,"shadow_estimated_bytes":0,"pressure_guard":false}
+{"level":"info","ts":1793040130.161872,"caller":"indexer/indexer.go:3046","msg":"indexer: FlushBulk start","repo":"","drain_elapsed":0.002099458}
+{"level":"info","ts":1793040130.1618938,"caller":"indexer/indexer.go:3053","msg":"indexer: FlushBulk complete","repo":"","flush_elapsed":0.000021917,"total_drain":0.002121458,"nodes":0,"edges":0,"fts_items":0}
+{"level":"info","ts":1793040130.1735182,"caller":"indexer/indexer.go:2851","msg":"indexer: memory envelope released","repo":"","reason":"index_exit","held":0.464410125,"weight_bytes":100663296,"used_bytes":0,"waiters":0,"bounded_bypasses":0,"queued_admissions":0}
+{"level":"info","ts":1793040130.173952,"caller":"indexer/cold_manifest_census.go:242","msg":"persisted file mtimes","repo":"","count":0,"authoritative":true}
+[gortex init] updated global config at /var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitCreatesProjectMarker2505735748/007/config/gortex/config.yaml
+{"level":"info","ts":1793040130.9236941,"caller":"indexer/indexer.go:2780","msg":"indexer: shadow-swap decision","repo":"","bulk_loader":true,"first_index":true,"files":1,"shadow_max_files":50000,"below_shadow_max":true,"total_file_bytes":192,"shadow_max_bytes":1073741824,"below_shadow_bytes":true,"shadow_weight_bytes":33554432,"shadow_process_budget_bytes":1073741824,"shadow_process_used_bytes":33554432,"shadow_process_peak_bytes":33554432,"shadow_max_concurrent":1,"shadow_active":1,"shadow_peak_active":1,"shadow_waiters":0,"shadow_admissions":9,"shadow_queued_admissions":0,"shadow_waited":0.000005375,"shadow_budget_granted":true,"shadow_taken":true}
+{"level":"info","ts":1793040130.923743,"caller":"indexer/indexer.go:2828","msg":"indexer: memory envelope admitted","repo":"","files":1,"input_bytes":192,"native_pressure_files":0,"native_pressure_bytes":0,"shadow_eligible":true,"shadow_taken":true,"requested_weight_bytes":100663296,"weight_bytes":100663296,"waited":0.00000125,"capacity_bytes":3221225472,"used_bytes":100663296,"peak_bytes":201326592,"waiters":0,"bounded_bypasses":0,"admissions":82,"queued_admissions":0}
+{"level":"info","ts":1793040130.925751,"caller":"indexer/indexer.go:3958","msg":"indexer: parse subphases","repo":"","wall":0.001193833,"sem_wait_workers":0.000001042,"read_workers":0.000111667,"extract_workers":0.000557708,"batch_workers":0.0000185,"workers":10,"files":1}
+{"level":"info","ts":1793040130.937612,"caller":"indexer/indexer.go:6896","msg":"contracts extracted","repo":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitCreatesProjectMarker2505735748/005","count":0,"commit_bulk_elapsed":0.000000042}
+{"level":"info","ts":1793040131.396995,"caller":"indexer/indexer.go:2940","msg":"indexer: drain start (shadow → disk)","repo":"","shadow_nodes":2,"shadow_edges":1,"shadow_estimated_bytes":0,"pressure_guard":false}
+{"level":"info","ts":1793040131.423126,"caller":"indexer/indexer.go:3046","msg":"indexer: FlushBulk start","repo":"","drain_elapsed":0.026166416}
+{"level":"info","ts":1793040131.42316,"caller":"indexer/indexer.go:3053","msg":"indexer: FlushBulk complete","repo":"","flush_elapsed":0.000035167,"total_drain":0.026201666,"nodes":2,"edges":1,"fts_items":1}
+2026/10/26 13:42:11 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/2 edges=0/1 receivers=0/0 elapsed=18.339ms
+{"level":"info","ts":1793040131.46045,"caller":"indexer/indexer.go:2851","msg":"indexer: memory envelope released","repo":"","reason":"index_exit","held":0.536701375,"weight_bytes":100663296,"used_bytes":0,"waiters":0,"bounded_bypasses":0,"queued_admissions":0}
+{"level":"info","ts":1793040131.461015,"caller":"indexer/cold_manifest_census.go:242","msg":"persisted file mtimes","repo":"","count":1,"authoritative":true}
+[gortex init] updated global config at /var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitCreatesProjectMarker2505735748/007/config/gortex/config.yaml
+{"level":"info","ts":1793040132.23481,"caller":"indexer/indexer.go:2780","msg":"indexer: shadow-swap decision","repo":"","bulk_loader":true,"first_index":true,"files":0,"shadow_max_files":50000,"below_shadow_max":true,"total_file_bytes":0,"shadow_max_bytes":1073741824,"below_shadow_bytes":true,"shadow_weight_bytes":33554432,"shadow_process_budget_bytes":1073741824,"shadow_process_used_bytes":33554432,"shadow_process_peak_bytes":33554432,"shadow_max_concurrent":1,"shadow_active":1,"shadow_peak_active":1,"shadow_waiters":0,"shadow_admissions":10,"shadow_queued_admissions":0,"shadow_waited":0.000005083,"shadow_budget_granted":true,"shadow_taken":true}
+{"level":"info","ts":1793040132.234855,"caller":"indexer/indexer.go:2828","msg":"indexer: memory envelope admitted","repo":"","files":0,"input_bytes":0,"native_pressure_files":0,"native_pressure_bytes":0,"shadow_eligible":true,"shadow_taken":true,"requested_weight_bytes":100663296,"weight_bytes":100663296,"waited":0.000001333,"capacity_bytes":3221225472,"used_bytes":100663296,"peak_bytes":201326592,"waiters":0,"bounded_bypasses":0,"admissions":83,"queued_admissions":0}
+{"level":"info","ts":1793040132.235917,"caller":"indexer/indexer.go:3958","msg":"indexer: parse subphases","repo":"","wall":0.000274125,"sem_wait_workers":0,"read_workers":0,"extract_workers":0,"batch_workers":0,"workers":10,"files":0}
+{"level":"info","ts":1793040132.24838,"caller":"indexer/indexer.go:6896","msg":"contracts extracted","repo":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitDryRunSkipsProjectMarker1206597928/001","count":0,"commit_bulk_elapsed":0.000000041}
+{"level":"info","ts":1793040132.6870809,"caller":"indexer/indexer.go:2940","msg":"indexer: drain start (shadow → disk)","repo":"","shadow_nodes":0,"shadow_edges":0,"shadow_estimated_bytes":0,"pressure_guard":false}
+{"level":"info","ts":1793040132.690298,"caller":"indexer/indexer.go:3046","msg":"indexer: FlushBulk start","repo":"","drain_elapsed":0.003270666}
+{"level":"info","ts":1793040132.690329,"caller":"indexer/indexer.go:3053","msg":"indexer: FlushBulk complete","repo":"","flush_elapsed":0.000031,"total_drain":0.003301708,"nodes":0,"edges":0,"fts_items":0}
+{"level":"info","ts":1793040132.704236,"caller":"indexer/indexer.go:2851","msg":"indexer: memory envelope released","repo":"","reason":"index_exit","held":0.469376375,"weight_bytes":100663296,"used_bytes":0,"waiters":0,"bounded_bypasses":0,"queued_admissions":0}
+{"level":"info","ts":1793040132.704687,"caller":"indexer/cold_manifest_census.go:242","msg":"persisted file mtimes","repo":"","count":0,"authoritative":true}
+{"level":"info","ts":1793040133.442168,"caller":"indexer/indexer.go:2780","msg":"indexer: shadow-swap decision","repo":"","bulk_loader":true,"first_index":true,"files":0,"shadow_max_files":50000,"below_shadow_max":true,"total_file_bytes":0,"shadow_max_bytes":1073741824,"below_shadow_bytes":true,"shadow_weight_bytes":33554432,"shadow_process_budget_bytes":1073741824,"shadow_process_used_bytes":33554432,"shadow_process_peak_bytes":33554432,"shadow_max_concurrent":1,"shadow_active":1,"shadow_peak_active":1,"shadow_waiters":0,"shadow_admissions":11,"shadow_queued_admissions":0,"shadow_waited":0.000003625,"shadow_budget_granted":true,"shadow_taken":true}
+{"level":"info","ts":1793040133.442212,"caller":"indexer/indexer.go:2828","msg":"indexer: memory envelope admitted","repo":"","files":0,"input_bytes":0,"native_pressure_files":0,"native_pressure_bytes":0,"shadow_eligible":true,"shadow_taken":true,"requested_weight_bytes":100663296,"weight_bytes":100663296,"waited":0.000001083,"capacity_bytes":3221225472,"used_bytes":100663296,"peak_bytes":201326592,"waiters":0,"bounded_bypasses":0,"admissions":84,"queued_admissions":0}
+{"level":"info","ts":1793040133.443273,"caller":"indexer/indexer.go:3958","msg":"indexer: parse subphases","repo":"","wall":0.000251125,"sem_wait_workers":0,"read_workers":0,"extract_workers":0,"batch_workers":0,"workers":10,"files":0}
+{"level":"info","ts":1793040133.456649,"caller":"indexer/indexer.go:6896","msg":"contracts extracted","repo":"/var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestInitForceBypassesHomeDirectoryGuard714143135/001","count":0,"commit_bulk_elapsed":0.000000084}
+{"level":"info","ts":1793040133.890764,"caller":"indexer/indexer.go:2940","msg":"indexer: drain start (shadow → disk)","repo":"","shadow_nodes":0,"shadow_edges":0,"shadow_estimated_bytes":0,"pressure_guard":false}
+{"level":"info","ts":1793040133.89285,"caller":"indexer/indexer.go:3046","msg":"indexer: FlushBulk start","repo":"","drain_elapsed":0.002137333}
+{"level":"info","ts":1793040133.8928761,"caller":"indexer/indexer.go:3053","msg":"indexer: FlushBulk complete","repo":"","flush_elapsed":0.00002625,"total_drain":0.002163666,"nodes":0,"edges":0,"fts_items":0}
+{"level":"info","ts":1793040133.9043388,"caller":"indexer/indexer.go:2851","msg":"indexer: memory envelope released","repo":"","reason":"index_exit","held":0.462121208,"weight_bytes":100663296,"used_bytes":0,"waiters":0,"bounded_bypasses":0,"queued_admissions":0}
+{"level":"info","ts":1793040133.904768,"caller":"indexer/cold_manifest_census.go:242","msg":"persisted file mtimes","repo":"","count":0,"authoritative":true}
+2026/10/26 13:42:15 store_sqlite: planner stats refreshed reason=missing:nodes_by_kind indexes=10/10 nodes=0/11 edges=0/12 receivers=0/0 elapsed=19.486ms
+Error: unknown command "unexpected" for "push"
+Usage:
+  push [flags]
+
+Flags:
+      --batch-size int                 maximum records per batch (default 500)
+      --dry-run                        validate and plan without target writes
+  -h, --help                           help for push
+      --json                           emit only the structured result
+      --namespace string               projection namespace
+      --operation-timeout duration     whole-operation timeout (default 30m0s)
+      --profile string                 named Neo4j profile
+      --project string                 project name
+      --repo strings                   repository prefix (repeatable)
+      --retry-timeout duration         Neo4j managed retry timeout (default 30s)
+      --transaction-timeout duration   Neo4j transaction timeout (default 30s)
+      --workspace string               workspace slug
+
+Error: operation timeout must be between 1ns and 30m0s
+Usage:
+  push [flags]
+
+Flags:
+      --batch-size int                 maximum records per batch (default 500)
+      --dry-run                        validate and plan without target writes
+  -h, --help                           help for push
+      --json                           emit only the structured result
+      --namespace string               projection namespace
+      --operation-timeout duration     whole-operation timeout (default 30m0s)
+      --profile string                 named Neo4j profile
+      --project string                 project name
+      --repo strings                   repository prefix (repeatable)
+      --retry-timeout duration         Neo4j managed retry timeout (default 30s)
+      --transaction-timeout duration   Neo4j transaction timeout (default 30s)
+      --workspace string               workspace slug
+
+Error: transaction timeout must be between 1ns and 30s
+Usage:
+  push [flags]
+
+Flags:
+      --batch-size int                 maximum records per batch (default 500)
+      --dry-run                        validate and plan without target writes
+  -h, --help                           help for push
+      --json                           emit only the structured result
+      --namespace string               projection namespace
+      --operation-timeout duration     whole-operation timeout (default 30m0s)
+      --profile string                 named Neo4j profile
+      --project string                 project name
+      --repo strings                   repository prefix (repeatable)
+      --retry-timeout duration         Neo4j managed retry timeout (default 30s)
+      --transaction-timeout duration   Neo4j transaction timeout (default 30s)
+      --workspace string               workspace slug
+
+Error: retry timeout must be between 1ns and 30s
+Usage:
+  push [flags]
+
+Flags:
+      --batch-size int                 maximum records per batch (default 500)
+      --dry-run                        validate and plan without target writes
+  -h, --help                           help for push
+      --json                           emit only the structured result
+      --namespace string               projection namespace
+      --operation-timeout duration     whole-operation timeout (default 30m0s)
+      --profile string                 named Neo4j profile
+      --project string                 project name
+      --repo strings                   repository prefix (repeatable)
+      --retry-timeout duration         Neo4j managed retry timeout (default 30s)
+      --transaction-timeout duration   Neo4j transaction timeout (default 30s)
+      --workspace string               workspace slug
+
+[gortex] remote "r2" disabled in /var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestProxyToggle_OffThenOnPersists2795939046/001/servers.toml
+[gortex] remote "r2" enabled in /var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestProxyToggle_OffThenOnPersists2795939046/001/servers.toml
+[gortex] added server "r3" (https://r3.example:4747) to /var/folders/ks/sc4623gx7c144xx9_sxj53b00000gn/T/TestProxyAdd_PositionalURL3672125931/001/servers.toml
+PASS
+
+cmd/gortex: a test wrote through to the developer's real per-user state:
+  /Users/e1001547-mbp-it/.gortex/cache/query-log.jsonl (1e8597102ae321e5 -> 5bb399cafc5c2c1d)
+
+Isolate the test with internal/testenv (Sandbox / SandboxAt / UnifiedHome / SetHome)
+instead of t.Setenv("HOME", ...), which does not move os.UserHomeDir on Windows.
+If a gortex daemon was running and tracked a repository during this run, that is a
+false positive — re-run with the daemon stopped to confirm.
+FAIL	github.com/zzet/gortex/cmd/gortex	127.271s
+ok  	github.com/zzet/gortex/internal/agents	(cached)
+?   	github.com/zzet/gortex/internal/agents/agentstest	[no test files]
+?   	github.com/zzet/gortex/internal/agents/aider	[no test files]
+ok  	github.com/zzet/gortex/internal/agents/antigravity	(cached)
+ok  	github.com/zzet/gortex/internal/agents/claudecode	(cached)
+ok  	github.com/zzet/gortex/internal/agents/cline	(cached)
+ok  	github.com/zzet/gortex/internal/agents/codex	(cached)
+ok  	github.com/zzet/gortex/internal/agents/continuedev	(cached)
+ok  	github.com/zzet/gortex/internal/agents/copilotcli	(cached)
+ok  	github.com/zzet/gortex/internal/agents/cursor	(cached)
+ok  	github.com/zzet/gortex/internal/agents/gemini	(cached)
+ok  	github.com/zzet/gortex/internal/agents/hermes	(cached)
+?   	github.com/zzet/gortex/internal/agents/internalutil	[no test files]
+ok  	github.com/zzet/gortex/internal/agents/kilocode	(cached)
+ok  	github.com/zzet/gortex/internal/agents/kimi	(cached)
+ok  	github.com/zzet/gortex/internal/agents/kiro	(cached)
+ok  	github.com/zzet/gortex/internal/agents/ohmypi	(cached)
+?   	github.com/zzet/gortex/internal/agents/openclaw	[no test files]
+ok  	github.com/zzet/gortex/internal/agents/opencode	(cached)
+ok  	github.com/zzet/gortex/internal/agents/pi	(cached)
+ok  	github.com/zzet/gortex/internal/agents/skillpack	(cached)
+ok  	github.com/zzet/gortex/internal/agents/vscode	(cached)
+ok  	github.com/zzet/gortex/internal/agents/windsurf	(cached)
+ok  	github.com/zzet/gortex/internal/agents/zed	(cached)
+ok  	github.com/zzet/gortex/internal/analysis	(cached)
+ok  	github.com/zzet/gortex/internal/analyzer	(cached)
+ok  	github.com/zzet/gortex/internal/artifacts	(cached)
+ok  	github.com/zzet/gortex/internal/astquery	(cached)
+ok  	github.com/zzet/gortex/internal/audit	(cached)
+ok  	github.com/zzet/gortex/internal/blame	(cached)
+ok  	github.com/zzet/gortex/internal/callpath	(cached)
+ok  	github.com/zzet/gortex/internal/cfg	(cached)
+ok  	github.com/zzet/gortex/internal/churn	(cached)
+ok  	github.com/zzet/gortex/internal/claudemd	(cached)
+ok  	github.com/zzet/gortex/internal/clones	(cached)
+ok  	github.com/zzet/gortex/internal/cochange	(cached)
+ok  	github.com/zzet/gortex/internal/codegen	(cached)
+ok  	github.com/zzet/gortex/internal/codeowners	(cached)
+ok  	github.com/zzet/gortex/internal/config	(cached)
+ok  	github.com/zzet/gortex/internal/contracts	(cached)
+ok  	github.com/zzet/gortex/internal/coverage	(cached)
+ok  	github.com/zzet/gortex/internal/daemon	(cached)
+ok  	github.com/zzet/gortex/internal/dataflow	(cached)
+ok  	github.com/zzet/gortex/internal/docs	(cached)
+ok  	github.com/zzet/gortex/internal/doctor	(cached)
+ok  	github.com/zzet/gortex/internal/elide	(cached)
+ok  	github.com/zzet/gortex/internal/embedding	(cached)
+ok  	github.com/zzet/gortex/internal/entrypoints	(cached)
+ok  	github.com/zzet/gortex/internal/eval	(cached)
+ok  	github.com/zzet/gortex/internal/eval/packeval	(cached)
+ok  	github.com/zzet/gortex/internal/eval/parity	(cached)
+ok  	github.com/zzet/gortex/internal/eval/parity/golden	(cached)
+ok  	github.com/zzet/gortex/internal/eval/quality	(cached)
+ok  	github.com/zzet/gortex/internal/eval/recall	(cached)
+ok  	github.com/zzet/gortex/internal/eval/stdbench	(cached)
+ok  	github.com/zzet/gortex/internal/excludes	(cached)
+ok  	github.com/zzet/gortex/internal/exporter	(cached)
+ok  	github.com/zzet/gortex/internal/fixtures	(cached)
+ok  	github.com/zzet/gortex/internal/forge	(cached)
+ok  	github.com/zzet/gortex/internal/gitcmd	(cached)
+ok  	github.com/zzet/gortex/internal/githooks	(cached)
+ok  	github.com/zzet/gortex/internal/gitstate	(cached)
+ok  	github.com/zzet/gortex/internal/graph	21.671s
+?   	github.com/zzet/gortex/internal/graph/overlaytest	[no test files]
+ok  	github.com/zzet/gortex/internal/graph/store_sqlite	(cached)
+ok  	github.com/zzet/gortex/internal/graph/storetest	(cached)
+ok  	github.com/zzet/gortex/internal/graphpath	(cached)
+ok  	github.com/zzet/gortex/internal/graphview	(cached)
+ok  	github.com/zzet/gortex/internal/hooks	(cached)
+ok  	github.com/zzet/gortex/internal/indexer	(cached)
+ok  	github.com/zzet/gortex/internal/indexer/merkle	(cached)
+ok  	github.com/zzet/gortex/internal/indexer/source	(cached)
+ok  	github.com/zzet/gortex/internal/intern	(cached)
+ok  	github.com/zzet/gortex/internal/licenses	(cached)
+ok  	github.com/zzet/gortex/internal/lint	(cached)
+ok  	github.com/zzet/gortex/internal/llm	(cached)
+ok  	github.com/zzet/gortex/internal/llm/agent	(cached)
+ok  	github.com/zzet/gortex/internal/llm/conversationlog	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/agentcli	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/anthropic	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/azure	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/bedrock	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/claudecli	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/codex	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/copilot	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/cursor	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/deepseek	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/gemini	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/httpx	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/local	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/ollama	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/openai	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/openaicompat	(cached)
+ok  	github.com/zzet/gortex/internal/llm/provider/opencode	(cached)
+ok  	github.com/zzet/gortex/internal/llm/registry	(cached)
+ok  	github.com/zzet/gortex/internal/llm/svc	(cached)
+ok  	github.com/zzet/gortex/internal/localizationauth	(cached)
+ok  	github.com/zzet/gortex/internal/lspuri	(cached)
+ok  	github.com/zzet/gortex/internal/mcp	(cached)
+ok  	github.com/zzet/gortex/internal/mcp/streamable	(cached)
+ok  	github.com/zzet/gortex/internal/modelhint	(cached)
+ok  	github.com/zzet/gortex/internal/modules	(cached)
+ok  	github.com/zzet/gortex/internal/neo4jprojection	(cached)
+ok  	github.com/zzet/gortex/internal/parser	(cached)
+ok  	github.com/zzet/gortex/internal/parser/crashpool	(cached)
+ok  	github.com/zzet/gortex/internal/parser/forest	(cached)
+ok  	github.com/zzet/gortex/internal/parser/forest/cobolprobe	(cached)
+ok  	github.com/zzet/gortex/internal/parser/languages	(cached)
+ok  	github.com/zzet/gortex/internal/parser/tsalias	(cached)
+ok  	github.com/zzet/gortex/internal/parser/tsitter	(cached)
+?   	github.com/zzet/gortex/internal/parser/tsitter/bash	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/c	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/cpp	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/csharp	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/css	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/dart	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/dockerfile	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/elixir	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/golang	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/hcl	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/html	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/java	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/javascript	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/kotlin	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/lua	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/markdown	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/ocaml	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/orgmode	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/php	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/protobuf	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/python	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/ruby	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/rust	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/scala	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/sql	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/swift	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/toml	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/tsx	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/typescript	[no test files]
+?   	github.com/zzet/gortex/internal/parser/tsitter/yaml	[no test files]
+ok  	github.com/zzet/gortex/internal/pathguard	(cached)
+ok  	github.com/zzet/gortex/internal/pathkey	(cached)
+ok  	github.com/zzet/gortex/internal/persistence	(cached)
+ok  	github.com/zzet/gortex/internal/platform	(cached)
+ok  	github.com/zzet/gortex/internal/procio	(cached)
+ok  	github.com/zzet/gortex/internal/profiles	(cached)
+ok  	github.com/zzet/gortex/internal/progress	(cached)
+?   	github.com/zzet/gortex/internal/progress/demo	[no test files]
+ok  	github.com/zzet/gortex/internal/query	(cached)
+ok  	github.com/zzet/gortex/internal/reach	(cached)
+ok  	github.com/zzet/gortex/internal/reconcile	(cached)
+ok  	github.com/zzet/gortex/internal/releases	(cached)
+ok  	github.com/zzet/gortex/internal/resolver	(cached)
+ok  	github.com/zzet/gortex/internal/respbudget	(cached)
+ok  	github.com/zzet/gortex/internal/review	(cached)
+?   	github.com/zzet/gortex/internal/routeguard	[no test files]
+ok  	github.com/zzet/gortex/internal/runtimeactivity	(cached)
+ok  	github.com/zzet/gortex/internal/savings	(cached)
+ok  	github.com/zzet/gortex/internal/search	(cached)
+ok  	github.com/zzet/gortex/internal/search/packstrategy	(cached)
+ok  	github.com/zzet/gortex/internal/search/rerank	(cached)
+ok  	github.com/zzet/gortex/internal/search/trigram	(cached)
+ok  	github.com/zzet/gortex/internal/semantic	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/goanalysis	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/lsp	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/scip	(cached)
+ok  	github.com/zzet/gortex/internal/semantic/tstypes	(cached)
+ok  	github.com/zzet/gortex/internal/server	(cached)
+ok  	github.com/zzet/gortex/internal/server/hub	(cached)
+ok  	github.com/zzet/gortex/internal/serverstack	(cached)
+ok  	github.com/zzet/gortex/internal/skills	(cached)
+ok  	github.com/zzet/gortex/internal/sql	(cached)
+ok  	github.com/zzet/gortex/internal/telemetry	(cached)
+ok  	github.com/zzet/gortex/internal/testenv	(cached)
+ok  	github.com/zzet/gortex/internal/testpath	(cached)
+?   	github.com/zzet/gortex/internal/testutil/gitpromisor	[no test files]
+ok  	github.com/zzet/gortex/internal/testutil/graphdump	(cached)
+ok  	github.com/zzet/gortex/internal/testutil/graphfixture	(cached)
+ok  	github.com/zzet/gortex/internal/thirdparty/fswatcher	(cached)
+ok  	github.com/zzet/gortex/internal/todos	(cached)
+ok  	github.com/zzet/gortex/internal/tokens	(cached)
+ok  	github.com/zzet/gortex/internal/toolref	(cached)
+?   	github.com/zzet/gortex/internal/tui	[no test files]
+ok  	github.com/zzet/gortex/internal/version	(cached)
+ok  	github.com/zzet/gortex/internal/viewmetrics	(cached)
+ok  	github.com/zzet/gortex/internal/wiki	(cached)
+ok  	github.com/zzet/gortex/internal/workspace	(cached)
+ok  	github.com/zzet/gortex/pkg/gortex	(cached)
+FAIL
+exit=1

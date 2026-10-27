@@ -1,10 +1,13 @@
 package config
 
+// TestNeo4jTracerContractProfile is implemented at the end of this file.
+
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +17,67 @@ import (
 
 	"github.com/zzet/gortex/internal/testenv"
 )
+
+func TestNeo4jTracerContractProfile(t *testing.T) {
+	const usernameSecret = "neo4j-user-canary"
+	const passwordSecret = "neo4j-password-canary"
+	t.Setenv("GORTEX_TEST_NEO4J_USER", usernameSecret)
+	t.Setenv("GORTEX_TEST_NEO4J_PASSWORD", passwordSecret)
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	configYAML := `neo4j:
+  production:
+    uri: neo4j+s://graph.example.com
+    database: estate
+    username_env: GORTEX_TEST_NEO4J_USER
+    password_env: GORTEX_TEST_NEO4J_PASSWORD
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(configYAML), 0o600))
+	gc, err := LoadGlobal(configPath)
+	require.NoError(t, err)
+	profile, err := gc.ResolveNeo4jProfile("production")
+	require.NoError(t, err)
+	assert.Equal(t, "neo4j+s://graph.example.com", profile.URI)
+	assert.Equal(t, "estate", profile.Database)
+	assert.Equal(t, usernameSecret, profile.Username)
+	assert.Equal(t, passwordSecret, profile.Password)
+	encoded, err := yaml.Marshal(profile)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), usernameSecret)
+	assert.NotContains(t, string(encoded), passwordSecret)
+
+	tests := []struct {
+		name     string
+		profiles map[string]Neo4jProfile
+		profile  string
+		want     string
+	}{
+		{name: "missing name", profiles: gc.Neo4j, want: "neo4j profile name is required"},
+		{name: "unknown", profiles: gc.Neo4j, profile: "missing", want: `neo4j profile "missing" not found`},
+		{name: "empty uri", profiles: map[string]Neo4jProfile{"bad": {Database: "neo4j", UsernameEnv: "U", PasswordEnv: "P"}}, profile: "bad", want: `neo4j profile "bad": uri is required`},
+		{name: "uri userinfo", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j://secret:canary@example.com", Database: "neo4j", UsernameEnv: "U", PasswordEnv: "P"}}, profile: "bad", want: `neo4j profile "bad": uri must not contain userinfo`},
+		{name: "remote self-signed tls", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j+ssc://graph.example.com", Database: "neo4j", UsernameEnv: "GORTEX_TEST_NEO4J_USER", PasswordEnv: "GORTEX_TEST_NEO4J_PASSWORD"}}, profile: "bad", want: `neo4j profile "bad": self-signed tls is permitted only for loopback hosts`},
+		{name: "empty database", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j://example.com", UsernameEnv: "U", PasswordEnv: "P"}}, profile: "bad", want: `neo4j profile "bad": database is required`},
+		{name: "empty username ref", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j://example.com", Database: "neo4j", PasswordEnv: "P"}}, profile: "bad", want: `neo4j profile "bad": username_env is required`},
+		{name: "empty password ref", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j://example.com", Database: "neo4j", UsernameEnv: "U"}}, profile: "bad", want: `neo4j profile "bad": password_env is required`},
+		{name: "missing username value", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j://example.com", Database: "neo4j", UsernameEnv: "GORTEX_MISSING_USER", PasswordEnv: "GORTEX_TEST_NEO4J_PASSWORD"}}, profile: "bad", want: `neo4j profile "bad": environment variable GORTEX_MISSING_USER is empty`},
+		{name: "missing password value", profiles: map[string]Neo4jProfile{"bad": {URI: "neo4j://example.com", Database: "neo4j", UsernameEnv: "GORTEX_TEST_NEO4J_USER", PasswordEnv: "GORTEX_MISSING_PASSWORD"}}, profile: "bad", want: `neo4j profile "bad": environment variable GORTEX_MISSING_PASSWORD is empty`},
+	}
+	loopbackSSC := &GlobalConfig{Neo4j: map[string]Neo4jProfile{"local": {URI: "bolt+ssc://127.0.0.1:7687", Database: "neo4j", UsernameEnv: "GORTEX_TEST_NEO4J_USER", PasswordEnv: "GORTEX_TEST_NEO4J_PASSWORD"}}}
+	if _, err := loopbackSSC.ResolveNeo4jProfile("local"); err != nil {
+		t.Fatalf("documented loopback +ssc exception rejected: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := (&GlobalConfig{Neo4j: tt.profiles}).ResolveNeo4jProfile(tt.profile)
+			require.EqualError(t, err, tt.want)
+			assert.False(t, strings.Contains(err.Error(), usernameSecret))
+			assert.False(t, strings.Contains(err.Error(), passwordSecret))
+			assert.False(t, strings.Contains(err.Error(), "secret:canary"))
+		})
+	}
+}
 
 // TestDefaultGlobalConfigPath_HonorsHomeChange guards the regression
 // where DefaultGlobalConfigPath cached its result with sync.Once. Whichever

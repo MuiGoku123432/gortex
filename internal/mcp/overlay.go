@@ -139,6 +139,9 @@ func (s *Server) wrapToolHandlerMode(h mcpserver.ToolHandlerFunc, injectOverlay 
 		// Tolerate hallucinated / mistyped parameter names before the
 		// handler reads arguments (e.g. "symbol" accepted as "id").
 		s.reconcileToolParams(&req)
+		// The source gate (requireSourceScope) resolves the caller's
+		// repo / project / workspace narrowing from this stored request.
+		ctx = withSourceScopeRequest(ctx, req)
 		// Enforce the session's runtime mode / workflow phase — a hard
 		// gate even if the client never re-read tools/list.
 		if blocked := s.checkToolGate(ctx, req.Params.Name); blocked != nil {

@@ -97,10 +97,8 @@ func TestHypothesisIDMS(t *testing.T) {
 	}
 	t.Logf("%-26s %6s %11s   %s", "construct", "errs", "dataItems", "dominant")
 	for _, c := range cases {
-		src := head + tail
-		if c.where == "data" {
-			src = head + c.inject + tail
-		} else {
+		src := head + c.inject + tail
+		if c.where != "data" {
 			src = head + "       PROCEDURE DIVISION.\n       0001-MAIN.\n" + c.inject + "           STOP RUN.\n"
 		}
 		errs, di, top := parseStats(t, src)

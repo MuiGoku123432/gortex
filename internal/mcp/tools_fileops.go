@@ -65,7 +65,32 @@ var errPathEscape = errors.New("relative path escapes the indexed repo root")
 // routed to a worktree view reads that checkout's working copy, every other
 // request the canonical one. An absolute input names a location outright and is
 // never moved between checkouts.
+//
+// With several tracked repositories the confined path must also pass the
+// source gate (D-13, D-20) for its repository; every read and write caller
+// goes through here, so none can bypass it.
 func (s *Server) resolveFilePath(ctx context.Context, rawPath string) (absPath, relPath string, err error) {
+	absPath, relPath, err = s.resolveConfinedFilePath(ctx, rawPath)
+	if err != nil || s.multiIndexer == nil {
+		return absPath, relPath, err
+	}
+	repo := matchedRepoPrefix(s.multiIndexer, relPath)
+	if view := requestViewPathRoot(ctx); repo == "" && view.contains(absPath) {
+		// A file in the request's selected checkout belongs to that
+		// checkout's repository even when no tracked root contains it.
+		repo = view.repoPrefix
+	}
+	if err := s.requirePathSourceScope(ctx, repo, absPath); err != nil {
+		return "", "", err
+	}
+	return absPath, relPath, nil
+}
+
+// resolveConfinedFilePath is resolveFilePath without the source gate: the
+// anchoring and root confinement only. Callers that turn the result into a
+// graph key or a repository attribution and never touch bytes
+// (graphRelPath, workspaceEditVerificationFiles) call it directly.
+func (s *Server) resolveConfinedFilePath(ctx context.Context, rawPath string) (absPath, relPath string, err error) {
 	// Post-resolution confinement (the SECURITY.md "confined to indexed
 	// repository roots" invariant): whatever path the body resolves below —
 	// relative or absolute — is refused if its real, symlink-resolved
@@ -471,6 +496,10 @@ func (s *Server) guardRepoRoots(ctx context.Context) []string {
 // error (not a relative path) when no repo root is available, to keep callers
 // from passing a bare-relative path to os.Open and resolving against the
 // daemon process CWD.
+//
+// node.RepoPrefix names only the lexical owner. When a tracked root sits
+// inside another (CR-01 nested checkout), the repository that physically
+// owns the file must be in scope too (D-13, D-16, D-20).
 func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string, error) {
 	if node == nil {
 		return "", errors.New("nil node")
@@ -481,8 +510,17 @@ func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string,
 	if node.FilePath == "" {
 		return "", fmt.Errorf("node %q has no file path", node.ID)
 	}
+	if err := s.requireSourceScope(ctx, node.RepoPrefix); err != nil {
+		return "", err
+	}
 	if filepath.IsAbs(node.FilePath) {
-		return filepath.Clean(node.FilePath), nil
+		abs := filepath.Clean(node.FilePath)
+		if s.multiIndexer != nil {
+			if err := s.requirePathSourceScope(ctx, node.RepoPrefix, abs); err != nil {
+				return "", err
+			}
+		}
+		return abs, nil
 	}
 	if s.multiIndexer != nil {
 		if root, ok := s.multiIndexer.RepoRoot(node.RepoPrefix); ok {
@@ -503,7 +541,11 @@ func (s *Server) resolveNodePath(ctx context.Context, node *graph.Node) (string,
 			// same reasoning as resolveFilePath: worktrees of one repo
 			// share an index identity, so a node's resolved path can
 			// land on a sibling checkout.
-			return s.checkoutRootedPath(ctx, abs, root, node.RepoPrefix), nil
+			path := s.checkoutRootedPath(ctx, abs, root, node.RepoPrefix)
+			if err := s.requirePathSourceScope(ctx, node.RepoPrefix, path); err != nil {
+				return "", err
+			}
+			return path, nil
 		}
 		return "", fmt.Errorf("could not resolve repo root for node %q (repo_prefix=%q)", node.ID, node.RepoPrefix)
 	}
@@ -550,12 +592,31 @@ func (s *Server) withAbsPaths(ctx context.Context, nodes []*graph.Node) []*graph
 // works on raw path strings — used for edges, search results, and other
 // references that don't carry a Node pointer. Returns errPathUnresolved
 // rather than letting os.Open resolve against the daemon process CWD.
+//
+// Both branches admit the returned path through requirePathSourceScope, so
+// the repository that physically owns it must be in scope too (D-16, D-20).
 func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string, error) {
 	if graphPath == "" {
 		return "", errors.New("empty path")
 	}
 	if requestReadsCommittedTree(ctx) {
 		return "", errViewHasNoWorkingCopy
+	}
+	if s.multiIndexer != nil {
+		// The source gate (D-13, D-20): rename and scaffold read and write
+		// through this resolver, so it carries the same rule as resolveFilePath.
+		// An absolute path is checked against the repository that physically
+		// owns its symlink-resolved location here; a relative one is checked
+		// the same way once it is anchored below. The early lexical check
+		// keeps the unbound-refusal text for paths that do not anchor.
+		if filepath.IsAbs(graphPath) {
+			abs := filepath.Clean(graphPath)
+			if err := s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, s.repoRelative(abs)), abs); err != nil {
+				return "", err
+			}
+		} else if err := s.requireSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, graphPath)); err != nil {
+			return "", err
+		}
 	}
 	if filepath.IsAbs(graphPath) {
 		return filepath.Clean(graphPath), nil
@@ -575,6 +636,11 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 				// there is no prefix to recover the root from — but a routed
 				// view still has to move the path into its own checkout.
 				abs = requestViewPathRoot(ctx).rooted(abs, root)
+			}
+			// A nested tracked root can own the bytes under the outer
+			// repository's spelling (CR-01).
+			if err := s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, graphPath), abs); err != nil {
+				return "", err
 			}
 			return abs, nil
 		}
@@ -607,7 +673,7 @@ func (s *Server) resolveGraphPath(ctx context.Context, graphPath string) (string
 // `alpha/svc\a.go`, which matches no node: get_file_summary answered
 // file_not_indexed for an indexed file.
 func (s *Server) graphRelPath(ctx context.Context, fp string) string {
-	if _, rel, err := s.resolveFilePath(ctx, fp); err == nil && rel != "" {
+	if _, rel, err := s.resolveConfinedFilePath(ctx, fp); err == nil && rel != "" {
 		return graphPathKey(rel)
 	}
 	return fp
@@ -1404,6 +1470,9 @@ func (s *Server) handleReadFile(ctx context.Context, req mcp.CallToolRequest) (*
 			return mcp.NewToolResultError(
 				"physical_evidence describes a file on disk, and this request reads a committed tree " +
 					"that is not checked out anywhere"), nil
+		}
+		if err := s.requireSourceScope(ctx, files.repoPrefix); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		bytes, rel, viewErr := readViewFile(ctx, files, rawPath)
 		if viewErr != nil {

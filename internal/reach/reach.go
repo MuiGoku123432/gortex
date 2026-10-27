@@ -262,6 +262,19 @@ func WritesBaseTopology(g graph.Store) bool {
 	return !ok || pinned.ViewGeneration() == 0
 }
 
+// TopologyWriterActive reports whether any base-topology writer holds the
+// process-global gate. A caller that holds the writer may rely on the answer;
+// anyone else must treat it as a snapshot that can change as soon as it
+// returns. It backs the finding ledger's held-writer warning and the D-23
+// interleaving test, which reads it while the only running goroutine is the
+// settle point under test.
+func TopologyWriterActive() bool {
+	gate := globalTopologyGate
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	return gate.writer
+}
+
 // BeginTopologyMutation prevents reach lookups/builds from observing a
 // watcher's parse-then-swap and resolver work half-applied. The returned
 // function must be called exactly once; changed=true invalidates every cached

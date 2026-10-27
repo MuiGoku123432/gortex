@@ -516,7 +516,8 @@ func identifierFromTarget(target string) string {
 		return spec[sep+2:]
 	case strings.HasPrefix(target, "import::"),
 		strings.HasPrefix(target, "pyrel::"),
-		strings.HasPrefix(target, "grpc::"):
+		strings.HasPrefix(target, "grpc::"),
+		strings.HasPrefix(target, "cobol::"): // owned by resolveCobolReferences
 		// LSP doesn't improve module-path resolution; let the
 		// dedicated passes own these.
 		return ""

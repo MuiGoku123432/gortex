@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -759,16 +761,17 @@ type IndexConfig struct {
 	// ON. Set false (or GORTEX_INDEX_SCOPED_GLOBAL_PASSES=0) to restore the
 	// whole-graph behaviour.
 	ScopedGlobalPasses *bool `mapstructure:"scoped_global_passes" yaml:"scoped_global_passes,omitempty"`
-	// AffectedByReresolveMax caps how many referencing files a single
-	// save's affected-by re-resolution pass will re-resolve. When a
-	// file's symbol signatures change (or symbols are removed / change
-	// kind), the files that referenced those symbols are re-resolved so
-	// their edges and persisted reference facts track the new shape; a
-	// symbol with thousands of callers must not turn one save into a
-	// near-whole-graph resolve, so the affected set is truncated at this
-	// bound (truncation is logged with the dropped count). Zero (the
-	// default) uses the built-in cap of 200 files. Configured under
-	// `index.affected_by_reresolve_max` in .gortex.yaml.
+	// AffectedByReresolveMax is the expected bound on how many referencing
+	// files a single save's affected-by re-resolution pass re-resolves.
+	// When a file's symbol signatures change (or symbols are removed /
+	// change kind), the files that referenced those symbols are
+	// re-resolved so their edges and persisted reference facts track the
+	// new shape. Above this bound the pass logs the escalation at Info
+	// with the affected and cap counts and still resolves the full
+	// affected set: dropping part of it would leave stale bindings
+	// (correctness over speed). Zero (the default) uses the built-in
+	// bound of 200 files. Configured under `index.affected_by_reresolve_max`
+	// in .gortex.yaml.
 	AffectedByReresolveMax int `mapstructure:"affected_by_reresolve_max" yaml:"affected_by_reresolve_max,omitempty"`
 	// Transforms are pluggable pre-ingestion content processors. Each
 	// rewrites a matching file's bytes before the parser sees them —
@@ -856,6 +859,119 @@ type IndexConfig struct {
 	// keeps the size / class caps only. Configured under
 	// `index.skip_untracked_assets`.
 	SkipUntrackedAssets bool `mapstructure:"skip_untracked_assets" yaml:"skip_untracked_assets,omitempty"`
+
+	// Cobol is this repository's COBOL binding policy, configured under
+	// `index.cobol` in the repository's .gortex.yaml. With no block, COBOL
+	// CALL and COPY bind inside the repository only. See CobolConfig.
+	Cobol CobolConfig `mapstructure:"cobol" yaml:"cobol,omitempty"`
+}
+
+// CobolConfig is one repository's COBOL binding policy (`index.cobol`).
+//
+//	index:
+//	  cobol:
+//	    resolve_from: [shared-copybooks]
+//	    copybook_libraries:
+//	      - {name: PRODLIB, repo: shared-copybooks, path: copy/prod}
+//	    db2_default_schema: MYSCH
+//	    idms_default_subschema: EMPSS
+//
+// Library names and default qualifiers are written as cobol-name-norm/1 keys
+// (upper-case ASCII, unquoted), because the resolver compares them by exact
+// string equality. Validate rejects every block that could widen resolution
+// beyond the repositories it names.
+type CobolConfig struct {
+	// ResolveFrom is the directed allowlist of other tracked repositories
+	// whose programs and copybooks this repository may bind to (D-09). It
+	// grants nothing in the other direction. Entries are exact repository
+	// prefixes; wildcards are rejected.
+	ResolveFrom []string `mapstructure:"resolve_from" yaml:"resolve_from,omitempty"`
+	// CopybookLibraries is the ordered, SYSLIB-like copybook search list
+	// (D-10): the first library holding a copybook wins.
+	CopybookLibraries []CobolCopybookLibrary `mapstructure:"copybook_libraries" yaml:"copybook_libraries,omitempty"`
+	// DB2DefaultSchema qualifies unqualified DB2 table names (D-11). It adds
+	// a link edge to an existing qualified node; IDs are never rewritten.
+	DB2DefaultSchema string `mapstructure:"db2_default_schema" yaml:"db2_default_schema,omitempty"`
+	// IDMSDefaultSubschema qualifies unqualified IDMS names (D-11), with the
+	// same link-only semantics as DB2DefaultSchema.
+	IDMSDefaultSubschema string `mapstructure:"idms_default_subschema" yaml:"idms_default_subschema,omitempty"`
+}
+
+// CobolCopybookLibrary is one entry of the ordered copybook search list: the
+// library Name a COPY ... OF/IN clause spells (optional), the repository
+// that holds it (empty means this repository; otherwise it must be listed in
+// resolve_from), and the repository-relative directory Path.
+type CobolCopybookLibrary struct {
+	Name string `mapstructure:"name" yaml:"name,omitempty"`
+	Repo string `mapstructure:"repo" yaml:"repo,omitempty"`
+	Path string `mapstructure:"path" yaml:"path"`
+}
+
+// Validate reports every index.cobol rule c breaks, joined with "; ". It
+// fails closed: a resolve_from entry must be one concrete repository prefix
+// (no blank, no *, ?, or [), a library path must be repository-relative with
+// no .. segment and no wildcard, a library repo must be listed in
+// resolve_from, and library names and default qualifiers must already be
+// cobol-name-norm/1 keys.
+func (c CobolConfig) Validate() error {
+	var errs []string
+	allowed := make(map[string]bool, len(c.ResolveFrom))
+	for i, repo := range c.ResolveFrom {
+		repo = strings.TrimSpace(repo)
+		switch {
+		case repo == "":
+			errs = append(errs, fmt.Sprintf("index.cobol.resolve_from[%d] is blank", i))
+		case strings.ContainsAny(repo, "*?["):
+			errs = append(errs, fmt.Sprintf("index.cobol.resolve_from[%d] = %q: wildcards are not allowed; name each repository", i, repo))
+		default:
+			allowed[repo] = true
+		}
+	}
+	for i, lib := range c.CopybookLibraries {
+		p := filepath.ToSlash(lib.Path)
+		switch {
+		case strings.TrimSpace(p) == "":
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path is empty", i))
+		case path.IsAbs(p) || filepath.IsAbs(lib.Path):
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path = %q must be repository-relative", i, lib.Path))
+		case slices.Contains(strings.Split(p, "/"), ".."):
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path = %q must not contain a .. segment", i, lib.Path))
+		case strings.ContainsAny(p, "*?["):
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].path = %q: wildcards are not allowed", i, lib.Path))
+		}
+		if repo := strings.TrimSpace(lib.Repo); repo != "" && !allowed[repo] {
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].repo = %q is not listed in resolve_from", i, lib.Repo))
+		}
+		if lib.Name != "" && !validCobolKey(lib.Name) {
+			errs = append(errs, fmt.Sprintf("index.cobol.copybook_libraries[%d].name = %q must be an upper-case, unquoted COBOL name", i, lib.Name))
+		}
+	}
+	if c.DB2DefaultSchema != "" && !validCobolKey(c.DB2DefaultSchema) {
+		errs = append(errs, fmt.Sprintf("index.cobol.db2_default_schema = %q must be an upper-case, unquoted schema name (delimited schemas cannot be defaults)", c.DB2DefaultSchema))
+	}
+	if c.IDMSDefaultSubschema != "" && !validCobolKey(c.IDMSDefaultSubschema) {
+		errs = append(errs, fmt.Sprintf("index.cobol.idms_default_subschema = %q must be an upper-case, unquoted subschema name", c.IDMSDefaultSubschema))
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.Join(errs, "; "))
+}
+
+// validCobolKey reports whether s is already a cobol-name-norm/1 key that is
+// safe as a node ID segment: non-empty, no lower-case ASCII letter, no quote,
+// and none of %, :, /, #, space, or a control byte.
+func validCobolKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || c <= ' ' || c == 0x7f || strings.IndexByte(`'"%:/#`, c) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ContentAdmissionConfig gates which large non-source artifacts enter the
@@ -1941,6 +2057,9 @@ func (c *Config) validateWorkspaceSchema() error {
 		if err := pc.Connect.Validate(); err != nil {
 			errs = append(errs, fmt.Sprintf("config: semantic.providers[%q]: %v", pc.Name, err))
 		}
+	}
+	if err := c.Index.Cobol.Validate(); err != nil {
+		errs = append(errs, "config: "+err.Error())
 	}
 	if len(errs) == 0 {
 		return nil

@@ -1245,6 +1245,17 @@ var viewGenSidecars = []viewGenSidecar{
 		body:    fileIndexFailuresTableBody,
 		columns: `repo_prefix, file_path, error, permission_denied, workspace_id, project_id`,
 	},
+	// finding_history is the append-only finding lifecycle log (D-06). It is
+	// best-effort and non-canonical (D-07): EvictRepo leaves it, untrack
+	// purges it, and a store rebuild starts it empty.
+	{
+		table: "finding_history",
+		body:  findingHistoryTableBody,
+		columns: `repo_prefix, seq, finding_id, prior_status, new_status, successor_id, class, kind,
+container, start_byte, evidence_digest, parser_tool_id, parser_grammar_id, extractor_version,
+workspace_id, project_id`,
+		indexes: []string{findingHistoryByFindingIndexSQL},
+	},
 	{
 		table:   "file_mtimes",
 		body:    fileMtimesTableBody,

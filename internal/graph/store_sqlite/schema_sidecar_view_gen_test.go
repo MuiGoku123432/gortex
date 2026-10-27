@@ -214,6 +214,9 @@ func seedSidecarRows(t *testing.T, store *Store) {
 	mustNoErr(t, "file indexing failures", store.ReplaceFileIndexFailures(sidecarSeedRepo, []graph.FileIndexFailure{{
 		Path: "repo/unreadable.go", Error: "permission denied", PermissionDenied: true,
 	}}))
+	mustNoErr(t, "finding history", store.AppendFindingTransitions(sidecarSeedRepo, []graph.FindingTransition{{
+		FindingID: "repo/a.cbl::@finding/parse/0", NewStatus: graph.FindingStatusActive, StartByte: 3,
+	}}))
 	mustNoErr(t, "repo index state", store.SetRepoIndexState(graph.RepoIndexState{
 		RepoPrefix: sidecarSeedRepo, IndexedSHA: "sha-1", Dirty: true, IndexedAt: 42,
 		WorkspaceFP: "fp-1", NodeCount: 3, EdgeCount: 0, ExtractorVersions: `{"go":1}`,
@@ -283,9 +286,11 @@ func mustNoErr(t *testing.T, what string, err error) {
 func downgradeSidecarsToV14(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, sidecar := range viewGenSidecars {
-		if sidecar.table == "file_index_failures" {
-			// This sidecar was introduced at v21; v14 had no table or rows.
-			execDDL(t, db, `DROP TABLE file_index_failures`)
+		switch sidecar.table {
+		case "file_index_failures", "finding_history":
+			// These sidecars were introduced at v21 and v23; v14 had no
+			// table or rows.
+			execDDL(t, db, `DROP TABLE `+sidecar.table)
 			continue
 		}
 		legacy, ok := legacySidecarShapes[sidecar.table]
@@ -424,9 +429,11 @@ func TestSchemaV14StoreGainsSidecarViewGenerationKeys(t *testing.T) {
 	// Every sidecar kept exactly its seeded rows, all at the base generation.
 	for _, sidecar := range viewGenSidecars {
 		gens := rowViewGens(t, migrated.writerDB, sidecar.table)
-		if sidecar.table == "file_index_failures" {
+		switch sidecar.table {
+		case "file_index_failures", "finding_history":
+			// Introduced at v21 and v23; both start empty after migrating v14.
 			if len(gens) != 0 {
-				t.Fatal("new failure sidecar must start empty after migrating v14")
+				t.Fatalf("new %s sidecar must start empty after migrating v14", sidecar.table)
 			}
 			continue
 		}

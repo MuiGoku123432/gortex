@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -58,6 +59,11 @@ func (s *Server) handleFindDeclaration(ctx context.Context, req mcp.CallToolRequ
 	if err != nil || strings.TrimSpace(useSite) == "" {
 		return mcp.NewToolResultError("find_declaration: use_site is required"), nil
 	}
+	// Use sites carry their source line, so the source gate's unbound
+	// refusal (D-13) runs before the search, as in search_text.
+	if err := s.requireSourceScope(ctx, ""); errors.Is(err, errSourceScopeRequired) {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	if s.indexer == nil {
 		return mcp.NewToolResultError("find_declaration: no indexer available"), nil
 	}
@@ -74,7 +80,7 @@ func (s *Server) handleFindDeclaration(ctx context.Context, req mcp.CallToolRequ
 	kindFilter := parseDeclKindCSV(req.GetString("kind", ""))
 
 	// Stage 1 — locate the use sites.
-	matches, stage1Err := s.findUseSiteMatches(useSite, isRegex, pathPrefix, limit)
+	matches, stage1Err := s.findUseSiteMatches(ctx, useSite, isRegex, pathPrefix, limit)
 	if stage1Err != nil {
 		return mcp.NewToolResultError("find_declaration: " + stage1Err.Error()), nil
 	}
@@ -139,22 +145,54 @@ func (s *Server) handleFindDeclaration(ctx context.Context, req mcp.CallToolRequ
 // applies the prefix natively. Multi-repo mode fans out across every
 // tracked per-repo Indexer — the singleton s.indexer has no rootPath
 // in that mode, so its trigram index is empty and a direct call
-// returns no matches.
-func (s *Server) findUseSiteMatches(useSite string, isRegex bool, pathPrefix string, limit int) ([]trigram.Match, error) {
+// returns no matches. A use site whose file lies in a repository outside
+// the request's source scope is dropped, since its line is source bytes;
+// the repository that physically owns the anchored file decides too, so a
+// nested tracked root cannot leak through the outer spelling (CR-01, D-16).
+func (s *Server) findUseSiteMatches(ctx context.Context, useSite string, isRegex bool, pathPrefix string, limit int) ([]trigram.Match, error) {
+	inScope := map[string]bool{}
+	allowed := func(m trigram.Match) bool {
+		if s.multiIndexer == nil {
+			return true
+		}
+		ok, seen := inScope[m.Path]
+		if !seen {
+			// note: filterTextMatchesByResolvedScope repeats this
+			// anchor-and-gate step (two uses, below the rule of three).
+			abs := s.multiIndexer.ResolveFilePath(m.Path)
+			ok = abs != "" && s.requirePathSourceScope(ctx, matchedRepoPrefix(s.multiIndexer, m.Path), abs) == nil
+			inScope[m.Path] = ok
+		}
+		return ok
+	}
 	if isRegex {
 		var (
 			matches []trigram.Match
 			err     error
 		)
+		// Filter before limit, as the literal branch does: GrepRegexp's
+		// global cap ran before the scope filter, so a scoped caller whose
+		// first raw hits were out of scope got "no use sites matched". Each
+		// repository is still capped at limit, so the scan cost is unchanged
+		// (WR-05).
 		if s.multiIndexer != nil {
-			matches, err = s.multiIndexer.GrepRegexp(useSite, pathPrefix, limit)
+			matches, err = s.multiIndexer.GrepRegexpForRepos(useSite, pathPrefix, nil, limit)
 		} else if s.indexer != nil {
 			matches, err = s.indexer.GrepRegexp(useSite, pathPrefix, limit)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("invalid regex: %v", err)
 		}
-		return matches, nil
+		kept := matches[:0]
+		for _, m := range matches {
+			if allowed(m) {
+				kept = append(kept, m)
+			}
+			if len(kept) >= limit {
+				break
+			}
+		}
+		return kept, nil
 	}
 	var raw []trigram.Match
 	if s.multiIndexer != nil {
@@ -164,7 +202,7 @@ func (s *Server) findUseSiteMatches(useSite string, isRegex bool, pathPrefix str
 	}
 	var matches []trigram.Match
 	for _, m := range raw {
-		if !graphpath.HasPrefix(m.Path, pathPrefix) {
+		if !graphpath.HasPrefix(m.Path, pathPrefix) || !allowed(m) {
 			continue
 		}
 		matches = append(matches, m)

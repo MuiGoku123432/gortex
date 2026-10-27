@@ -174,6 +174,14 @@ type Resolver struct {
 	// wall, and the daemon uses this hook to mark the graph queryable minutes
 	// before that verification work completes.
 	OnComputeDone func()
+	// DeferCobolReconcile, when set, makes ResolveAll skip its COBOL
+	// reconcile, so a caller that holds no reach topology writer can run
+	// ReconcileCobol over the same scope afterwards, in one writer section
+	// with its finding ledger (D-24, review WR-01). Nothing later in the
+	// pass reads a COBOL binding: terminal stamping never classifies a
+	// cobol:: target, and the other tail passes are gated on their own
+	// languages.
+	DeferCobolReconcile bool
 	// receiverTypeIdxByDir memoizes, per package directory, the Go type index
 	// the per-file method-receiver rebind builds. On a scoped tail that visits
 	// every file of a D-file package, building it once per package (O(D)) rather
@@ -480,6 +488,29 @@ type Resolver struct {
 	// SetScope. Independent of any backend bulk-mode flag.
 	scope map[string]struct{}
 
+	// cobolPolicyLookup supplies each caller repository's COBOL binding
+	// policy (cobol_policy.go). nil means same-repository binding only. Set
+	// via SetCobolPolicyLookup.
+	cobolPolicyLookup CobolPolicyLookup
+
+	// cobolReconcileMu, when set, is held across each COBOL reconcile pass
+	// so passes of resolvers sharing it never interleave. Set via
+	// SetCobolReconcileLock.
+	cobolReconcileMu *sync.Mutex
+
+	// cobolFindingRepos, cobolFindingAdded, and cobolFindingEvicted are the
+	// COBOL finding change record: the repositories reconcileCobolFindings
+	// reconciled and the finding and placeholder IDs it added or evicted,
+	// accumulated across passes until CobolFindingChanges drains them.
+	// reconcileCobolFindings is the only writer, CobolFindingChanges the only
+	// reader. cobolFindingMu guards only these sets and is a leaf lock: no
+	// other lock is taken while it is held, and the reader takes it without
+	// mu, so a drain never waits on a running resolve.
+	cobolFindingMu      sync.Mutex
+	cobolFindingRepos   map[string]struct{}
+	cobolFindingAdded   map[string]struct{}
+	cobolFindingEvicted map[string]struct{}
+
 	// stampTerminal, when true, lets a FULL (unscoped) ResolveAll durably mark
 	// the edges it concludes are permanently external / stdlib / definition-
 	// less so a later SCOPED warm resolve can skip re-feeding them (see
@@ -717,6 +748,12 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 		return &ResolveStats{PendingBefore: pendingBefore, PendingAfter: pendingAfter}, pendingErr
 	}
 	if len(pending) == 0 && streamDone && !r.hasDeferredLSPRetryForScope() {
+		// A COBOL edge on a missing-artifact placeholder node is not pending,
+		// yet a candidate tracked since may now bind it (Pitfall 10), so the
+		// COBOL reconcile still runs; it is a no-op on a graph without COBOL.
+		if !r.DeferCobolReconcile {
+			r.reconcileCobol(r.scope)
+		}
 		return &ResolveStats{PendingBefore: pendingBefore, PendingAfter: pendingAfter}, nil
 	}
 
@@ -1658,6 +1695,13 @@ func (r *Resolver) ResolveAllContext(ctx context.Context) (*ResolveStats, error)
 	// imports above; resolveRelativeImports never touches Lua, so this lands
 	// the Lua module/instance requires onto their indexed file nodes.
 	r.resolveLuaRequires()
+	// COBOL literal CALL / COPY reconcile: re-decides placeholders and bound
+	// edges from the scope's repositories, exactly as the incremental tails do
+	// through ReconcileCobol (D-09, D-11, D-16), unless the caller deferred
+	// it (DeferCobolReconcile).
+	if !r.DeferCobolReconcile {
+		r.reconcileCobol(r.scope)
+	}
 	// Godot `res://` binding — scene `[ext_resource]` references and
 	// GDScript `preload(...)`. Same settle window and the same path-suffix
 	// net as the Lua requires above.
@@ -3373,6 +3417,8 @@ func (r *Resolver) resolveEdge(e *graph.Edge, stats *ResolveStats) (oldTo string
 		// KindFile node once the whole index is built; the per-edge
 		// resolver can't see project-layout context. Leave untouched
 		// so the post-pass owns rewriting.
+		return oldTo, false
+	case strings.HasPrefix(target, "cobol::"): // owned by reconcileCobol (exactly-one, same repo)
 		return oldTo, false
 	case strings.HasPrefix(target, "import::"):
 		r.resolveImport(e, strings.TrimPrefix(target, "import::"), stats)

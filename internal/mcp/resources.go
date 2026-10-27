@@ -215,6 +215,14 @@ func (s *Server) handleResourceSchema(_ context.Context, req mcp.ReadResourceReq
               repo; ID is bridge::<contract-id>, Meta carries
               canonical_key, repos, provider_count, consumer_count.
               Queried via the contracts tool's action=bridge.
+- finding   — one deterministic parse or external unresolved finding;
+              ID is <path>::@finding/<parse|external>/<hash>[#k],
+              Meta carries prov_evidence_class (PARSE_UNRESOLVED or
+              EXTERNAL_UNRESOLVED), finding_kind, finding_reason,
+              finding_severity, finding_status, finding_container.
+              A member_of edge links it to the containing symbol and,
+              for external findings, a references edge to the
+              missing-artifact placeholder resource.
 
 ## Edge Kinds
 - calls        — function/method A calls function/method B

@@ -94,6 +94,11 @@ type MultiIndexer struct {
 	// a live repo is hidden and removed only after payload, vector, config, and
 	// derived-contract cleanup have all succeeded.
 	pendingRepositoryUntracks map[string]*repositoryUntrackState
+	// pendingRoots holds the cleaned absolute roots of repositories an
+	// in-flight batch declared (DeclarePendingRoots) and may not have
+	// registered yet, with one count per declaration. Guarded by mu;
+	// nestedTrackedRootContains reads it together with repos.
+	pendingRoots map[string]int
 
 	// repositoryMutations owns one stable mutation lane per repository prefix.
 	// The slot survives Indexer replacement so an explicit re-index cannot race
@@ -143,6 +148,24 @@ type MultiIndexer struct {
 	// pass self-consistent without widening mi.mu's scope.
 	reconcileMu sync.Mutex
 
+	// cobolReconcileMu serialises every COBOL CALL/COPY reconcile pass this
+	// MultiIndexer drives, through a master resolver or a per-repository
+	// one: each pass reads, decides, and rewrites edges from its own
+	// snapshot, and overlapping repository sets decide the same edges. It is
+	// installed on each resolver (SetCobolReconcileLock), which takes it
+	// inside the pass, as reconcileMu does for contract edges.
+	cobolReconcileMu sync.Mutex
+
+	// cobolSettleHook is a focused test seam for the D-23 and D-24 ledger
+	// exclusion. nil in production. It is called with stage "committed" and
+	// the repository when an incremental lane's file commit has landed
+	// (writer held, before its reconcile), with stage "master_reconciled"
+	// and no repository when a writer-free master resolve has run its
+	// deferred COBOL reconcile (writer held, before its ledger), and with
+	// stage "ledger" and the base repositories when a settle point holds the
+	// writer, before its ledger.
+	cobolSettleHook func(stage string, repos []string)
+
 	// stitchProber / proxyBudget wire the cross-daemon proxy-edge feature:
 	// when set by the daemon entry point (flag on), every CrossRepoResolver
 	// this MultiIndexer builds mints proxy edges to remote-owned symbols
@@ -185,6 +208,13 @@ type MultiIndexer struct {
 	// batchCensusEligible is the daemon's one-shot full-coverage attestation
 	// for the armed batch scope — see ArmBatchCensusEligible.
 	batchCensusEligible bool
+	// batchCobolRepos collects the repositories whose COBOL reconcile a
+	// parallel batch deferred: the warm-restart reconcile and the cold-track
+	// reconcile and finding ledger. Deciding one before every repository is
+	// registered would drop bindings into the unregistered ones. EndBatch
+	// and ResetBatch run one reconcile, and with it the ledger, over the
+	// set. Guarded by mi.mu.
+	batchCobolRepos map[string]struct{}
 
 	// resolverLSPHelper is the resolve-time LSP helper propagated
 	// onto every per-repo Indexer and onto the global post-pass
@@ -373,6 +403,11 @@ func (mi *MultiIndexer) newPerRepoIndexerGuardedWithMode(
 	if mi.semanticMgr != nil {
 		idx.SetSemanticManager(mi.semanticMgr)
 	}
+	// COBOL binding policy comes from every tracked repository's config, so
+	// a per-repository pass decides cross-repository edges exactly as the
+	// master pass does (D-09).
+	idx.resolver.SetCobolPolicyLookup(mi.cobolPolicyLookup())
+	idx.resolver.SetCobolReconcileLock(&mi.cobolReconcileMu)
 	return idx
 }
 
@@ -582,7 +617,10 @@ func (mi *MultiIndexer) RunDeferredPassesAllResult(ctx context.Context) Deferred
 // already performs either exact cross-repository catch-up or a fail-closed full
 // pass; only contract-bridge reconciliation remains afterward.
 func (mi *MultiIndexer) finishColdDeferredPasses(ctx context.Context, completedIndexers []*Indexer) DeferredPassesResult {
-	result := mi.beginDeferredPasses(ctx, nil, completedIndexers, true).FinishTailResult()
+	run := mi.beginDeferredPasses(ctx, nil, completedIndexers, true)
+	// IndexAll holds the reach topology writer across this whole tail.
+	run.topologyHeld = true
+	result := run.FinishTailResult()
 	mi.ReconcileContractEdges()
 	return result
 }
@@ -615,10 +653,14 @@ func (mi *MultiIndexer) withDeferredRepositoryMutation(idx *Indexer, lanesHeld b
 // mutation-revision interleave handling. The tail (contracts + catch-up
 // resolve) stays strictly after both the pool and the caller's resolve phase.
 type DeferredPassesRun struct {
-	mi              *MultiIndexer
-	workIndexers    []*Indexer
-	attempts        []*deferredPassAttempt
-	lanesHeld       bool
+	mi           *MultiIndexer
+	workIndexers []*Indexer
+	attempts     []*deferredPassAttempt
+	lanesHeld    bool
+	// topologyHeld reports that the caller holds the reach topology writer
+	// across FinishTailResult (only finishColdDeferredPasses, inside
+	// IndexAll); the public BeginDeferredPasses route leaves it false.
+	topologyHeld    bool
 	attemptAborted  bool
 	enrichScheduled int
 	catchupNeeded   bool
@@ -792,7 +834,7 @@ func (r *DeferredPassesRun) FinishTailResult() DeferredPassesResult {
 	scope := normalizeDeferredCatchupScope(r.catchupScope, r.catchupKnown, r.indexerCount)
 	noNewUnresolved := r.unresolvedCounter != nil &&
 		r.unresolvedCounter.UnresolvedEdgeInsertions() == r.unresolvedBase
-	mode, crossRepoComplete := r.mi.resolveDeferredMutations(mutationReceipt, r.catchupNeeded, scope, noNewUnresolved)
+	mode, crossRepoComplete := r.mi.resolveDeferredMutationsMode(mutationReceipt, r.catchupNeeded, scope, noNewUnresolved, r.topologyHeld)
 	crossRepoComplete = crossRepoComplete && !r.attemptAborted
 	var mutationRevision uint64
 	var mutationRevisionKnown bool
@@ -863,8 +905,16 @@ const (
 // exact receipt frontier or a full fallback. A complete receipt is
 // authoritative even when the old scheduled-work heuristic predicted
 // mutations; an incomplete receipt always fails closed to a whole-graph pass.
-// nil means the store does not support receipts yet.
+// nil means the store does not support receipts yet. Its callers hold no reach
+// topology writer; see resolveDeferredMutationsMode.
 func (mi *MultiIndexer) resolveDeferredMutations(receipt *graph.MutationReceipt, fallbackNeeded bool, fallbackScope map[string]struct{}, noNewUnresolved bool) (deferredResolveMode, bool) {
+	return mi.resolveDeferredMutationsMode(receipt, fallbackNeeded, fallbackScope, noNewUnresolved, false)
+}
+
+// resolveDeferredMutationsMode is resolveDeferredMutations with the caller's
+// reach topology writer state, which the full fallback's master passes to
+// its settle ledger (D-23, D-24).
+func (mi *MultiIndexer) resolveDeferredMutationsMode(receipt *graph.MutationReceipt, fallbackNeeded bool, fallbackScope map[string]struct{}, noNewUnresolved bool, topologyHeld bool) (deferredResolveMode, bool) {
 	fullFallback := func(masterScope map[string]struct{}, reason string) (deferredResolveMode, bool) {
 		// A flat unresolved-insertion counter cannot prove that cross-repository
 		// catch-up is empty: enrichment may add a definition that binds an old
@@ -875,7 +925,7 @@ func (mi *MultiIndexer) resolveDeferredMutations(receipt *graph.MutationReceipt,
 			mi.logger.Info("DEFERRED-TIMING unresolved-target counter unchanged; retaining fallback for definitions and resolved cross-repo edges",
 				zap.String("reason", reason))
 		}
-		if err := mi.runMasterResolveHookedContext(context.Background(), masterScope, false, nil); err != nil {
+		if err := mi.runMasterResolveHookedContext(context.Background(), masterScope, false, nil, topologyHeld); err != nil {
 			mi.logger.Error("DEFERRED-TIMING fallback master resolve failed", zap.Error(err))
 			return deferredResolveFailed, false
 		}
@@ -958,22 +1008,35 @@ func (mi *MultiIndexer) newMasterResolver(useLSP bool) *resolver.Resolver {
 	master.SetNpmDependencyLookup(mi.npmDependencyLookup())
 	master.SetPathAliasResolver(mi.pathAliasResolver())
 	master.SetWorkspaceMembership(mi.workspaceMembershipResolver())
+	master.SetCobolPolicyLookup(mi.cobolPolicyLookup())
+	master.SetCobolReconcileLock(&mi.cobolReconcileMu)
 	return master
 }
 
 func (mi *MultiIndexer) runMasterResolve(scope map[string]struct{}, useLSP bool) {
-	mi.runMasterResolveHooked(scope, useLSP, nil)
+	mi.runMasterResolveHooked(scope, useLSP, nil, false)
+}
+
+// runMasterResolveTopologyHeld is runMasterResolve for a caller that holds
+// the reach topology writer (the incremental no-frontier fallback), so the
+// master's settle ledger does not take it again (D-23, D-24).
+func (mi *MultiIndexer) runMasterResolveTopologyHeld(scope map[string]struct{}, useLSP bool) {
+	mi.runMasterResolveHooked(scope, useLSP, nil, true)
 }
 
 // runMasterResolveHooked is runMasterResolve with an optional compute-done
-// hook threaded into the resolver (see Resolver.OnComputeDone).
-func (mi *MultiIndexer) runMasterResolveHooked(scope map[string]struct{}, useLSP bool, onComputeDone func()) {
-	if err := mi.runMasterResolveHookedContext(context.Background(), scope, useLSP, onComputeDone); err != nil {
+// hook threaded into the resolver (see Resolver.OnComputeDone) and the
+// caller's reach topology writer state.
+func (mi *MultiIndexer) runMasterResolveHooked(scope map[string]struct{}, useLSP bool, onComputeDone func(), topologyHeld bool) {
+	if err := mi.runMasterResolveHookedContext(context.Background(), scope, useLSP, onComputeDone, topologyHeld); err != nil {
 		mi.logger.Error("DEFERRED-TIMING master.ResolveAll", zap.Error(err))
 	}
 }
 
-func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope map[string]struct{}, useLSP bool, onComputeDone func()) error {
+// runMasterResolveHookedContext runs one master ResolveAll and then the COBOL
+// settle ledger for what its reconcile changed. topologyHeld reports whether
+// the caller holds the reach topology writer (TopologyHeld convention).
+func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope map[string]struct{}, useLSP bool, onComputeDone func(), topologyHeld bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -992,11 +1055,46 @@ func (mi *MultiIndexer) runMasterResolveHookedContext(ctx context.Context, scope
 	}
 	master.OnComputeDone = onComputeDone
 	scoped := len(scope) > 0 && mi.scopedGlobalPassesEnabled()
+	var cobolScope map[string]struct{}
 	if scoped {
 		master.SetScope(scope)
+		cobolScope = scope
 	}
+	master.DeferCobolReconcile = !topologyHeld
 	mt := time.Now()
 	stats, err := master.ResolveAllContext(ctx)
+	// The master is ephemeral, so this drain is the only record of the
+	// repositories its COBOL reconcile changed (the incremental no-frontier
+	// fallback, resolveDeferredMutations' full fallback, and
+	// RunPreEnrichResolve all run this function). The ledger therefore runs
+	// at this step, over the repositories the master reconciled plus the
+	// tracked repositories its added and evicted IDs name, then search syncs
+	// (Pitfall 4): a later settle point would record only the net diff, so a
+	// close here could merge with an unrelated later open into a false
+	// supersede (D-24, WR-02).
+	//
+	// A caller holding the writer kept every lane out of the whole pass, so
+	// the ledger drains whatever ResolveAllContext returns: a reconcile that
+	// ran before a cancellation still changed the store. Without the writer,
+	// a lane could commit, reconcile, and ledger between the pass's
+	// reconcile and this ledger, recording the master's close as a supersede
+	// (review WR-01). The pass therefore skipped its reconcile
+	// (DeferCobolReconcile), and it runs here over the same scope, in one
+	// writer section with the ledger, like every other settle point. A
+	// failed or cancelled pass reconciled nothing, so it records nothing.
+	if topologyHeld {
+		mi.recordCobolSettleLedger(nil, true, master)
+	} else if err == nil && ctx.Err() == nil {
+		func() {
+			finish := reach.BeginTopologyMutation(mi.graph)
+			defer finish(false)
+			master.ReconcileCobol(cobolScope)
+			if mi.cobolSettleHook != nil {
+				mi.cobolSettleHook("master_reconciled", nil)
+			}
+			mi.recordCobolSettleLedger(nil, true, master)
+		}()
+	}
 	mi.logger.Info("DEFERRED-TIMING master.ResolveAll",
 		zap.Duration("elapsed", time.Since(mt)),
 		zap.Bool("scoped", scoped),
@@ -1109,8 +1207,16 @@ func (mi *MultiIndexer) runMasterResolveNames(names []string) {
 // cross-repo passes starved cross-repo to a standstill (measured: 1,049s for
 // a pass that runs in ~38s uncontended on the same workspace).
 func (mi *MultiIndexer) RunPreEnrichResolve(ctx context.Context, scope map[string]struct{}, onComputeDone func()) error {
+	return mi.runPreEnrichResolve(ctx, scope, onComputeDone, false)
+}
+
+// runPreEnrichResolve is RunPreEnrichResolve with the caller's reach topology
+// writer state: IndexAll runs it inside its writer section (true); the
+// daemon warmup and the public entry run it without (false), so the master's
+// settle ledger takes the writer itself (D-23, D-24).
+func (mi *MultiIndexer) runPreEnrichResolve(ctx context.Context, scope map[string]struct{}, onComputeDone func(), topologyHeld bool) error {
 	mi.runDeferredGoModAll()
-	if err := mi.runMasterResolveHookedContext(ctx, scope, true, onComputeDone); err != nil {
+	if err := mi.runMasterResolveHookedContext(ctx, scope, true, onComputeDone, topologyHeld); err != nil {
 		return err
 	}
 	// Stamp legacy nodes after master resolution so synthetic nodes created by
@@ -1577,12 +1683,17 @@ func (mi *MultiIndexer) EndBatch() {
 	mi.deferGlobalPasses = false
 	mi.deferResolve = false
 	state := mi.detachBatchGlobalPassStateLocked()
+	cobolRepos := mi.batchCobolRepos
+	mi.batchCobolRepos = nil
 	mode := multiIndexerBatchMode{}
 	for _, idx := range mi.indexers {
 		applyMultiIndexerBatchMode(idx, mode)
 	}
 	mi.mu.Unlock()
 
+	if len(cobolRepos) > 0 {
+		mi.reconcileCobolRepos(cobolRepos)
+	}
 	// Keep the transition write side through the complete global pass: a
 	// watcher admitted before or during EndBatch runs wholly before or after it.
 	mi.runGlobalGraphPasses(context.Background(), state.scope, state.censusEligible)
@@ -1603,14 +1714,22 @@ func (mi *MultiIndexer) ResetBatch() {
 	defer mi.batchMutationGate.Unlock()
 
 	mi.mu.Lock()
-	defer mi.mu.Unlock()
 	mi.deferGlobalPasses = false
 	mi.deferResolve = false
 	mi.batchChangedPrefixes = nil
 	mi.batchCensusEligible = false
+	cobolRepos := mi.batchCobolRepos
+	mi.batchCobolRepos = nil
 	mode := multiIndexerBatchMode{}
 	for _, idx := range mi.indexers {
 		applyMultiIndexerBatchMode(idx, mode)
+	}
+	mi.mu.Unlock()
+
+	// The deferred warm-restart COBOL reconcile still runs here: an
+	// interrupted reindex leaves placeholders that no census can see.
+	if len(cobolRepos) > 0 {
+		mi.reconcileCobolRepos(cobolRepos)
 	}
 }
 
@@ -2085,6 +2204,59 @@ func (mi *MultiIndexer) rebuildColdRefFacts(ctx context.Context, repoPrefixes []
 }
 
 // indexMultiRepo indexes multiple repos concurrently with repo prefixes.
+// DeclarePendingRoots marks the roots of repos as about to be indexed until
+// the returned release runs.
+//
+// PURPOSE — a batch's siblings are not in mi.repos until it publishes, so a
+// walk that runs first needs the set the batch is indexing to stop at a
+// nested sibling's root. The global config is the wrong set: it misses
+// projects: entries and includes entries the batch does not index (CR-01).
+//
+// RATIONALE — counts are per declaration so one batch's release cannot drop a
+// root another in-flight batch or the daemon warmup also declared. mi.mu is
+// held only for the map updates; the caller must not hold mi.mu. release is
+// idempotent, so a deferred and an explicit call are both safe. Entries with
+// an empty or non-Abs-able path are skipped; roots are spelled
+// filepath.Clean(filepath.Abs(path)), like mi.repos.
+//
+// KEYWORDS — nested repository, pending root, walk pruning, batch, warmup.
+func (mi *MultiIndexer) DeclarePendingRoots(repos []config.RepoEntry) (release func()) {
+	roots := make([]string, 0, len(repos))
+	for _, entry := range repos {
+		if entry.Path == "" {
+			continue
+		}
+		abs, err := filepath.Abs(entry.Path)
+		if err != nil {
+			continue
+		}
+		roots = append(roots, filepath.Clean(abs))
+	}
+	mi.mu.Lock()
+	if mi.pendingRoots == nil {
+		mi.pendingRoots = make(map[string]int, len(roots))
+	}
+	for _, r := range roots {
+		mi.pendingRoots[r]++
+	}
+	mi.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			mi.mu.Lock()
+			defer mi.mu.Unlock()
+			for _, r := range roots {
+				if mi.pendingRoots[r] <= 1 {
+					delete(mi.pendingRoots, r)
+					continue
+				}
+				mi.pendingRoots[r]--
+			}
+		})
+	}
+}
+
 func (mi *MultiIndexer) indexMultiRepo(repos []config.RepoEntry) (map[string]*IndexResult, error) {
 	type repoResult struct {
 		prefix string
@@ -2158,9 +2330,17 @@ func (mi *MultiIndexer) indexMultiRepo(repos []config.RepoEntry) (map[string]*In
 	}
 
 	prefixes := make([]string, 0, len(resolved))
+	declared := make([]config.RepoEntry, 0, len(resolved))
 	for _, repo := range resolved {
 		prefixes = append(prefixes, repo.prefix)
+		declared = append(declared, repo.entry)
 	}
+	// Declare the repositories this batch indexes, including projects:
+	// entries and excluding filtered, duplicate and unopenable ones, so a
+	// worker's walk stops at a nested sibling that has not published yet
+	// (CR-01). Taken before the gate; mi.mu is not held here.
+	release := mi.DeclarePendingRoots(declared)
+	defer release()
 	// Freeze one batch-mode generation before acquiring any stable repository
 	// lane. This global gate -> sorted lanes order prevents a queued transition
 	// writer from owning the gate while waiting for a lane held by this batch.
@@ -2303,7 +2483,7 @@ func (mi *MultiIndexer) indexMultiRepo(repos []config.RepoEntry) (map[string]*In
 			// was the dominant cold-index regression. runDeferredGoMod is generation-
 			// idempotent, so RunDeferredPassesAll does not repeat the pre-resolve work.
 			deferCtx := context.Background()
-			if err := mi.RunPreEnrichResolve(deferCtx, nil, nil); err != nil {
+			if err := mi.runPreEnrichResolve(deferCtx, nil, nil, true); err != nil {
 				return results, fmt.Errorf("multi-repo pre-enrichment resolve: %w", err)
 			}
 			completedIndexers := make([]*Indexer, 0, len(completed))
@@ -2444,8 +2624,10 @@ func (mi *MultiIndexer) indexRepoRaw(repoPrefix string) (*IndexResult, error) {
 }
 
 // RefreshRepoConfigs re-reads every tracked repo's `.gortex.yaml` and
-// pushes the refreshed effective exclude list into that repo's live
-// Indexer. Returns the number of repos whose config was re-read.
+// pushes the refreshed effective exclude list and index.cobol block into
+// that repo's live Indexer, reconciling the COBOL bindings of every repo
+// whose COBOL material fingerprint changed. Returns the number of repos whose
+// config was re-read.
 //
 // This is the deterministic re-read path for an already-tracked repo.
 // Track and index both load the workspace config on their way in, but a
@@ -2468,6 +2650,7 @@ func (mi *MultiIndexer) RefreshRepoConfigs() int {
 	}
 	mi.mu.RUnlock()
 
+	cobolChanged := map[string]struct{}{}
 	for prefix, root := range roots {
 		mi.configMgr.LoadWorkspaceConfig(prefix, root)
 
@@ -2480,7 +2663,18 @@ func (mi *MultiIndexer) RefreshRepoConfigs() int {
 		mi.mu.RUnlock()
 		if idx != nil {
 			idx.SetExcludePatterns(cfg.Index.Exclude)
+			before, _ := idx.cobolMaterial()
+			idx.SetCobolConfig(cfg.Index.Cobol)
+			if after, ok := idx.cobolMaterial(); ok && after != before {
+				cobolChanged[prefix] = struct{}{}
+			}
 		}
+	}
+	// The COBOL policy is read on every reconcile pass, so a changed
+	// index.cobol block (D-06) re-decides those repositories' bindings now
+	// instead of on their next unrelated COBOL mutation.
+	if len(cobolChanged) > 0 {
+		mi.reconcileCobolRepos(cobolChanged)
 	}
 	return len(roots)
 }
@@ -2656,6 +2850,9 @@ func (mi *MultiIndexer) incrementalReindexRepoRawMode(repoPrefix string, paths [
 	if err != nil {
 		return nil, fmt.Errorf("reindexing %s: %w", meta.RootPath, err)
 	}
+	if mi.cobolSettleHook != nil {
+		mi.cobolSettleHook("committed", []string{repoPrefix})
+	}
 
 	// Run the same-repo and cross-repo resolver tails exactly once after the
 	// bounded parse/evict batch. Complete mutation receipts provide the precise
@@ -2799,7 +2996,123 @@ func EffectiveRepoPrefix(cm *config.ConfigManager, entry config.RepoEntry) strin
 // TrackRepoCtx is TrackRepo with a context, allowing callers to pipe progress
 // reporters (via progress.WithReporter) through to the underlying Index call.
 func (mi *MultiIndexer) TrackRepoCtx(ctx context.Context, entry config.RepoEntry) (*IndexResult, error) {
-	return mi.trackRepoSourceCtx(ctx, entry, nil)
+	result, err := mi.trackRepoSourceCtx(ctx, entry, nil)
+	// A repository tracked inside another one's root takes its files over:
+	// evict the enclosing repositories' copies now rather than at their next
+	// reindex (WR-02, ID-09).
+	if err == nil && result != nil && result.RepoPrefix != "" {
+		if meta := mi.GetMetadata(result.RepoPrefix); meta != nil {
+			mi.reconcileEnclosingRepos(ctx, meta.RootPath, true)
+		}
+		// The cold track's COBOL reconcile and finding ledger (D-09, D-11,
+		// D-03). While a parallel batch defers resolution the repository
+		// joins the batch set instead, which EndBatch reconciles once every
+		// repository is registered; checked and inserted under one mi.mu
+		// section, so EndBatch either consumes it or the tail runs inline.
+		mi.mu.Lock()
+		deferred := mi.deferResolve
+		if deferred {
+			if mi.batchCobolRepos == nil {
+				mi.batchCobolRepos = make(map[string]struct{})
+			}
+			mi.batchCobolRepos[result.RepoPrefix] = struct{}{}
+		}
+		mi.mu.Unlock()
+		if !deferred {
+			// A shadow-path resolve saw only this repository, so a master
+			// pass on the durable store re-decides it and every repository
+			// resolving from it, then ledgers: the warm-restart tail's shape.
+			// The ledger must hold the reach topology writer (D-23). Inside a
+			// repository topology batch, RunRepositoryTopologyBatch holds the
+			// non-reentrant writer for its whole callback, so the tail runs
+			// under it through the held variant; taking it again would
+			// self-deadlock (the reconcileEnclosingRepos batch check is the
+			// precedent). Outside a batch, the cold commit's writer was
+			// released when trackRepoSourceCtx's closure returned, and
+			// reconcileCobolRepos retakes it. That commit-to-tail gap is
+			// benign: the closure installs only an untracked repository, so
+			// its commit evicts no existing finding, and a settle point
+			// reads this repository only after a reconcile of it (its own
+			// base, or a drained record a later reconcile produced), see the
+			// 05-14 SUMMARY "Cold-track gap".
+			repos := map[string]struct{}{result.RepoPrefix: {}}
+			if activeRepositoryTopologyBatch(ctx, mi) != nil {
+				mi.reconcileCobolReposTopologyHeld(repos)
+			} else {
+				mi.reconcileCobolRepos(repos)
+			}
+		}
+	}
+	return result, err
+}
+
+// reconcileEnclosingRepos reconciles, scoped to root, every registered
+// repository whose root strictly contains root, after a repository at root
+// was tracked (evicting) or untracked (admitting).
+//
+// PURPOSE — a topology change is a mutation of every enclosing repository:
+// once root is registered the outer walk prunes it, and once it is gone the
+// outer walk admits it again. IncrementalReindexRepo(outer, [root]) does both
+// jobs: its scoped deletion pass purges present-but-excluded copies, and its
+// walk admits the subtree, so incremental equals a clean build (ID-09, SC-4).
+//
+// RATIONALE — this runs only after the triggering track or untrack has
+// released mi.mu, its repository lane, the batch gate and the topology
+// writer; the reconcile takes the outer lane itself, so no lane is ever held
+// across another (the ordering 04-18 deferred). Inside a repository topology
+// batch it is skipped: the batch holds the transition writer, so an unmarked
+// reconcile would wait on it, and the batch's declared roots (04-20) plus the
+// outer repository's census converge instead. When evicting, an enclosing
+// repository is reconciled only if its committed snapshot holds a file under
+// root, since otherwise there is nothing to purge. IncrementalReindexRepo
+// takes no context, so cancellation is not honoured past the batch check.
+//
+// KEYWORDS — nested tracked root, enclosing repository, topology change,
+// evict, admit, scoped reconcile, lock order.
+func (mi *MultiIndexer) reconcileEnclosingRepos(ctx context.Context, root string, evicting bool) {
+	if root == "" || activeRepositoryTopologyBatch(ctx, mi) != nil {
+		return
+	}
+	root = filepath.Clean(root)
+	var prefixes []string
+	mi.mu.RLock()
+	for prefix, meta := range mi.repos {
+		if meta == nil {
+			continue
+		}
+		r := filepath.Clean(meta.RootPath)
+		if r == "" || r == "." || pathkey.EqualPaths(r, root) || !pathkey.HasPathPrefix(root, r) {
+			continue
+		}
+		if evicting {
+			rel, err := filepath.Rel(r, root)
+			if err != nil {
+				continue
+			}
+			sub := filepath.ToSlash(rel)
+			held := false
+			for key := range meta.FileMtimes {
+				if key == sub || strings.HasPrefix(key, sub+"/") {
+					held = true
+					break
+				}
+			}
+			if !held {
+				continue
+			}
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	mi.mu.RUnlock()
+
+	sort.Strings(prefixes)
+	for _, prefix := range prefixes {
+		if _, err := mi.IncrementalReindexRepo(prefix, []string{root}); err != nil {
+			mi.logger.Warn("enclosing repository reconcile failed",
+				zap.String("prefix", prefix), zap.String("root", root),
+				zap.Bool("evicting", evicting), zap.Error(err))
+		}
+	}
 }
 
 // trackRepoSourceCtx is TrackRepoCtx with a borrowed immutable content source.
@@ -3239,6 +3552,25 @@ func (mi *MultiIndexer) ReconcileRepoCtx(ctx context.Context, entry config.RepoE
 			}
 		} else if result.FullRetrack && !batchMode.deferGlobalPasses {
 			mi.ReconcileContractEdges()
+		}
+		// A reindex interrupted before its resolver tail leaves COBOL edges on
+		// their placeholders with mtimes already recorded, so this restart's
+		// census can see no change. Reconcile unconditionally: it is a no-op
+		// without COBOL nodes and idempotent with them (ID-07). A parallel
+		// warmup defers it to the batch end, once every repository is
+		// registered, as it defers the other resolve tails. The warm snapshot
+		// closure holds the reach topology writer (taken above through
+		// beginRepositoryTopologyMutation, or held by the repository topology
+		// batch), so the reconcile and ledger use the held variant (D-23).
+		if batchMode.deferResolve {
+			mi.mu.Lock()
+			if mi.batchCobolRepos == nil {
+				mi.batchCobolRepos = make(map[string]struct{})
+			}
+			mi.batchCobolRepos[prefix] = struct{}{}
+			mi.mu.Unlock()
+		} else {
+			mi.reconcileCobolReposTopologyHeld(map[string]struct{}{prefix: {}})
 		}
 
 		publishTiming.complete(nil)

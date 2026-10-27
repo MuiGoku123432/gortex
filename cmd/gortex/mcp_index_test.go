@@ -1,14 +1,22 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/zzet/gortex/internal/config"
+	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
+	"github.com/zzet/gortex/internal/indexer"
+	"github.com/zzet/gortex/internal/parser"
+	"github.com/zzet/gortex/internal/parser/languages"
 	"github.com/zzet/gortex/internal/pathkey"
 	"github.com/zzet/gortex/internal/platform"
 	"github.com/zzet/gortex/internal/testenv"
@@ -155,4 +163,65 @@ func TestEmbeddedFallback_LeavesNoGortexDirInLaunchCWD(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(parent, ".gortex"))
 	assert.True(t, os.IsNotExist(statErr),
 		"embedded startup created %s/.gortex — that is the untracked directory users saw in git status", parent)
+}
+
+// TestEmbeddedIndex_OwnedByRepo pins D-14 for the embedded server: single-repo
+// mode is a workspace of one, so every node `gortex mcp --index` writes is
+// owned by the repository and the strict ownership audit is clean. The COBOL
+// program is invented; it must never be replaced with estate-derived source.
+func TestEmbeddedIndex_OwnedByRepo(t *testing.T) {
+	testenv.Sandbox(t)
+	t.Setenv("GORTEX_LLM_PROVIDER", "")
+
+	dir := testenv.ShortTempDir(t)
+	root := filepath.Join(dir, "tree")
+	files := map[string]string{
+		"main.go": "package main\n\nfunc main() { helper() }\n\nfunc helper() {}\n",
+		"demo.cbl": "       IDENTIFICATION DIVISION.\n" +
+			"       PROGRAM-ID. EMBPGM.\n" +
+			"       PROCEDURE DIVISION.\n" +
+			"       MAIN-PARA.\n" +
+			"           GOBACK.\n",
+		"README.md": "embedded fixture\n",
+	}
+	for rel, src := range files {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, rel), []byte(src), 0o644))
+	}
+
+	store, err := store_sqlite.Open(filepath.Join(dir, "store.sqlite"))
+	require.NoError(t, err)
+	reg := parser.NewRegistry()
+	languages.RegisterAll(reg)
+	idx := indexer.New(store, reg, config.Default().Index, zap.NewNop())
+	cm, err := config.NewConfigManager(filepath.Join(dir, "config.yaml"))
+	require.NoError(t, err)
+	mi := indexer.NewMultiIndexer(store, reg, idx.Search(), cm, zap.NewNop())
+	t.Cleanup(func() {
+		_ = mi.Close(context.Background())
+		_ = store.Close()
+	})
+
+	result, prefix, err := indexEmbeddedRepo(context.Background(), mi, root)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, prefix, "the embedded tree must be indexed under a repository prefix")
+	require.NotNil(t, mi.GetIndexer(prefix), "the watcher needs the prefixed per-repo indexer")
+
+	diag, ok := graph.ReadPrefixDiagnostics(store, 5)
+	require.True(t, ok)
+	assert.Positive(t, diag.OwnedCodeNodes)
+	assert.Zero(t, diag.UnownedCodeNodes, "unowned nodes: %v", diag.UnownedSamples)
+	assert.Zero(t, diag.MisprefixedNodes)
+	assert.True(t, diag.Clean(), diag.Summary())
+
+	program := store.GetNode(prefix + "/demo.cbl::EMBPGM")
+	require.NotNil(t, program, "the COBOL program node must carry the repository prefix")
+	assert.True(t, strings.HasPrefix(program.ID, prefix+"/"))
+
+	t.Run("nil MultiIndexer is an error, not an unprefixed index", func(t *testing.T) {
+		_, _, err := indexEmbeddedRepo(context.Background(), nil, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "MultiIndexer")
+	})
 }

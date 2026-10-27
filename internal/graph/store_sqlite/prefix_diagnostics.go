@@ -2,6 +2,7 @@ package store_sqlite
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/zzet/gortex/internal/graph"
 )
@@ -9,27 +10,24 @@ import (
 // PrefixDiagnostics answers graph.PrefixDiagnosticsReader natively.
 //
 // The predicates below are the SQL transcription of
-// graph.IsAuditableRepoSourceNode and graph.ClassifyNodePrefix, and the two
-// must be changed together. The auditable predicate admits repository source
-// while excluding exact virtual external paths and the contract/topic/rationale
-// identity namespaces whose IDs deliberately are not path-prefixed.
+// graph.IsAuditableRepoSourceNode and graph.ClassifyNodePrefix. The
+// exemption terms are generated once from graph.OwnershipExemptKinds,
+// graph.OwnershipExemptPathPrefixes and graph.OwnershipGlobalIDNamespaces, so
+// adding an exemption in Go changes both backends; the storetest
+// testPrefixDiagnostics fence is the parity test that proves they agree.
 //
 // Each population is answered by one aggregate plus one bounded sample
 // query rather than a node pull: on a warm multi-repo store the node table
 // runs to millions of rows, and this is called from health and boot paths
 // that must not materialise it.
-const (
-	// Keep this exact predicate in lockstep with
-	// graph.IsAuditableRepoSourceNode. Prefix checks use instr(...)=1 instead
-	// of a broad punctuation/URI heuristic so real parser nodes cannot escape
-	// the audit merely because their path contains punctuation.
-	auditableRepoSourceNodePredicate = `file_path <> '' AND ` +
-		`kind NOT IN ('contract', 'contract_bridge', 'topic', 'rationale') AND ` +
-		`instr(file_path, 'external::') <> 1 AND ` +
-		`instr(file_path, 'external-call::') <> 1`
+var (
+	// The audited population. Prefix checks use instr(...)=1 rather than
+	// LIKE so `_` and `%` in a path or ID are never wildcards. The list
+	// values are compile-time constants from package graph, never user
+	// input; every runtime value still binds as a parameter.
+	auditableRepoSourceNodePredicate = buildAuditableRepoSourceNodePredicate()
 
-	// A code node no repository claims. Post-flip this must be zero;
-	// a non-zero count is the ghost-graph signature.
+	// A code node no repository claims.
 	unownedCodeNodePredicate = `repo_prefix = '' AND (` + auditableRepoSourceNodePredicate + `)`
 
 	// An owned node whose minted identity does not carry the prefix its
@@ -43,6 +41,27 @@ const (
 	ownedCodeNodePredicate = `repo_prefix <> '' AND (` + auditableRepoSourceNodePredicate + `) AND ` +
 		`instr(file_path, repo_prefix || '/') = 1 AND instr(id, repo_prefix || '/') = 1`
 )
+
+// buildAuditableRepoSourceNodePredicate renders graph.IsAuditableRepoSourceNode
+// as SQL from the exported Ownership* exemption lists.
+func buildAuditableRepoSourceNodePredicate() string {
+	kinds := make([]string, 0, len(graph.OwnershipExemptKinds))
+	for _, k := range graph.OwnershipExemptKinds {
+		kinds = append(kinds, quoteSQLLiteral(string(k)))
+	}
+	terms := []string{`kind NOT IN (` + strings.Join(kinds, ", ") + `)`}
+	for _, p := range graph.OwnershipExemptPathPrefixes {
+		terms = append(terms, `instr(file_path, `+quoteSQLLiteral(p)+`) <> 1`)
+	}
+	namespaces := make([]string, 0, len(graph.OwnershipGlobalIDNamespaces))
+	for _, ns := range graph.OwnershipGlobalIDNamespaces {
+		namespaces = append(namespaces, `instr(id, `+quoteSQLLiteral(ns)+`) = 1`)
+	}
+	terms = append(terms, `NOT (file_path = '' AND (`+
+		`(repo_prefix = '' AND (`+strings.Join(namespaces, " OR ")+`)) OR `+
+		`(repo_prefix <> '' AND instr(id, repo_prefix || '::') = 1)))`)
+	return strings.Join(terms, " AND ")
+}
 
 func (s *Store) PrefixDiagnostics(sampleLimit int) graph.PrefixDiagnostics {
 	var d graph.PrefixDiagnostics

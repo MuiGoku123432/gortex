@@ -3236,6 +3236,33 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 		}
 	}
 
+	// Active finding counts by resolution class (D-08, GAP-03), over the
+	// repository set the file scan above collected. The class is read from
+	// prov_evidence_class, never parsed from the ID, so any other value is
+	// not counted.
+	var parseFindings, externalFindings int
+	scanned = 0
+	for n := range s.graph.NodesByKind(graph.KindFinding) {
+		if scanned%healthScanCancelStride == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		scanned++
+		if n == nil {
+			continue
+		}
+		if _, ok := repoPrefixes[n.RepoPrefix]; !ok {
+			continue
+		}
+		switch n.Meta[graph.MetaEvidenceClass] {
+		case graph.FindingClassParse:
+			parseFindings++
+		case graph.FindingClassExternal:
+			externalFindings++
+		}
+	}
+
 	// A graph holding files that no longer exist is not a healthy graph,
 	// whatever the parse ratio says. Worst-of rather than a blend: the two
 	// scores answer different questions ("did the files we found parse" vs
@@ -3481,7 +3508,14 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 		}
 	}
 	if prefixAuditOK {
+		// D-15: status is reported, never enforced — an unhealthy store still
+		// answers every query. Phases 6 and 7 decide what to refuse.
+		status := "healthy"
+		if !prefixAudit.Clean() {
+			status = "unhealthy"
+		}
 		ownership := map[string]any{
+			"status":             status,
 			"owned_code_nodes":   prefixAudit.OwnedCodeNodes,
 			"unowned_code_nodes": prefixAudit.UnownedCodeNodes,
 			"consistent":         prefixAudit.Clean(),
@@ -3490,14 +3524,22 @@ func (s *Server) buildIndexHealthBasePayloadCtx(ctx context.Context) (map[string
 			ownership["misprefixed_nodes"] = prefixAudit.MisprefixedNodes
 			ownership["misprefixed_samples"] = prefixAudit.MisprefixedSamples
 		}
-		// Only surface samples when they point at a defect; on a
-		// single-repo daemon every node is legitimately unowned and a
-		// sample list would read as an error.
-		if prefixAudit.Mixed() {
-			ownership["mixed"] = true
+		// Every unowned node is a defect (D-14: single-repo mode is a
+		// workspace of one), so name them whenever there are any. Mixed
+		// marks the sharper ghost-graph case on top of that.
+		if prefixAudit.UnownedCodeNodes > 0 {
 			ownership["unowned_samples"] = prefixAudit.UnownedSamples
 		}
+		if prefixAudit.Mixed() {
+			ownership["mixed"] = true
+		}
 		result["repo_ownership"] = ownership
+	}
+	// D-08 visibility. D-14 and P4 D-15: findings are reported, never
+	// enforced, so these counts feed neither healthScore nor recommendation.
+	result["findings"] = map[string]any{
+		graph.FindingClassParse:    parseFindings,
+		graph.FindingClassExternal: externalFindings,
 	}
 	// Path liveness. Reported whenever the audit had something to look at, not
 	// only when it found a defect: "checked 2581, 0 orphans" is the evidence

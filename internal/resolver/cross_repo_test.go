@@ -2,11 +2,14 @@ package resolver
 
 import (
 	"iter"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zzet/gortex/internal/graph"
+	"github.com/zzet/gortex/internal/graph/store_sqlite"
 	"pgregory.net/rapid"
 )
 
@@ -526,4 +529,226 @@ func TestCrossRepoResolveFilesAndIncoming_BatchesBothDirectionsWithOneIndexBuild
 	require.Equal(t, 1, g.directoryIndexBuilds)
 	require.Equal(t, 1, g.dependencyIndexBuilds)
 	require.Equal(t, 1, g.reachabilityIndexBuilds)
+}
+
+// seedTwoRepoHelper builds the D-12 ambiguity fixture: repoA's caller file
+// imports both repoB and repoC, and each of those repositories defines a
+// function named Helper. The returned edge is the unresolved call.
+func seedTwoRepoHelper(g graph.Store) *graph.Edge {
+	g.AddNode(&graph.Node{ID: "repoA/pkg/a.go::Caller", Kind: graph.KindFunction, Name: "Caller", FilePath: "repoA/pkg/a.go", Language: "go", RepoPrefix: "repoA"})
+	g.AddNode(&graph.Node{ID: "repoB/lib/b.go::Helper", Kind: graph.KindFunction, Name: "Helper", FilePath: "repoB/lib/b.go", Language: "go", RepoPrefix: "repoB"})
+	g.AddNode(&graph.Node{ID: "repoC/lib/c.go::Helper", Kind: graph.KindFunction, Name: "Helper", FilePath: "repoC/lib/c.go", Language: "go", RepoPrefix: "repoC"})
+	wireImport(g, "repoA/pkg/a.go", "repoB", "repoB/lib/b.go")
+	wireImport(g, "repoA/pkg/a.go", "repoC", "repoC/lib/c.go")
+	edge := &graph.Edge{From: "repoA/pkg/a.go::Caller", To: "unresolved::Helper", Kind: graph.EdgeCalls, FilePath: "repoA/pkg/a.go", Line: 5}
+	g.AddEdge(edge)
+	return edge
+}
+
+// callEdgeAt returns the out-edge of from on line, re-read from the store.
+func callEdgeAt(t *testing.T, g graph.Store, from string, line int) *graph.Edge {
+	t.Helper()
+	for _, e := range g.GetOutEdges(from) {
+		if e.Line == line && e.Kind == graph.EdgeCalls {
+			return e
+		}
+	}
+	t.Fatalf("no call edge from %s on line %d", from, line)
+	return nil
+}
+
+// TestCrossRepoResolveAll_Ambiguous locks in D-12 / SEC-03: the generic
+// cross-repository fallback never binds a same-named function by map order.
+func TestCrossRepoResolveAll_Ambiguous(t *testing.T) {
+	wantIDs := []string{"repoB/lib/b.go::Helper", "repoC/lib/c.go::Helper"}
+
+	t.Run("two_repos", func(t *testing.T) {
+		g := graph.New()
+		edge := seedTwoRepoHelper(g)
+
+		stats := NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::Helper", edge.To, "two reachable repositories must not bind")
+		assert.False(t, edge.CrossRepo)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, wantIDs, edge.Meta["resolution_candidate_ids"])
+		assert.Equal(t, 0, stats.Resolved)
+		assert.Equal(t, 1, stats.Unresolved)
+		assert.Equal(t, 0, stats.CrossRepoEdges)
+	})
+
+	t.Run("one_repo_two_candidates", func(t *testing.T) {
+		g := graph.New()
+		g.AddNode(&graph.Node{ID: "repoA/pkg/a.go::Caller", Kind: graph.KindFunction, Name: "Caller", FilePath: "repoA/pkg/a.go", Language: "go", RepoPrefix: "repoA"})
+		// Higher ID inserted first so insertion order cannot pick the winner.
+		g.AddNode(&graph.Node{ID: "repoB/lib/z.go::Helper", Kind: graph.KindFunction, Name: "Helper", FilePath: "repoB/lib/z.go", Language: "go", RepoPrefix: "repoB"})
+		g.AddNode(&graph.Node{ID: "repoB/lib/a.go::Helper", Kind: graph.KindFunction, Name: "Helper", FilePath: "repoB/lib/a.go", Language: "go", RepoPrefix: "repoB"})
+		wireImport(g, "repoA/pkg/a.go", "repoB", "repoB/lib/a.go")
+		edge := &graph.Edge{From: "repoA/pkg/a.go::Caller", To: "unresolved::Helper", Kind: graph.EdgeCalls, FilePath: "repoA/pkg/a.go", Line: 5}
+		g.AddEdge(edge)
+
+		stats := NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "repoB/lib/a.go::Helper", edge.To, "one repository binds the lowest ID")
+		assert.True(t, edge.CrossRepo)
+		assert.Equal(t, 1, stats.CrossRepoEdges)
+		assert.NotContains(t, edge.Meta, "resolution_unresolved_reason")
+	})
+
+	t.Run("deterministic", func(t *testing.T) {
+		type outcome struct {
+			To   string
+			Meta map[string]any
+		}
+		var first *outcome
+		for i := 0; i < 20; i++ {
+			g := graph.New()
+			edge := seedTwoRepoHelper(g)
+			NewCrossRepo(g).ResolveAll()
+			got := outcome{To: edge.To, Meta: map[string]any{}}
+			for k, v := range edge.Meta {
+				got.Meta[k] = v
+			}
+			require.Equal(t, "ambiguous", got.Meta["resolution_unresolved_reason"], "run %d", i)
+			if first == nil {
+				first = &got
+				continue
+			}
+			require.Equal(t, *first, got, "run %d diverged from run 0", i)
+		}
+	})
+
+	t.Run("clears_stale_keys", func(t *testing.T) {
+		g := graph.New()
+		g.AddNode(&graph.Node{ID: "repoA/pkg/a.go::Caller", Kind: graph.KindFunction, Name: "Caller", FilePath: "repoA/pkg/a.go", Language: "go", RepoPrefix: "repoA"})
+		g.AddNode(&graph.Node{ID: "repoB/lib/b.go::Helper", Kind: graph.KindFunction, Name: "Helper", FilePath: "repoB/lib/b.go", Language: "go", RepoPrefix: "repoB"})
+		wireImport(g, "repoA/pkg/a.go", "repoB", "repoB/lib/b.go")
+		edge := &graph.Edge{
+			From: "repoA/pkg/a.go::Caller", To: "unresolved::Helper", Kind: graph.EdgeCalls, FilePath: "repoA/pkg/a.go", Line: 5,
+			Meta: map[string]any{"resolution_unresolved_reason": "ambiguous", "resolution_candidate_ids": wantIDs},
+		}
+		g.AddEdge(edge)
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "repoB/lib/b.go::Helper", edge.To)
+		assert.NotContains(t, edge.Meta, "resolution_unresolved_reason")
+		assert.NotContains(t, edge.Meta, "resolution_candidate_ids")
+	})
+
+	t.Run("persisted", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "xrepo.sqlite")
+		store, err := store_sqlite.Open(path)
+		require.NoError(t, err)
+		seedTwoRepoHelper(store)
+		NewCrossRepo(store).ResolveAll()
+		require.NoError(t, store.Close())
+
+		reopened, err := store_sqlite.Open(path)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+		e := callEdgeAt(t, reopened, "repoA/pkg/a.go::Caller", 5)
+		assert.Equal(t, "unresolved::Helper", e.To)
+		assert.Equal(t, "ambiguous", e.Meta["resolution_unresolved_reason"], "ambiguity stamp persisted")
+		assert.Len(t, e.Meta["resolution_candidate_ids"], 2)
+	})
+}
+
+// TestCrossRepoResolveAll_AmbiguousMethod applies D-12 to every
+// cross-repository tier of resolveMethodCall: an ambiguous tier refuses and
+// stops the walk instead of falling through to a weaker tier.
+func TestCrossRepoResolveAll_AmbiguousMethod(t *testing.T) {
+	const callerID = "repoA/pkg/a.go::Caller"
+	addNode := func(g graph.Store, id string, kind graph.NodeKind, repo, receiver string) {
+		filePath, _, _ := strings.Cut(id, "::")
+		n := &graph.Node{ID: id, Kind: kind, Name: "Run", FilePath: filePath, Language: "go", RepoPrefix: repo}
+		if receiver != "" {
+			n.Meta = map[string]any{"receiver": receiver}
+		}
+		g.AddNode(n)
+	}
+	newGraph := func(reachable ...string) graph.Store {
+		g := graph.New()
+		g.AddNode(&graph.Node{ID: callerID, Kind: graph.KindFunction, Name: "Caller", FilePath: "repoA/pkg/a.go", Language: "go", RepoPrefix: "repoA"})
+		for _, repo := range reachable {
+			wireImport(g, "repoA/pkg/a.go", repo, repo+"/lib/import.go")
+		}
+		return g
+	}
+	callEdge := func(g graph.Store, receiverType string) *graph.Edge {
+		e := &graph.Edge{From: callerID, To: "unresolved::*.Run", Kind: graph.EdgeCalls, FilePath: "repoA/pkg/a.go", Line: 10}
+		if receiverType != "" {
+			e.Meta = map[string]any{"receiver_type": receiverType}
+		}
+		g.AddEdge(e)
+		return e
+	}
+
+	t.Run("exact_type", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoB/lib/b.go::T.Run", graph.KindMethod, "repoB", "T")
+		addNode(g, "repoC/lib/c.go::T.Run", graph.KindMethod, "repoC", "T")
+		// A weaker-tier candidate: falling through to the method-name tier
+		// would add this ID to the recorded candidates.
+		addNode(g, "repoB/lib/u.go::U.Run", graph.KindMethod, "repoB", "U")
+		edge := callEdge(g, "T")
+
+		stats := NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::*.Run", edge.To)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, []string{"repoB/lib/b.go::T.Run", "repoC/lib/c.go::T.Run"}, edge.Meta["resolution_candidate_ids"])
+		assert.Equal(t, 0, stats.Resolved)
+		assert.Equal(t, 1, stats.Unresolved)
+	})
+
+	t.Run("method_name", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoB/lib/b.go::S.Run", graph.KindMethod, "repoB", "S")
+		addNode(g, "repoC/lib/c.go::S.Run", graph.KindMethod, "repoC", "S")
+		edge := callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::*.Run", edge.To)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, []string{"repoB/lib/b.go::S.Run", "repoC/lib/c.go::S.Run"}, edge.Meta["resolution_candidate_ids"])
+
+		g = newGraph("repoB")
+		addNode(g, "repoB/lib/z.go::S.Run", graph.KindMethod, "repoB", "S")
+		addNode(g, "repoB/lib/a.go::S.Run", graph.KindMethod, "repoB", "S")
+		edge = callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "repoB/lib/a.go::S.Run", edge.To, "one repository binds the lowest ID")
+		assert.True(t, edge.CrossRepo)
+	})
+
+	t.Run("function_tier", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoB/lib/b.go::Run", graph.KindFunction, "repoB", "")
+		addNode(g, "repoC/lib/c.go::Run", graph.KindFunction, "repoC", "")
+		edge := callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "unresolved::*.Run", edge.To)
+		assert.Equal(t, "ambiguous", edge.Meta["resolution_unresolved_reason"])
+		assert.Equal(t, []string{"repoB/lib/b.go::Run", "repoC/lib/c.go::Run"}, edge.Meta["resolution_candidate_ids"])
+	})
+
+	t.Run("same_repo_unchanged", func(t *testing.T) {
+		g := newGraph("repoB", "repoC")
+		addNode(g, "repoA/pkg/s.go::S.Run", graph.KindMethod, "repoA", "S")
+		addNode(g, "repoB/lib/b.go::S.Run", graph.KindMethod, "repoB", "S")
+		addNode(g, "repoC/lib/c.go::S.Run", graph.KindMethod, "repoC", "S")
+		edge := callEdge(g, "")
+
+		NewCrossRepo(g).ResolveAll()
+
+		assert.Equal(t, "repoA/pkg/s.go::S.Run", edge.To, "same-repository candidate binds first")
+		assert.False(t, edge.CrossRepo)
+		assert.NotContains(t, edge.Meta, "resolution_unresolved_reason")
+	})
 }

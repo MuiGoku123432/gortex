@@ -569,6 +569,11 @@ func (s *Server) handleGetEditingContext(ctx context.Context, req mcp.CallToolRe
 			// the file is indexed).
 			var fileBytes []byte
 			anchor := fileNodeForScope
+			if anchor != nil {
+				if err := s.requireSourceScope(ctx, anchor.RepoPrefix); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+			}
 			if files := refViewFilesFor(ctx); files != nil {
 				// A view of committed state has no working copy, so the whole
 				// file comes out of the tree it pins.
@@ -961,6 +966,14 @@ func (s *Server) handleGetSymbolSource(ctx context.Context, req mcp.CallToolRequ
 	if !s.nodeInSessionScope(ctx, node) {
 		return mcp.NewToolResultError("symbol not found: " + id), nil
 	}
+	// The source gate (D-13): an out-of-scope repository answers like a
+	// missing symbol, an unbound multi-repo request is told how to narrow.
+	if err := s.requireSourceScope(ctx, node.RepoPrefix); err != nil {
+		if errors.Is(err, errSourceOutOfScope) {
+			return mcp.NewToolResultError("symbol not found: " + id), nil
+		}
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sess := s.sessionFor(ctx)
 	sess.recordSymbol(id)
 	sess.recordFile(node.FilePath)
@@ -1009,6 +1022,11 @@ func (s *Server) handleGetSymbolSource(ctx context.Context, req mcp.CallToolRequ
 		var resolveErr error
 		absPath, resolveErr = s.resolveNodePath(ctx, node)
 		if resolveErr != nil {
+			// A file another repository physically owns answers like the
+			// lexical gate above, so the refusal names no owner (D-13).
+			if errors.Is(resolveErr, errSourceOutOfScope) {
+				return mcp.NewToolResultError("symbol not found: " + id), nil
+			}
 			return mcp.NewToolResultError(resolveErr.Error()), nil
 		}
 		if guardErr := s.guardSymlinkWithinRepo(ctx, absPath); guardErr != nil {
@@ -1327,6 +1345,9 @@ func (s *Server) handleBatchSymbols(ctx context.Context, req mcp.CallToolRequest
 
 		// Source code (optional).
 		if includeSource && node.StartLine > 0 && node.EndLine > 0 {
+			if err := s.requireSourceScope(ctx, node.RepoPrefix); errors.Is(err, errSourceScopeRequired) {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			if absPath, err := s.resolveNodePath(ctx, node); err == nil {
 				if source, fromLine, totalFileChars, err := s.readLinesForCtx(ctx, absPath, node.StartLine, node.EndLine, contextLines); err == nil {
 					entry["source"] = source
@@ -2228,6 +2249,9 @@ func (s *Server) handleSmartContext(ctx context.Context, req mcp.CallToolRequest
 		if !graded && sourcesEmbedded < smartCtxMaxSource &&
 			(sym.Kind == graph.KindFunction || sym.Kind == graph.KindMethod) &&
 			sym.StartLine > 0 && sym.EndLine > 0 {
+			if err := s.requireSourceScope(ctx, sym.RepoPrefix); errors.Is(err, errSourceScopeRequired) {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			if absPath, err := s.resolveNodePath(ctx, sym); err == nil {
 				if source, _, totalFileChars, err := s.readLinesForCtx(ctx, absPath, sym.StartLine, sym.EndLine, 0); err == nil {
 					if red, did := s.maybeRedactConfigLeaf(sym.Language, sym.FilePath, false, source); did {
@@ -2677,6 +2701,10 @@ func (s *Server) handleRenameSymbol(ctx context.Context, req mcp.CallToolRequest
 		}
 		return mcp.NewToolResultError("symbol not found: " + id), nil
 	}
+	// An out-of-scope target answers like a missing symbol (D-13).
+	if err := s.requireSourceScope(ctx, node.RepoPrefix); errors.Is(err, errSourceOutOfScope) {
+		return mcp.NewToolResultError("symbol not found: " + id), nil
+	}
 
 	oldName := node.Name
 
@@ -2685,10 +2713,16 @@ func (s *Server) handleRenameSymbol(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	// Resolve abs paths per node/edge — single rootPath is wrong in
-	// multi-repo mode where each repo has its own root.
+	// multi-repo mode where each repo has its own root. A site the source
+	// gate refuses is remembered, not skipped: a rename that cannot reach
+	// every reference must not be applied to the rest.
+	var scopeErr error
 	resolvePath := func(graphPath string) string {
 		abs, err := s.resolveGraphPath(ctx, graphPath)
 		if err != nil {
+			if scopeErr == nil && (errors.Is(err, errSourceScopeRequired) || errors.Is(err, errSourceOutOfScope)) {
+				scopeErr = err
+			}
 			return ""
 		}
 		return abs
@@ -2826,6 +2860,13 @@ func (s *Server) handleRenameSymbol(ctx context.Context, req mcp.CallToolRequest
 				})
 			}
 		}
+	}
+
+	if errors.Is(scopeErr, errSourceScopeRequired) {
+		return mcp.NewToolResultError(scopeErr.Error()), nil
+	}
+	if scopeErr != nil {
+		return refsOutOfScopeResult("rename_symbol", "rename every reference"), nil
 	}
 
 	// Collect affected files.
